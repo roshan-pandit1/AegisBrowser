@@ -30,7 +30,8 @@ internal static class Program
             settings.CommandLineArgsDisabled = true;
             initialized = Cef.Initialize(settings);
             if (!initialized) throw new InvalidOperationException("Chromium initialization failed.");
-            if (!Cef.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory()))
+            using var context = Cef.GetGlobalRequestContext();
+            if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory()))
                 throw new InvalidOperationException("Could not register local diagnostics.");
             using var window = new MainForm(profile);
             Application.Run(window);
