@@ -1,6 +1,12 @@
 using AegisBrowser;
 using CefSharp;
 using CefSharp.WinForms;
+using System.Net;
+using System.Net.Sockets;
+using System.Net.Security;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 
 namespace AegisBrowser.BrowserTests;
 
@@ -33,7 +39,7 @@ internal static class Program
                 try
                 {
                     await Storage(host, root, args[0]);
-                    if (args[0] == "write") await TabsAndRenderer();
+                    if (args[0] == "write") { await RejectUntrustedTls(host); await TabsAndRenderer(); }
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
                 }
                 catch (Exception ex)
@@ -143,6 +149,51 @@ internal static class Program
         Check(await Js(first, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=A|A", phase + " profile A persistence");
         Check(await Js(second, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=B|B", phase + " profile B persistence");
         host.Controls.Remove(first); host.Controls.Remove(second);
+    }
+
+    private static async Task RejectUntrustedTls(Form host)
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("localhost");
+        request.CertificateExtensions.Add(san.Build());
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+        using var server = new TcpListener(IPAddress.Loopback, 0); server.Start();
+        var port = ((IPEndPoint)server.LocalEndpoint).Port;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var serving = Task.Run(async () =>
+        {
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    using var connection = await server.AcceptTcpClientAsync(stop.Token);
+                    using var stream = new SslStream(connection.GetStream());
+                    try
+                    {
+                        await stream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate }, stop.Token);
+                        await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nuntrusted"), stop.Token);
+                    }
+                    catch (AuthenticationException) { }
+                    catch (IOException) { }
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+        using var web = new ChromiumWebBrowser("about:blank") { Dock = DockStyle.Fill };
+        var failure = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
+        web.RequestHandler = new SafeRequests(Console.WriteLine);
+        Observe(web);
+        web.LoadError += (_, e) => { if (e.Frame.IsMain && e.FailedUrl.StartsWith("https://localhost:")) failure.TrySetResult(e.ErrorCode); };
+        host.Controls.Add(web);
+        try
+        {
+            await Ready(web);
+            web.Load($"https://localhost:{port}/");
+            var code = await failure.Task.WaitAsync(TimeSpan.FromSeconds(20));
+            Check(code.ToString().StartsWith("Cert", StringComparison.Ordinal), "untrusted TLS certificate rejected by production handler: " + code);
+        }
+        finally { stop.Cancel(); await serving; host.Controls.Remove(web); }
     }
 
     private static async Task TabsAndRenderer()
