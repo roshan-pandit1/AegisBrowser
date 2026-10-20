@@ -44,6 +44,7 @@ public sealed class MainForm : Form
             if (url is null) status.Text = "Enter an HTTP(S) address without credentials, or aegis:diagnostics.";
             else Current?.Load(url);
         };
+        address.Leave += (_, _) => UpdateNavigation();
         var bottom = new StatusStrip();
         bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: ask by origin |"));
         bottom.Items.Add(status);
@@ -73,9 +74,14 @@ public sealed class MainForm : Form
     private void NewTab(string url)
     {
         if (closing) return;
-        var page = new TabPage("New tab");
+        var page = new TabPage("New tab") { Tag = "Loading…" };
         var browser = new ChromiumWebBrowser(url) { Dock = DockStyle.Fill };
-        void Report(string message) => Post(() => { if (tabs.SelectedTab == page) status.Text = message; });
+        void Report(string message) => Post(() =>
+        {
+            if (page.IsDisposed) return;
+            page.Tag = message;
+            if (tabs.SelectedTab == page) status.Text = message;
+        });
         browser.PermissionHandler = new OriginPermissions(Report);
         browser.RequestHandler = new SafeRequests(Report);
         var popups = new SafePopups(Report);
@@ -92,9 +98,16 @@ public sealed class MainForm : Form
             page.Text = title.Length > 28 ? title[..28] + "…" : title;
             page.ToolTipText = title;
         });
+        browser.FrameLoadStart += (_, e) => { if (e.Frame.IsMain) Report("Loading…"); };
+        browser.FrameLoadEnd += (_, e) =>
+        {
+            if (!e.Frame.IsMain) return;
+            if (e.HttpStatusCode >= 400) Report($"HTTP {e.HttpStatusCode} from {BrowserPolicy.DisplayOrigin(e.Url)}. Reload to retry.");
+            else if (e.HttpStatusCode is >= 200 and < 400) Report("Ready");
+        };
         browser.LoadError += (_, e) =>
         {
-            if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Page failed to load: {e.ErrorCode}");
+            if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Load failed: {e.ErrorCode} at {BrowserPolicy.DisplayOrigin(e.FailedUrl)}. Reload to retry.");
         };
         page.Controls.Add(browser);
         tabs.TabPages.Add(page);
@@ -104,7 +117,9 @@ public sealed class MainForm : Form
     private void UpdateNavigation()
     {
         var browser = Current;
-        address.Text = browser?.Address ?? "";
+        // Loading events must not overwrite an address the user is typing.
+        if (!address.Focused) address.Text = browser?.Address ?? "";
+        status.Text = tabs.SelectedTab?.Tag as string ?? "Ready";
         back.Enabled = browser?.CanGoBack == true;
         forward.Enabled = browser?.CanGoForward == true;
         reload.Text = browser?.IsLoading == true ? "Stop" : "Reload";

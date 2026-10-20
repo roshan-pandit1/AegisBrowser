@@ -61,6 +61,12 @@ internal sealed class SafeRequests(Action<string> report) : RequestHandler
         return !BrowserPolicy.IsWebUrl(url) && url != "about:blank";
     }
 
+    protected override void OnRenderProcessTerminated(IWebBrowser control, IBrowser browser,
+        CefTerminationStatus status, int errorCode, string errorMessage)
+    {
+        report($"Renderer stopped: {status} ({errorCode}). Reload to recover; unsaved edits may be lost.");
+    }
+
     protected override bool OnCertificateError(IWebBrowser control, IBrowser browser, CefErrorCode code,
         string url, ISslInfo sslInfo, IRequestCallback callback)
     {
