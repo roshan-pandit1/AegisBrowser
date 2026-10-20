@@ -80,6 +80,7 @@ internal sealed class SafePopups(Action<string> report) : LifeSpanHandler
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
     private volatile bool closing;
+    internal int PopupCount => popups.Count;
 
     internal void ClosePopups()
     {

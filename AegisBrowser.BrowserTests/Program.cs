@@ -2,6 +2,8 @@ using AegisBrowser;
 using CefSharp;
 using CefSharp.WinForms;
 
+namespace AegisBrowser.BrowserTests;
+
 internal static class Program
 {
     private const string Origin = "https://browser-tests.invalid/";
@@ -20,7 +22,7 @@ internal static class Program
             initialized = Cef.Initialize(new CefSettings
             {
                 RootCachePath = root, CachePath = Path.Combine(root, "global"),
-                CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef-test.log")
+                CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef-test.log"), LogSeverity = LogSeverity.Info
             });
             if (!initialized) throw new Exception("CEF initialization failed");
             using var global = Cef.GetGlobalRequestContext();
@@ -34,7 +36,13 @@ internal static class Program
                     if (args[0] == "write") await TabsAndRenderer();
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
                 }
-                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(ex);
+                    var log = Path.Combine(root, "cef-test.log");
+                    if (File.Exists(log)) Console.Error.WriteLine(File.ReadAllText(log));
+                    Environment.ExitCode = 1;
+                }
                 finally { host.Close(); }
             };
             Application.Run(host);
@@ -70,9 +78,18 @@ internal static class Program
 
     private static async Task Ready(ChromiumWebBrowser browser)
     {
-        await Wait(() => browser.IsBrowserInitialized && browser.CanExecuteJavascriptInMainFrame && !browser.IsLoading, "browser ready");
+        await Wait(() => browser.IsBrowserInitialized && browser.CanExecuteJavascriptInMainFrame && !browser.IsLoading,
+            "browser ready (" + browser.Address + ")");
         // A completed JS round trip also proves the live renderer is responsive.
         await Js(browser, "document.readyState");
+    }
+
+    private static void Observe(ChromiumWebBrowser web)
+    {
+        // Subscribe before creating the handle, ensuring CEF's load handler is installed.
+        web.FrameLoadEnd += (_, e) => { if (e.Frame.IsMain) Console.WriteLine($"Loaded {e.Url}: HTTP {e.HttpStatusCode}"); };
+        web.LoadError += (_, e) => Console.WriteLine($"Load error {e.ErrorCode}: {e.FailedUrl}");
+        web.IsBrowserInitializedChanged += (_, _) => Console.WriteLine($"Initialized: {web.IsBrowserInitialized}");
     }
 
     private static async Task Storage(Form host, string root, string phase)
@@ -90,6 +107,8 @@ internal static class Program
         first.PermissionHandler = new OriginPermissions(Console.WriteLine);
         var popupHandler = new SafePopups(Console.WriteLine);
         first.LifeSpanHandler = popupHandler;
+        first.Disposed += (_, _) => popupHandler.ClosePopups();
+        foreach (var web in new[] { first, second }) Observe(web);
         host.Controls.Add(second); host.Controls.Add(first);
         await Ready(first); await Ready(second);
         if (phase == "write")
@@ -100,7 +119,7 @@ internal static class Program
             Check(await Js(second, "document.cookie + localStorage.getItem('marker')") == "null", "actual CEF cookie and localStorage isolation");
             await Js(second, "document.cookie='marker=B; Max-Age=86400; Secure; SameSite=Lax; Path=/'; localStorage.setItem('marker','B'); 'ok'");
             using var same = new ChromiumWebBrowser(Origin, requestContext: a) { Dock = DockStyle.Bottom, Height = 150 };
-            host.Controls.Add(same); await Ready(same);
+            Observe(same); host.Controls.Add(same); await Ready(same);
             Check(await Js(same, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=A|A", "same-profile browser shares storage");
             // User activation is injected through CDP only in this test process. Production has no remote-debugging port.
             await Js(first, "window.oauthDone=false; window.addEventListener('message', e => { if(e.origin===location.origin && e.data==='oauth-ok') window.oauthDone=true; }); 'ok'");
@@ -142,13 +161,22 @@ internal static class Program
         Button("+").PerformClick(); await Ready(Current());
         var damaged = Current();
         await Cef.UIThreadTaskFactory.StartNew(() => damaged.GetBrowserHost().ExecuteDevToolsMethod(0, "Page.crash", new Dictionary<string, object>()));
-        await Wait(() => status.Text.Contains("Renderer stopped"), "renderer termination diagnostic");
+        await Wait(() => status.Text?.Contains("Renderer stopped") == true, "renderer termination diagnostic");
         Check(true, "renderer crash reports recoverable per-tab diagnostic");
         damaged.Reload(); await Ready(damaged);
         Check(await Js(damaged, "document.title") == "Aegis · Local diagnostics", "renderer reload recovery");
         tabs.SelectedIndex = 0; Current().Reload(); await Ready(Current());
         Check(await Js(Current(), "document.title") == "Aegis · Local diagnostics", "remaining tab can recover even if Chromium shared its renderer");
-        Button("×").PerformClick(); Button("×").PerformClick();
+        var owner = Current();
+        var ownerPopups = (SafePopups)owner.LifeSpanHandler;
+        await Cef.UIThreadTaskFactory.StartNew(() => owner.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate",
+            new Dictionary<string, object> { ["expression"] = "window.blankPopup=window.open('about:blank','blank'); window.blankOpener=!!window.blankPopup && window.blankPopup.opener===window;", ["userGesture"] = true }));
+        await Wait(() => ownerPopups.PopupCount == 1, "blank popup created");
+        Check(await Js(owner, "window.blankOpener") == "True", "user-initiated about:blank preserves opener");
+        Button("×").PerformClick();
+        await Wait(() => ownerPopups.PopupCount == 0, "owner tab closes its native popup");
+        Check(true, "popup lifecycle ends with owner tab");
+        Button("×").PerformClick();
         await Ready(Current()); Check(tabs.TabCount == 1, "last-tab replacement");
         form.Close();
     }
