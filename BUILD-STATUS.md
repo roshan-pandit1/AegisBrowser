@@ -1,56 +1,79 @@
+# Aegis Browser v0.1 acceptance status — 2026-10-20
+
+## Current acceptance work
+
+[Windows GUI acceptance plan](docs/windows-acceptance-v0.1.md) defines startup, navigation, tabs, isolated persistent profiles/cookies, deny-by-default permissions, DevTools, offline diagnostics and scaling tests. Local browser fixture: `tests/acceptance/`.
+
+- Manual cases S01–S03, N01–N04, T01–T03, P01–P04, Q01–Q05, D01, F01–F03 and U01: **NOT RUN**. No interactive Windows workstation is available in this macOS session.
+- New Windows published-app startup/cache/normal-close smoke test: **PENDING CI**. This is limited automation, not full GUI acceptance.
+- Expanded policy tests including a separate-process profile lock probe: **PENDING CI**.
+- No new GUI failures observed because manual GUI cases have not been executed. This is not a pass. Runtime failures found by CI will be recorded here.
+- Existing limitations: deny-all permissions/downloads, unsupported opener-dependent blank popups, no tab-session restoration, and untested visual/accessibility behavior. Full acceptance remains incomplete.
+- Chromium security settings and production browser code are unchanged by this acceptance work.
+
+Earlier confirmed results and resolved failures follow; they do not establish acceptance of the new tests.
+
 # Verification status — 2026-10-20
 
-**Status: repository access now works; upload is pending visibility clarification. No CI run or artifact upload has occurred.**
+## Latest result: Windows CI passed
 
-## Workflow review
+Write access succeeded on retry. [PR #1](https://github.com/roshan-pandit1/AegisBrowser/pull/1) contains only the two CefSharp API fixes and global.json, committed as `6951dab83ded9a4aa7828fb1ec59c0ed248c5cea` on `fix/cefsharp-net8-build`.
 
-Reviewed `AegisBrowser/README.md` and `.github/workflows/windows.yml`.
+[CI run 39396193090](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39396193090) completed successfully. Its full job logs confirm SDK 8.0.426, restore success, Release build with zero warnings/errors, 36 passing policy/profile checks, self-contained win-x64 publish and payload validation. PR merge checkout: `9c91b9c5dee7667ae5b21b320023aae06f5c3279`.
 
-- Runner: `windows-latest` (already configured).
-- SDK: `actions/setup-dotnet@v4`, `dotnet-version: '8.0.x'` (already configured).
-- Updated application restore/build to explicitly target `win-x64` with `SelfContained=true`.
-- Updated the automated console tests to restore for `win-x64` and execute with `PlatformTarget=x64`.
-- Publishing now reuses the same Release build with `--no-build --no-restore` and `--self-contained true`.
-- Payload validation checks the application, CEF subprocess, `libcef.dll` and bundled .NET `coreclr.dll`.
-- `actions/upload-artifact@v4` is configured to upload the entire `artifacts/win-x64/` directory as `AegisBrowser-win-x64`, failing if no files are found. Build/test/publish failures prevent this step from running.
-- Ruby YAML parsing and assertions for the runner, SDK and artifact configuration passed. Python's YAML parser was unavailable (`ModuleNotFoundError: yaml`); Ruby was used instead. This is configuration validation only, not GitHub Actions execution.
-- Application code and Chromium security settings were not modified during this review.
+[Artifact 12250919586](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39396193090/artifacts/12250919586): `AegisBrowser-win-x64`, 258,924,406 bytes, uploaded successfully and confirmed in the run artifact API. SHA-256: `7cfd08d37f14d4802471e2afd05a634038c8637ba5a7e5a0e92507dffe5fc3ff`. Expires 2027-01-18.
 
-## Actual command results
+Windows GUI acceptance has not been performed. This local status update and earlier README edits are preserved locally, outside the narrowly scoped three-file PR. Verification results are also recorded in the PR description.
 
-Host: Darwin ARM64 (macOS). All five commands were attempted locally during this review and exited **127** with `zsh:1: command not found: dotnet`:
+## Historical failure and access blocker (resolved)
 
-| Operation | Command |
-| --- | --- |
-| Application restore | `dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true` |
-| Release build | `dotnet build AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 -p:SelfContained=true --no-restore` |
-| Test restore | `dotnet restore AegisBrowser.Tests/AegisBrowser.Tests.csproj -r win-x64` |
-| Automated tests | `dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore` |
-| Self-contained publish | `dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -o artifacts/win-x64` |
+**Windows CI ran and failed compilation. Fixes are prepared locally but cannot be uploaded because the GitHub integration returns HTTP 403. No release artifact exists for this run.**
 
-These are environment failures before compilation, not C# compiler diagnostics or failing tests. No publish directory was produced by these commands.
+## Actual Windows CI results
 
-## CI access and outstanding verification
+Repository: `roshan-pandit1/AegisBrowser`, branch `main`.
 
-The supplied repository is `https://github.com/roshan-pandit1/AegisBrowser.git`.
+- Commit: `c500587fb4dd0abd0bae9e809ac138e0fcd20414`.
+- [Workflow run 39394651876](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39394651876).
+- [Build job 118534251494](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39394651876/job/118534251494).
+- Runner: `windows-latest`, resolved to Windows Server 2025 x64.
+- `actions/setup-dotnet@v4` installed SDK 8.0.426 successfully.
+- Without a global.json, `dotnet --info` selected preinstalled SDK 10.0.401.
+- Windows x64 application restore: **passed**.
+- Windows x64 Release build: **failed**, one error and one warning.
+- Automated test restore/execution, self-contained publish, payload validation and artifact upload: **skipped** after the build failed.
 
-Latest retry through the connected GitHub tools:
+The completed job logs were retrieved and inspected. Compiler diagnostics:
 
-- Repository metadata returned successfully with push permission and default branch name `main`.
-- GitHub reports `visibility: public`, although the user described the repository as private. Clarification was requested before uploading local source to a public repository.
-- The branches endpoint returned `[]`: the repository has no branches yet.
-- The Actions runs endpoint returned `total_count: 0` and `workflow_runs: []`.
-- Direct `git ls-remote` still failed with exit 128: `Could not resolve host: github.com`. The GitHub connector is accessible despite the shell DNS failure.
+```text
+Program.cs(33,22): error CS0117: 'Cef' does not contain a definition for 'RegisterSchemeHandlerFactory'
+SecurityHandlers.cs(83,16): warning CS0618: 'ResourceHandler.FromString(string, string)' is obsolete
+```
 
-The earlier connected GitHub 404 is resolved. No remote source has been uploaded or modified. Local source and the Windows workflow are prepared, but publishing them is pending either confirmed private visibility or explicit permission to proceed publicly.
+## Prepared local corrections (not yet CI-verified)
 
-- CI run URL / commit SHA: unavailable; no run exists.
-- CI restore / build / tests / publish logs: unavailable.
-- Workflow artifact ID / download URL: unavailable; no upload performed.
-- CI build-error diagnosis and rerun: pending actual CI execution and logs.
+- `AegisBrowser/Program.cs`: obtain `Cef.GetGlobalRequestContext()` and register the diagnostics handler on that request context, disposing its wrapper before Chromium shutdown.
+- `AegisBrowser/SecurityHandlers.cs`: select the MIME-type overload with named argument `mimeType: "text/html"`.
+- `global.json`: select .NET SDK 8.0.4xx using baseline 8.0.400 and `latestPatch`, preventing an installed SDK 10 from taking precedence.
+- `AegisBrowser/README.md`: document the actual failed run and SDK selection.
 
-After visibility is resolved, upload the source and workflow, inspect logs for every verification step, fix any reported errors, and confirm the artifact belongs to the verified run and commit before recording success here. Windows GUI acceptance checks in the README remain separate from automated policy tests.
+No Chromium security settings, permission rules, certificate handling or spoofing behavior were changed.
 
-## Earlier checks
+## Current blocker
 
-In the initial implementation pass, all three project files parsed as XML, and `node --check` passed for the embedded diagnostics script. Earlier restore/build/test/publish attempts also failed because `dotnet` was absent. A shell HTTPS download failed DNS resolution. None of those static checks establishes Windows compilation or runtime correctness.
+Read access now works, and the user's source upload created `main` and triggered the run above. GitHub still reports repository visibility as public. No additional source was uploaded by this agent.
+
+Two attempts to upload the fixes failed:
+
+1. Git trees API: HTTP 403, `Resource not accessible by integration`.
+2. Repository contents API: HTTP 403, `Resource not accessible by integration`.
+
+Although repository metadata lists the user's push permission, the connected integration does not have effective write access for these operations. Direct Git transport also remains unavailable because the shell cannot resolve github.com.
+
+Grant the connected GitHub integration repository contents write access, or push the prepared local changes (including global.json) through an authenticated Git client. Then inspect the resulting Windows CI logs, fix any further errors and rerun until restore/build/tests/publish and artifact upload are confirmed successful. The current failed run must not be reported as a working release.
+
+## Local environment and workflow configuration
+
+Host: macOS ARM64, no `dotnet` on PATH. Earlier local restore, build, test and publish attempts all exited 127 before compilation. XML parsing and diagnostics JavaScript syntax checks passed in the initial pass. Workflow YAML parsing and runner/SDK/artifact assertions passed locally.
+
+The workflow explicitly targets win-x64, runs the console tests as x64, publishes self-contained without rebuilding, checks the application/CEF subprocess/libcef/coreclr payload, and uploads the complete publish directory as `AegisBrowser-win-x64` only after preceding steps pass. Those later steps have not yet executed successfully. Windows GUI acceptance remains separate from the automated policy tests.
