@@ -13,7 +13,7 @@
 <small>AEGIS BROWSER / LOCAL DIAGNOSTICS</small>
 <h1>What this browser exposes</h1>
 <p>This embedded page reads browser properties locally. It makes no network requests and stores no report. Values are observations, not an anonymity score. Profiles separate stored browsing data; they do not change your device or network identity.</p>
-<p>Camera, microphone, screen sharing, location and other permission requests are denied. Downloads are disabled.</p>
+<p>Supported secure same-origin camera, microphone, location and notification requests use Chromium consent prompts. Other permissions, screen capture and downloads are denied. This page requests no permissions.</p>
 <button id="refresh">Refresh report</button>
 <pre id="result" aria-live="polite">Collecting local observations…</pre>
 <script>

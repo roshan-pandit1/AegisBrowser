@@ -22,6 +22,25 @@ public static class BrowserPolicy
         Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
         && !string.IsNullOrEmpty(uri.Host) && string.IsNullOrEmpty(uri.UserInfo);
 
+    // Compare parsed origins, never suffixes or display strings; ports remain significant.
+    public static string? PermissionOrigin(string value)
+    {
+        if (!IsWebUrl(value)) return null;
+        var uri = new Uri(value);
+        if (uri.Scheme != "https" && !uri.IsLoopback) return null;
+        if (uri.Host.Equals("aegis-diagnostics.invalid", StringComparison.OrdinalIgnoreCase)) return null;
+        return uri.GetLeftPart(UriPartial.Authority);
+    }
+
+    public static bool CanPromptPermission(string requestingUrl, string topLevelUrl)
+    {
+        var origin = PermissionOrigin(requestingUrl);
+        return origin is not null && origin == PermissionOrigin(topLevelUrl);
+    }
+
+    public static string DisplayOrigin(string url) =>
+        IsWebUrl(url) ? new Uri(url).GetLeftPart(UriPartial.Authority) : "unavailable origin";
+
     public static string? NormalizeAddress(string input)
     {
         input = input.Trim();

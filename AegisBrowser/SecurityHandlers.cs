@@ -4,12 +4,22 @@ using CefSharp.Handler;
 
 namespace AegisBrowser;
 
-// No asynchronous permission grants to survive navigation or closure: all requests fail closed.
-internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
+// Chromium owns the origin-labelled consent UI and cancellation lifecycle. We never
+// manufacture a grant or persist an application-side permission decision.
+internal sealed class OriginPermissions(Action<string> report) : PermissionHandler
 {
     protected override bool OnShowPermissionPrompt(IWebBrowser control, IBrowser browser, ulong promptId,
         string origin, PermissionRequestType permissions, IPermissionPromptCallback callback)
     {
+        const PermissionRequestType supported = PermissionRequestType.Geolocation | PermissionRequestType.Notifications;
+        using var main = browser.MainFrame;
+        if (permissions != PermissionRequestType.None && (permissions & ~supported) == 0
+            && BrowserPolicy.CanPromptPermission(origin, main.Url))
+        {
+            callback.Dispose();
+            report($"Permission decision requested for {BrowserPolicy.DisplayOrigin(origin)}: {permissions}");
+            return false; // Chrome runtime displays its native, origin-scoped permission UI.
+        }
         using (callback) callback.Continue(PermissionRequestResult.Deny);
         report($"Permission blocked: {permissions} ({origin})");
         return true;
@@ -18,6 +28,16 @@ internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
     protected override bool OnRequestMediaAccessPermission(IWebBrowser control, IBrowser browser, IFrame frame,
         string origin, MediaAccessPermissionType permissions, IMediaAccessCallback callback)
     {
+        const MediaAccessPermissionType supported = MediaAccessPermissionType.AudioCapture | MediaAccessPermissionType.VideoCapture;
+        using var main = browser.MainFrame;
+        if (permissions != MediaAccessPermissionType.None && (permissions & ~supported) == 0
+            && BrowserPolicy.CanPromptPermission(origin, main.Url)
+            && BrowserPolicy.CanPromptPermission(frame.Url, main.Url))
+        {
+            callback.Dispose();
+            report($"Media decision requested for {BrowserPolicy.DisplayOrigin(origin)}: {permissions}");
+            return false; // Native device consent. No blanket capture grant or screen-selection bypass.
+        }
         using (callback) callback.Cancel();
         report($"Media access blocked ({origin})");
         return true;

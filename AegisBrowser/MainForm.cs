@@ -45,7 +45,7 @@ public sealed class MainForm : Form
             else Current?.Load(url);
         };
         var bottom = new StatusStrip();
-        bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: deny all |"));
+        bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: ask by origin |"));
         bottom.Items.Add(status);
         Controls.Add(tabs);
         Controls.Add(bar);
@@ -76,7 +76,7 @@ public sealed class MainForm : Form
         var page = new TabPage("New tab");
         var browser = new ChromiumWebBrowser(url) { Dock = DockStyle.Fill };
         void Report(string message) => Post(() => { if (tabs.SelectedTab == page) status.Text = message; });
-        browser.PermissionHandler = new DenyPermissions(Report);
+        browser.PermissionHandler = new OriginPermissions(Report);
         browser.RequestHandler = new SafeRequests(Report);
         var popups = new SafePopups(Report);
         browser.LifeSpanHandler = popups;
