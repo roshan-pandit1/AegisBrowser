@@ -80,6 +80,6 @@ internal sealed class DiagnosticsFactory : ISchemeHandlerFactory
         using var stream = typeof(DiagnosticsFactory).Assembly.GetManifestResourceStream("AegisBrowser.diagnostics.html")
             ?? throw new InvalidOperationException("Diagnostics resource missing.");
         using var reader = new StreamReader(stream);
-        return ResourceHandler.FromString(reader.ReadToEnd(), "text/html");
+        return ResourceHandler.FromString(reader.ReadToEnd(), mimeType: "text/html");
     }
 }
