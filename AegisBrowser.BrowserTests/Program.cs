@@ -27,7 +27,12 @@ internal static class Program
         var result = 0;
         try
         {
-            Console.WriteLine("Browser subprocess exists: " + File.Exists(Path.Combine(AppContext.BaseDirectory, "CefSharp.BrowserSubprocess.exe")));
+            foreach (var dependency in new[] { "CefSharp.BrowserSubprocess.exe", "CefSharp.BrowserSubprocess.runtimeconfig.json", "CefSharp.BrowserSubprocess.Core.dll" })
+            {
+                var dependencyPath = Path.Combine(AppContext.BaseDirectory, dependency);
+                Console.WriteLine(dependency + ": " + File.Exists(dependencyPath));
+                if (dependency.EndsWith(".json") && File.Exists(dependencyPath)) Console.WriteLine(File.ReadAllText(dependencyPath));
+            }
             initialized = Cef.Initialize(new CefSettings
             {
                 RootCachePath = root, CachePath = Path.Combine(root, "global"),
