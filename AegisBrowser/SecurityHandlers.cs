@@ -24,7 +24,7 @@ internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
     }
 }
 
-internal sealed class SafeRequests(Action<string> openTab, Action<string> report) : RequestHandler
+internal sealed class SafeRequests(Action<string> report) : RequestHandler
 {
     protected override bool OnBeforeBrowse(IWebBrowser control, IBrowser browser, IFrame frame,
         IRequest request, bool userGesture, bool isRedirect)
@@ -37,8 +37,8 @@ internal sealed class SafeRequests(Action<string> openTab, Action<string> report
     protected override bool OnOpenUrlFromTab(IWebBrowser control, IBrowser browser, IFrame frame,
         string url, WindowOpenDisposition disposition, bool userGesture)
     {
-        if (userGesture && BrowserPolicy.IsWebUrl(url)) openTab(url);
-        return true;
+        // Preserve CEF's disposition/opener handling instead of synthesizing an unrelated tab.
+        return !BrowserPolicy.IsWebUrl(url) && url != "about:blank";
     }
 
     protected override bool OnCertificateError(IWebBrowser control, IBrowser browser, CefErrorCode code,
@@ -50,16 +50,42 @@ internal sealed class SafeRequests(Action<string> openTab, Action<string> report
     }
 }
 
-internal sealed class SafePopups(Action<string> openTab, Action<string> report) : LifeSpanHandler
+internal sealed class SafePopups(Action<string> report) : LifeSpanHandler
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
+    private volatile bool closing;
+
+    internal void ClosePopups()
+    {
+        closing = true;
+        Cef.UIThreadTaskFactory.StartNew(() =>
+        {
+            foreach (var popup in popups.Values)
+                if (!popup.IsDisposed) popup.GetHost().CloseBrowser(true);
+        });
+    }
+
+    protected override void OnAfterCreated(IWebBrowser control, IBrowser browser)
+    {
+        if (!browser.IsPopup) return;
+        popups[browser.Identifier] = browser;
+        if (closing) browser.GetHost().CloseBrowser(true);
+    }
+
+    protected override void OnBeforeClose(IWebBrowser control, IBrowser browser) =>
+        popups.TryRemove(browser.Identifier, out _);
+
     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,
         string targetUrl, string targetFrameName, WindowOpenDisposition disposition, bool userGesture,
         IPopupFeatures features, IWindowInfo windowInfo, IBrowserSettings settings,
         ref bool noJavascriptAccess, out IWebBrowser newBrowser)
     {
         newBrowser = null!;
-        if (userGesture && BrowserPolicy.IsWebUrl(targetUrl)) openTab(targetUrl);
-        else report("Popup blocked.");
+        // Keep CEF's original browsing context: window.opener, POST data, named-window
+        // reuse and postMessage are required by OAuth. CEF still enforces COOP/SOP.
+        if (!closing && userGesture && (string.IsNullOrEmpty(targetUrl) || targetUrl == "about:blank"
+            || BrowserPolicy.IsWebUrl(targetUrl))) return false;
+        report("Popup blocked: a user gesture and a web destination are required.");
         return true;
     }
 }

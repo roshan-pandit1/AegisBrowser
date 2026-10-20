@@ -76,10 +76,11 @@ public sealed class MainForm : Form
         var page = new TabPage("New tab");
         var browser = new ChromiumWebBrowser(url) { Dock = DockStyle.Fill };
         void Report(string message) => Post(() => { if (tabs.SelectedTab == page) status.Text = message; });
-        void Open(string target) => Post(() => { if (!page.IsDisposed) NewTab(target); });
         browser.PermissionHandler = new DenyPermissions(Report);
-        browser.RequestHandler = new SafeRequests(Open, Report);
-        browser.LifeSpanHandler = new SafePopups(Open, Report);
+        browser.RequestHandler = new SafeRequests(Report);
+        var popups = new SafePopups(Report);
+        browser.LifeSpanHandler = popups;
+        page.Disposed += (_, _) => popups.ClosePopups();
         browser.DownloadHandler = new DenyDownloads(Report);
         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
