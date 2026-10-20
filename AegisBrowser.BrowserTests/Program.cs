@@ -19,12 +19,15 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Length != 2 || args[0] is not ("write" or "read")) return 2;
-        ApplicationConfiguration.Initialize();
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(args[1]);
         Directory.CreateDirectory(root);
         var initialized = false;
+        var result = 0;
         try
         {
+            Console.WriteLine("Browser subprocess exists: " + File.Exists(Path.Combine(AppContext.BaseDirectory, "CefSharp.BrowserSubprocess.exe")));
             initialized = Cef.Initialize(new CefSettings
             {
                 RootCachePath = root, CachePath = Path.Combine(root, "global"),
@@ -38,8 +41,9 @@ internal static class Program
             {
                 try
                 {
+                    if (args[0] == "write") await TabsAndRenderer();
                     await Storage(host, root, args[0]);
-                    if (args[0] == "write") { await RejectUntrustedTls(host); await TabsAndRenderer(); }
+                    if (args[0] == "write") await RejectUntrustedTls(host);
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
                 }
                 catch (Exception ex)
@@ -47,7 +51,7 @@ internal static class Program
                     Console.Error.WriteLine(ex);
                     var log = Path.Combine(root, "cef-test.log");
                     if (File.Exists(log)) Console.Error.WriteLine(File.ReadAllText(log));
-                    Environment.ExitCode = 1;
+                    result = 1;
                 }
                 finally { host.Close(); }
             };
@@ -55,7 +59,7 @@ internal static class Program
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
         finally { if (initialized) Cef.Shutdown(); }
-        return Environment.ExitCode;
+        return result;
     }
 
     private static void Check(bool condition, string name)
@@ -84,8 +88,16 @@ internal static class Program
 
     private static async Task Ready(ChromiumWebBrowser browser)
     {
-        await Wait(() => browser.IsBrowserInitialized && browser.CanExecuteJavascriptInMainFrame && !browser.IsLoading,
-            "browser ready (" + browser.Address + ")");
+        try
+        {
+            await Wait(() => browser.IsBrowserInitialized && browser.CanExecuteJavascriptInMainFrame && !browser.IsLoading,
+                "browser ready (" + browser.Address + ")");
+        }
+        catch
+        {
+            Console.Error.WriteLine($"Readiness: initialized={browser.IsBrowserInitialized}, javascript={browser.CanExecuteJavascriptInMainFrame}, loading={browser.IsLoading}, address={browser.Address}");
+            throw;
+        }
         // A completed JS round trip also proves the live renderer is responsive.
         await Js(browser, "document.readyState");
     }
@@ -100,13 +112,15 @@ internal static class Program
 
     private static async Task Storage(Form host, string root, string phase)
     {
-        using var a = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-a") });
-        using var b = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-b") });
-        foreach (var context in new[] { a, b })
+        CefSharp.Handler.RequestContextHandler Handler() => new CefSharp.Handler.RequestContextHandler().OnInitialize(context =>
         {
-            context.RegisterSchemeHandlerFactory("https", "browser-tests.invalid", new Fixture());
-            context.RegisterSchemeHandlerFactory("https", "provider-tests.invalid", new Fixture());
-        }
+            Console.WriteLine("Context initialized: " + context.CachePath);
+            if (!context.RegisterSchemeHandlerFactory("https", "browser-tests.invalid", new Fixture())
+                || !context.RegisterSchemeHandlerFactory("https", "provider-tests.invalid", new Fixture()))
+                throw new InvalidOperationException("Fixture scheme registration failed");
+        });
+        using var a = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-a") }, Handler());
+        using var b = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-b") }, Handler());
         using var first = new ChromiumWebBrowser(Origin, requestContext: a) { Dock = DockStyle.Left, Width = 450 };
         using var second = new ChromiumWebBrowser(Origin, requestContext: b) { Dock = DockStyle.Fill };
         first.RequestHandler = new SafeRequests(Console.WriteLine);
