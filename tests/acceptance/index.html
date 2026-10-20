@@ -1,0 +1,23 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Aegis acceptance fixture</title>
+<h1>Aegis acceptance fixture</h1>
+<p>Serve at http://localhost:8765. Use the same origin and port for both profiles. No external dependencies or uploads.</p>
+<label>Profile marker <input id="marker" value="A"></label>
+<button id="save">Save persistent cookie + localStorage</button><button id="read">Read stored state</button>
+<p><a href="page2.html">Page two</a> · <a href="page2.html" target="_blank">User popup/tab</a> · <a href="data:text/html,blocked">Blocked data navigation</a></p>
+<button id="geo">Geolocation</button><button id="camera">Camera</button><button id="mic">Microphone</button><button id="screen">Screen capture</button><button id="notify">Notifications</button>
+<button id="auto">Schedule popup without activation (6 seconds)</button>
+<pre id="result" aria-live="polite"></pre>
+<script>
+const out = value => document.querySelector('#result').textContent = value;
+const read = () => out(JSON.stringify({cookie:document.cookie,localStorage:localStorage.getItem('aegis-marker'),secureContext:isSecureContext},null,2));
+document.querySelector('#save').onclick = () => {const v=document.querySelector('#marker').value;document.cookie='aegis-marker='+encodeURIComponent(v)+'; Max-Age=86400; SameSite=Strict; Path=/';localStorage.setItem('aegis-marker',v);read();};
+document.querySelector('#read').onclick=read;
+document.querySelector('#geo').onclick=()=>navigator.geolocation.getCurrentPosition(()=>out('FAIL: location granted'),e=>out('Geolocation error '+e.code+': '+e.message));
+const media = async constraints => {try {const s=await navigator.mediaDevices.getUserMedia(constraints);s.getTracks().forEach(t=>t.stop());out('FAIL: media granted');} catch(e){out(e.name+': '+e.message);}};
+document.querySelector('#camera').onclick=()=>media({video:true});
+document.querySelector('#mic').onclick=()=>media({audio:true});
+document.querySelector('#screen').onclick=async()=>{try{const s=await navigator.mediaDevices.getDisplayMedia({video:true});s.getTracks().forEach(t=>t.stop());out('FAIL: display capture granted');}catch(e){out(e.name+': '+e.message);}};
+document.querySelector('#notify').onclick=async()=>out('Notifications: '+await Notification.requestPermission());
+document.querySelector('#auto').onclick=()=>setTimeout(()=>{window.open('page2.html');out('Popup requested without current user activation. Confirm no extra tab/window.');},6000);
+read();
+</script></html>

@@ -1,4 +1,14 @@
 using AegisBrowser.Core;
+using System.Diagnostics;
+using System.Reflection;
+
+// A child process proves that the OS lease is exclusive beyond this process.
+if (args.Length == 2 && args[0] == "--probe-lock")
+{
+    try { using var lease = new ProfileLease(args[1]); Environment.ExitCode = 2; }
+    catch (IOException) { Environment.ExitCode = 0; }
+    return;
+}
 
 var count = 0;
 void Check(bool condition, string name)
@@ -18,6 +28,9 @@ foreach (var name in new[] { "", "../escape", "a/b", "a\\b", "a:b", "a b", "a.b"
     Reject(["--profile=" + name]);
 Reject(["--no-sandbox"]);
 Reject(["--profile=a", "--profile=b"]);
+Reject(["--profile=Personal", "--disable-web-security"]);
+Check(BrowserPolicy.ReadProfile(["--profile=" + new string('a', 40)]).Length == 40, "maximum profile length");
+Check(BrowserPolicy.NormalizeAddress("HTTPS://EXAMPLE.COM/path?q=1#section") == "https://example.com/path?q=1#section", "URL query and fragment retained");
 Check(BrowserPolicy.NormalizeAddress(" example.com/path ") == "https://example.com/path", "default HTTPS");
 Check(BrowserPolicy.NormalizeAddress("localhost:8080") == "https://localhost:8080/", "local port");
 Check(BrowserPolicy.NormalizeAddress("http://localhost:8080/") == "http://localhost:8080/", "explicit HTTP");
@@ -41,6 +54,17 @@ try
         try { using var duplicate = new ProfileLease(a); }
         catch (IOException) { rejected = true; }
         Check(rejected, "exclusive profile lease");
+        var executable = Environment.ProcessPath ?? throw new Exception("Process path unavailable");
+        var start = new ProcessStartInfo(executable) { UseShellExecute = false };
+        if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            start.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+        start.ArgumentList.Add("--probe-lock");
+        start.ArgumentList.Add(a);
+        using (var child = Process.Start(start) ?? throw new Exception("Could not start lease probe"))
+        {
+            if (!child.WaitForExit(15000)) { child.Kill(true); throw new Exception("Lease probe timed out"); }
+            Check(child.ExitCode == 0, "cross-process profile lease");
+        }
         File.WriteAllText(Path.Combine(a, "sentinel"), "persisted");
         Check(!File.Exists(Path.Combine(b, "sentinel")), "storage isolation");
     }

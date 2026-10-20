@@ -35,6 +35,8 @@ jobs:
           foreach ($file in @('AegisBrowser.exe', 'CefSharp.BrowserSubprocess.exe', 'libcef.dll', 'coreclr.dll')) {
             if (!(Get-ChildItem artifacts/win-x64 -Recurse -Filter $file)) { throw "Missing $file" }
           }
+      - name: Smoke test published Windows application
+        run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64
       - name: Upload complete publish directory
         uses: actions/upload-artifact@v4
         with:
