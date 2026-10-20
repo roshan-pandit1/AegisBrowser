@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aegis · Local diagnostics</title>
+<style>
+:root{color-scheme:dark}body{font:16px/1.6 system-ui;max-width:960px;margin:3rem auto;padding:0 24px;background:#111827;color:#e5e7eb}h1{font-size:34px}pre{padding:24px;background:#1f2937;border:1px solid #374151;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere}small{color:#b6c5d9}button{font:inherit;padding:8px 20px;cursor:pointer}
+</style>
+</head>
+<body>
+<small>AEGIS BROWSER / LOCAL DIAGNOSTICS</small>
+<h1>What this browser exposes</h1>
+<p>This embedded page reads browser properties locally. It makes no network requests and stores no report. Values are observations, not an anonymity score. Profiles separate stored browsing data; they do not change your device or network identity.</p>
+<p>Camera, microphone, screen sharing, location and other permission requests are denied. Downloads are disabled.</p>
+<button id="refresh">Refresh report</button>
+<pre id="result" aria-live="polite">Collecting local observations…</pre>
+<script>
+'use strict';
+const read = fn => { try { return fn() ?? 'not exposed'; } catch { return 'unavailable'; } };
+function report() {
+  const values = {
+    userAgent: navigator.userAgent,
+    userAgentData: read(() => navigator.userAgentData?.toJSON()),
+    language: navigator.language, languages: navigator.languages,
+    platform: navigator.platform, hardwareConcurrency: navigator.hardwareConcurrency,
+    deviceMemory: read(() => navigator.deviceMemory),
+    maxTouchPoints: navigator.maxTouchPoints, cookieEnabled: navigator.cookieEnabled,
+    doNotTrack: navigator.doNotTrack, secureContext: isSecureContext,
+    screen: {width: screen.width, height: screen.height, availableWidth: screen.availWidth,
+      availableHeight: screen.availHeight, colorDepth: screen.colorDepth, pixelRatio: devicePixelRatio},
+    viewport: {width: innerWidth, height: innerHeight},
+    timezone: read(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
+    webGL: read(() => {
+      const gl = document.createElement('canvas').getContext('webgl');
+      if (!gl) return 'unavailable';
+      const result = {version: gl.getParameter(gl.VERSION), vendor: gl.getParameter(gl.VENDOR), renderer: gl.getParameter(gl.RENDERER)};
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return result;
+    })
+  };
+  document.querySelector('#result').textContent = JSON.stringify(values, null, 2);
+}
+document.querySelector('#refresh').addEventListener('click', report);
+report();
+</script>
+</body>
+</html>

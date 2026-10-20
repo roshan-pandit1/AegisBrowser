@@ -1,0 +1,43 @@
+name: Windows build and release artifact
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Record SDK and source revision
+        run: |
+          dotnet --info
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git rev-parse HEAD
+      - name: Restore Windows x64 application
+        run: dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
+      - name: Build Windows x64 Release
+        run: dotnet build AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 -p:SelfContained=true --no-restore
+      - name: Restore Windows x64 automated tests
+        run: dotnet restore AegisBrowser.Tests/AegisBrowser.Tests.csproj -r win-x64
+      - name: Run Windows x64 automated tests
+        run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
+      - name: Publish self-contained Windows x64 build
+        run: dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -o artifacts/win-x64
+      - name: Check release payload
+        run: |
+          foreach ($file in @('AegisBrowser.exe', 'CefSharp.BrowserSubprocess.exe', 'libcef.dll', 'coreclr.dll')) {
+            if (!(Get-ChildItem artifacts/win-x64 -Recurse -Filter $file)) { throw "Missing $file" }
+          }
+      - name: Upload complete publish directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: AegisBrowser-win-x64
+          path: artifacts/win-x64/
+          if-no-files-found: error
