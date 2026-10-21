@@ -41,6 +41,7 @@ internal static class Program
             if (!initialized) throw new Exception("CEF initialization failed");
             using var global = Cef.GetGlobalRequestContext();
             global.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory());
+            global.RegisterSchemeHandlerFactory("https", "browser-tests.invalid", new Fixture());
             using var host = new Form { Width = 1000, Height = 700, Text = "Aegis CEF integration tests" };
             host.Shown += async (_, _) =>
             {
@@ -109,6 +110,15 @@ internal static class Program
         }
         // A completed JS round trip also proves the live renderer is responsive.
         await Js(browser, "document.readyState");
+    }
+
+    private static async Task LoadReady(ChromiumWebBrowser web, string url)
+    {
+        var loaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<FrameLoadEndEventArgs> handler = (_, e) => { if (e.Frame.IsMain && e.Url == url) loaded.TrySetResult(true); };
+        web.FrameLoadEnd += handler;
+        try { web.Load(url); await loaded.Task.WaitAsync(TimeSpan.FromSeconds(25)); await Ready(web); }
+        finally { web.FrameLoadEnd -= handler; }
     }
 
     private static async Task ReloadReady(ChromiumWebBrowser browser)
@@ -244,6 +254,17 @@ internal static class Program
         ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
         await Wait(() => tabs.TabCount == 1, "initial tab"); await Ready(Current());
         Check(await Js(Current(), "document.querySelector('#result').textContent.includes('userAgent')") == "True", "embedded diagnostics renders in CEF");
+        var navigating = Current();
+        await LoadReady(navigating, Origin + "one");
+        await LoadReady(navigating, Origin + "two");
+        Button("←").PerformClick(); await Wait(() => navigating.Address == Origin + "one" && !navigating.IsLoading, "back navigation");
+        Button("→").PerformClick(); await Wait(() => navigating.Address == Origin + "two" && !navigating.IsLoading, "forward navigation");
+        Check(true, "back and forward navigation buttons");
+        var address = toolbar.Controls.OfType<TextBox>().Single();
+        address.Focus(); address.Text = "editing.example/path";
+        await ReloadReady(navigating);
+        Check(address.Text == "editing.example/path", "loading does not overwrite an address being typed");
+        await LoadReady(navigating, BrowserPolicy.DiagnosticsUrl);
         for (var i = 0; i < 5; i++) { Button("+").PerformClick(); Button("×").PerformClick(); }
         Check(tabs.TabCount == 1, "rapid tab creation and disposal during loading");
         Button("+").PerformClick(); await Ready(Current());
