@@ -62,6 +62,43 @@ internal static class PrivacyTests
         Check(session.Snapshot().Allowed == 0 && session.Snapshot().Blocked == 0 && session.Snapshot().Requests.Length == 0, "clear inspector");
         session.Apply(config with { AllowedDomains = ["cdn.test"], Mode = PrivacyMode.Strict });
         Check(!session.Evaluate(cdn).Blocked, "live policy replacement");
+        Check(sites.IsThirdParty("http://[::1]:80", "http://[0:0:0:0:0:0:0:1]:90") == false, "IPv6 normalization");
+        session.Evaluate(cdn with { Url = "https://user:password@cdn.test/path?secret=1" });
+        Check(!session.Snapshot().Requests.Last().Destination.Contains("password"), "inspector strips credentials");
+        var folder = Path.Combine(Path.GetTempPath(), "aegis-privacy-" + Guid.NewGuid());
+        try
+        {
+            var store = new PrivacySettingsStore(folder);
+            Check(store.Load().Mode == PrivacyMode.Standard, "missing settings defaults");
+            var saved = config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"], UserRules = "||tracker.test^" };
+            store.Save(saved);
+            var restored = new PrivacySettingsStore(folder).Load();
+            Check(restored.Mode == PrivacyMode.Strict && restored.SiteExceptions.SequenceEqual(saved.SiteExceptions)
+                && restored.UserRules == saved.UserRules, "settings round trip");
+            Check(new PrivacySettingsStore(Path.Combine(folder, "other")).Load().SiteExceptions.Length == 0, "profile settings isolation");
+            var fresh = new PrivacySession(restored);
+            Check(!fresh.Paused && fresh.Snapshot().Requests.Length == 0, "pause and inspector never persist");
+            var copy = fresh.Configuration; copy.SiteExceptions[0] = "evil.test";
+            Check(fresh.Configuration.SiteExceptions[0] == "example.com", "configuration snapshots isolated");
+            bool rejected = false;
+            try { fresh.Apply(config, _ => throw new IOException("simulated disk failure")); } catch (IOException) { rejected = true; }
+            Check(rejected && fresh.Configuration.Mode == PrivacyMode.Strict, "failed save preserves active policy");
+            File.WriteAllText(Path.Combine(folder, "privacy.json"), "{broken");
+            var corrupt = new PrivacySettingsStore(folder);
+            rejected = false;
+            try { corrupt.Load(); } catch (IOException) { rejected = true; }
+            Check(rejected, "malformed settings reported");
+            rejected = false;
+            try { corrupt.Save(config); } catch (IOException) { rejected = true; }
+            Check(rejected && File.ReadAllText(Path.Combine(folder, "privacy.json")) == "{broken", "malformed file preserved");
+            File.WriteAllText(Path.Combine(folder, "privacy.json"), "{\"BlockedDomains\":null}");
+            rejected = false;
+            try { new PrivacySettingsStore(folder).Load(); } catch (IOException) { rejected = true; }
+            Check(rejected, "null settings rejected safely");
+            Parallel.For(0, 1000, i => { if (i % 50 == 0) fresh.Apply(config); fresh.Evaluate(cdn); });
+            Check(fresh.Snapshot().Allowed + fresh.Snapshot().Blocked == 1000, "concurrent settings and request accounting");
+        }
+        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
         Console.WriteLine($"PASS: {count} privacy checks");
     }
 }

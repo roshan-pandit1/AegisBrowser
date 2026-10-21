@@ -33,7 +33,7 @@ internal static class Program
             using var context = Cef.GetGlobalRequestContext();
             if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory()))
                 throw new InvalidOperationException("Could not register local diagnostics.");
-            using var window = new MainForm(profile);
+            using var window = new MainForm(profile, path);
             Application.Run(window);
         }
         catch (Exception ex)

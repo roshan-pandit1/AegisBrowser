@@ -18,7 +18,7 @@ internal sealed class PrivacyForm : Form
     public PrivacyForm(PrivacySession session, string? currentUrl, Action<PrivacyConfiguration>? apply = null)
     {
         this.session = session;
-        this.apply = apply ?? session.Apply;
+        this.apply = apply ?? (configuration => session.Apply(configuration));
         Text = "Aegis Privacy — profile settings and network inspector";
         Width = 1100; Height = 760; MinimumSize = new(800, 550);
         var pages = new TabControl { Dock = DockStyle.Fill };

@@ -33,3 +33,16 @@ Open **Privacy** on the toolbar. Choose a mode; edit one resource hostname or si
 The current site's hostname can be added to site exceptions. **Pause filtering** applies across this profile's tabs until resumed or browser exit. It never persists across restarts. Neither action weakens Chromium security protections.
 
 The Network inspector shows the last 500 decisions with first/third-party classification, allowed/blocked result and matching rule. Counts include decisions since startup or Clear, not just visible rows, and do not imply successful HTTP responses. Choose **Third-party only** to narrow the view. Select a row to add its resource hostname to block/allow settings, then Apply. Inspecting is local and in-memory: origins only, without URL paths/queries/fragments, headers, cookies or bodies. Matching rule text may itself contain user-supplied patterns. Close/reopen the Privacy window to use a different current-site shortcut.
+
+## Windows acceptance cases (not yet executed interactively)
+
+1. Open Privacy, switch each mode, Apply and reload. Confirm Standard blocks a listed third-party tracker, Strict blocks an unlisted third-party image, and Custom obeys only enabled rules.
+2. Add a domain block, inspect the matching rule, then add/remove an allow rule and verify new request decisions change. Confirm `example.com.evil.test` does not inherit an `example.com` exception.
+3. Add a site exception, reload, remove it and reload. Pause/resume filtering. Check counts and third-party-only view, and confirm Clear resets history/counts.
+4. Import a standard privacy list containing supported and unsupported rules. Confirm unsupported entries appear, validation errors leave the previous policy active, and large imports remain usable.
+5. Exercise top-level sign-in redirects and embedded identity-provider content. Use explicit exceptions if Strict breaks embedded authentication. No automatic security-check exceptions or challenge manipulation are provided.
+6. Navigate through a redirect to a blocked resource, test iframe resources and cached/service-worker requests, then close loading tabs. Confirm no crash, no unexpected dialogs and no traffic reaches the blocked test endpoint.
+7. Restart the same profile and a different profile. Confirm settings persist only in the first, while pause and inspector history reset. Check malformed/read-only settings files produce a visible error without silent data loss.
+8. Open local diagnostics offline and DevTools. Verify invalid TLS certificates still fail, permission policy is unchanged and no security-disabling Chromium switches were added.
+
+These cases require an actual Windows desktop. CI startup smoke does not establish their outcomes.

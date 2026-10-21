@@ -13,12 +13,23 @@ public sealed class MainForm : Form
     private readonly Button forward;
     private readonly Button reload;
     private bool closing;
-    private readonly PrivacySession privacy = new();
+    private readonly PrivacySession privacy;
+    private readonly PrivacySettingsStore? privacyStore;
     private PrivacyForm? privacyWindow;
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
-    public MainForm(string profile)
+    public MainForm(string profile, string? profilePath = null)
     {
+        var configuration = new PrivacyConfiguration();
+        string? privacyWarning = null;
+        if (profilePath is not null)
+        {
+            privacyStore = new(profilePath);
+            try { configuration = privacyStore.Load(); }
+            catch (IOException ex) { privacyWarning = ex.Message; }
+        }
+        privacy = new(configuration);
+        if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
         Text = $"Aegis Browser — {profile}";
         Width = 1250;
         Height = 850;
@@ -41,7 +52,7 @@ public sealed class MainForm : Form
         bar.Controls.Add(MakeButton("Privacy", () =>
         {
             if (privacyWindow is null || privacyWindow.IsDisposed)
-                privacyWindow = new PrivacyForm(privacy, Current?.Address);
+                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save));
             privacyWindow.Show(this); privacyWindow.BringToFront();
         }), 8, 0);
         address.KeyDown += (_, e) =>

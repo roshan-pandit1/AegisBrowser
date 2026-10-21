@@ -7,29 +7,36 @@ public sealed record InspectorSnapshot(long Allowed, long Blocked, RequestObserv
 /// <summary>One profile's in-memory policy and bounded, origin-only inspection history.</summary>
 public sealed class PrivacySession
 {
-    private RequestFilter filter;
+    private sealed record PolicyState(PrivacyConfiguration Configuration, RequestFilter Filter);
+    private PolicyState state;
+    private static PrivacyConfiguration Copy(PrivacyConfiguration config) => config with
+    { BlockedDomains = config.BlockedDomains.ToArray(), AllowedDomains = config.AllowedDomains.ToArray(), SiteExceptions = config.SiteExceptions.ToArray() };
     private readonly object gate = new();
     private readonly Queue<RequestObservation> history = new();
     private long allowed, blocked, sequence;
     private bool paused;
     public bool Paused { get => Volatile.Read(ref paused); set => Volatile.Write(ref paused, value); }
-    public PrivacyConfiguration Configuration { get; private set; }
-    public IReadOnlyList<string> Unsupported => Volatile.Read(ref filter).Unsupported;
-    public int RuleCount => Volatile.Read(ref filter).RuleCount;
+    public PrivacyConfiguration Configuration => Copy(Volatile.Read(ref state).Configuration);
+    public IReadOnlyList<string> Unsupported => Volatile.Read(ref state).Filter.Unsupported;
+    public int RuleCount => Volatile.Read(ref state).Filter.RuleCount;
     public PrivacySession(PrivacyConfiguration? configuration = null)
     {
-        Configuration = configuration ?? new();
-        filter = new(Configuration);
+        var config = configuration ?? new();
+        PrivacySettingsStore.Validate(config);
+        config = Copy(config);
+        state = new(config, new(config));
     }
-    public void Apply(PrivacyConfiguration configuration)
+    public void Apply(PrivacyConfiguration configuration, Action<PrivacyConfiguration>? persist = null)
     {
-        var next = new RequestFilter(configuration); // Build fully before publication to CEF IO.
-        Configuration = configuration;
-        Volatile.Write(ref filter, next);
+        PrivacySettingsStore.Validate(configuration);
+        configuration = Copy(configuration);
+        var next = new PolicyState(configuration, new(configuration));
+        persist?.Invoke(configuration); // A failed save leaves the active policy unchanged.
+        Volatile.Write(ref state, next);
     }
     public FilterDecision Evaluate(NetworkRequest request)
     {
-        var decision = Volatile.Read(ref filter).Evaluate(request);
+        var decision = Volatile.Read(ref state).Filter.Evaluate(request);
         if (Paused) decision = decision with { Blocked = false, Rule = "Temporarily paused" };
         lock (gate)
         {
@@ -42,7 +49,7 @@ public sealed class PrivacySession
         return decision;
     }
     private static string Origin(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var uri)
-        && uri.Scheme is "http" or "https" ? uri.GetLeftPart(UriPartial.Authority) : "(internal / unknown)";
+        && uri.Scheme is "http" or "https" ? new UriBuilder(uri.Scheme, uri.IdnHost, uri.IsDefaultPort ? -1 : uri.Port).Uri.GetLeftPart(UriPartial.Authority) : "(internal / unknown)";
     public InspectorSnapshot Snapshot() { lock (gate) return new(allowed, blocked, history.ToArray()); }
     public void ClearHistory() { lock (gate) { allowed = blocked = 0; history.Clear(); } }
 }

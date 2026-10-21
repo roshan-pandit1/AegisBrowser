@@ -28,6 +28,16 @@ jobs:
         run: dotnet restore AegisBrowser.Tests/AegisBrowser.Tests.csproj -r win-x64
       - name: Run Windows x64 automated tests
         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
+      - name: Build Chromium filtering tests
+        run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Run Chromium filtering tests
+        timeout-minutes: 5
+        run: |
+          $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0) { throw "Chromium filtering tests exited with $code" }
+          if (!(($output -join "`n") -match 'PASS: \d+ Chromium filtering checks')) { throw 'Chromium filtering suite did not complete' }
       - name: Publish self-contained Windows x64 build
         run: dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -o artifacts/win-x64
       - name: Check release payload

@@ -26,7 +26,12 @@ public sealed class SiteClassifier
             target.Add(NormalizeHost(line.TrimStart('!', '*', '.')));
         }
     }
-    public static string NormalizeHost(string host) => new IdnMapping().GetAscii(host.TrimEnd('.').ToLowerInvariant()).ToLowerInvariant();
+    public static string NormalizeHost(string host)
+    {
+        host = host.TrimEnd('.');
+        if (IPAddress.TryParse(host.Trim('[', ']'), out var address)) return address.ToString();
+        return new IdnMapping().GetAscii(host.ToLowerInvariant()).ToLowerInvariant();
+    }
     public static string? Host(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var uri)
         && uri.Scheme is "http" or "https" ? NormalizeHost(uri.IdnHost) : null;
     public static bool DomainMatches(string host, string domain) => host == domain || host.EndsWith("." + domain, StringComparison.Ordinal);
