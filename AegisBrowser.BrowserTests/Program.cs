@@ -235,7 +235,11 @@ internal static class Program
         var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("localhost");
         request.CertificateExtensions.Add(san.Build());
-        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+        using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+        // Schannel on .NET 8 cannot use CreateSelfSigned's ephemeral key.
+        // Import a temporary user key container; do not add trust to any store.
+        using var certificate = new X509Certificate2(generated.Export(X509ContentType.Pfx),
+            (string?)null, X509KeyStorageFlags.UserKeySet);
         using var server = new TcpListener(IPAddress.Loopback, 0); server.Start();
         var port = ((IPEndPoint)server.LocalEndpoint).Port;
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -252,8 +256,8 @@ internal static class Program
                         await stream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate }, stop.Token);
                         await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nuntrusted"), stop.Token);
                     }
-                    catch (AuthenticationException) { }
-                    catch (IOException) { }
+                    catch (AuthenticationException ex) { Console.WriteLine("TLS fixture handshake: " + ex); }
+                    catch (IOException ex) { Console.WriteLine("TLS fixture transport: " + ex.Message); }
                 }
             }
             catch (OperationCanceledException) { }
