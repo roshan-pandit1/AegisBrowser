@@ -1,3 +1,32 @@
+# Windows release review — 2026-10-21
+
+**Release blocked; PR #4 remains draft and unmerged.** The review branch now includes main at `90a4f69` and the privacy work, retaining .NET 8 / WinForms / CefSharp 151.3.240. Historical green runs below do not certify this combined release candidate.
+
+## Latest completed verification
+
+[Windows run 39570856734](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39570856734) for `76fd0a3383663c45434687370b78a56204bcd144` **failed**. Logs were inspected:
+
+- Application restore and win-x64 Release build passed; Windows SDK selected .NET 8.0.426.
+- 56 privacy and 50 policy/profile checks passed.
+- Browser integration passed rendered diagnostics, back/forward navigation, preserving address edits, rapid tab closure, renderer failure/recovery and blank-popup opener checks. It then timed out closing the owner tab's native popup. A native Chromium observer assertion also occurred. The full suite did not complete; cookie restart and TLS coverage are not certified by this run.
+- 20 Chromium filtering checks passed: all three modes, redirect/iframe cancellation, explicit exceptions, pause/resume, preserved navigation, import/apply/remove/invalid edits, inspector selection and enforced CORS.
+- Browser settings restart checks passed in separate processes (2 write checks, 3 read checks), including normal window shutdown and reset of temporary pause/history.
+- Publish and both artifact uploads were skipped because the browser suite failed. No portable ZIP from this source is available or certified.
+
+Earlier review runs exposed a missing test namespace import (fixed), unexpected native closure of the storage fixture host, and native shutdown assertions. These are real verification failures, not passing tests. The workflow now rejects native assertions even when a process returns zero.
+
+The latest lifecycle revision keeps the owner handler alive until popup closure completes. Revision `00210f26f7117554524a056988bef00f2c4c7cb7` is pushed, but GitHub has not created a workflow run for it as of 2026-10-21 14:25 UTC. Verification is pending; no fix success is claimed. Inspector selection retention is fixed and its Windows regression check passes. Packaging and installation instructions are implemented but await a fully passing run; see [installation instructions](docs/INSTALL-WINDOWS.md).
+
+## Remaining release gates
+
+All human-operated cases in [release review](docs/release-review.md) and [Windows acceptance plan](docs/windows-acceptance-v0.1.md) remain **NOT RUN**: clean Windows installation, full navigation/keyboard/stop UX, tab/window close races, real OAuth, origin permission consent and device handling, DevTools, cold offline diagnostics, sustained-traffic inspector actions, large imports, settings warning/upgrade/crash recovery, scaling and accessibility. Automated CEF coverage above is partial and is not a manual GUI acceptance pass.
+
+TLS rejection and Chromium web-security protections remain enabled; no sandbox-disabling switches, identity spoofing or security-check circumvention was added. Local execution remains unavailable on this macOS host without dotnet; all Windows results above come from CI.
+
+---
+
+## Historical privacy-only verification (superseded by current review)
+
 # Privacy filtering verification — 2026-10-21
 
 [PR #4](https://github.com/roshan-pandit1/AegisBrowser/pull/4), branch `feature/privacy-filtering`, implements the four privacy phases on the existing .NET 8 / WinForms / CefSharp 151.3.240 architecture. It is based on `main` at `ee2f01a` and does not include or overwrite the separate unfinished browser-compatibility work in PR #3 or its local working files.

@@ -55,7 +55,7 @@ Hostname-only list rules use an index. Generic patterns use .NET's non-backtrack
 
 Third-party classification is relative to the top-level page. The supported `domain=` restriction likewise uses the top-level hostname; this differs from engines that scope it to a nested frame's document. Unknown top-level contexts fail open for third-party-only rules. This interception is not a system-wide firewall: service-worker/cache paths, WebSockets, WebRTC and other Chromium background traffic may not have a usable browser/frame context or pass through these callbacks. The inspector is a resource-decision inspector, not a complete packet capture.
 
-Strict mode can break embedded sign-in, payment widgets, video, fonts and CDN dependencies. Add a narrowly scoped resource-domain exception, or temporarily pause for the site and reload. No automatic authentication/security-check detection or bypass is implemented. Top-level navigation, redirects and POST semantics are not rewritten by this engine. Existing popup limitations on `main` remain; the independent popup/OAuth compatibility work is in PR #3.
+Strict mode can break embedded sign-in, payment widgets, video, fonts and CDN dependencies. Add a narrowly scoped resource-domain exception, or temporarily pause for the site and reload. No automatic authentication/security-check detection or bypass is implemented. Top-level navigation, redirects and POST semantics are not rewritten by this engine. The current release review incorporates main's native popup/OAuth compatibility changes. Real-provider acceptance remains required.
 
 ## Automated verification
 

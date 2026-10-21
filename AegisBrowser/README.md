@@ -81,3 +81,7 @@ The **Privacy** toolbar button opens Standard/Strict/Custom settings, editable d
 The bundled tracking list is intentionally small. Import standard UTF-8 privacy lists to extend it; unsupported syntax is reported. This is a documented network-syntax subset, not a full EasyList/uBlock implementation. Strict mode can break third-party dependencies and embedded authentication; explicit exceptions restore compatibility without changing Chromium security settings.
 
 See [privacy filtering documentation](../docs/privacy.md) for syntax, precedence, persistence, limitations and Windows acceptance cases. Real Chromium filtering tests are built and run by the Windows workflow before publishing. Consult [BUILD-STATUS.md](../BUILD-STATUS.md) for verified results; a compiled binary alone does not establish GUI acceptance.
+
+## Portable release candidate
+
+See [Windows installation instructions](../docs/INSTALL-WINDOWS.md) and [release review gates](../docs/release-review.md). Windows CI packages `AegisBrowser-v0.1.0-rc1-win-x64-portable.zip` with a SHA-256 checksum, verifies every extracted file and smoke-tests the extracted executable. The app folder is portable; profile data remains in LocalAppData. A successful candidate build does not replace manual stable-release acceptance.
