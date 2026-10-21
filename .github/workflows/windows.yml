@@ -38,6 +38,8 @@ jobs:
             $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
+            if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
             if ($code -ne 0) { throw "Browser $phase phase exited with $code" }
             if (!(($output -join "`n") -match "PASS: \d+ browser integration checks \($phase\)")) {
               throw "Browser $phase phase did not report suite completion"
@@ -53,6 +55,7 @@ jobs:
           $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
           if ($code -ne 0) { throw "Chromium filtering tests exited with $code" }
           if (!(($output -join "`n") -match 'PASS: \d+ Chromium filtering checks')) { throw 'Chromium filtering suite did not complete' }
       - name: Browser privacy settings process restart
@@ -64,6 +67,8 @@ jobs:
             $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe $phase $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
+            if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
             if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ Chromium filtering checks')) { throw "Privacy restart $phase failed or incomplete" }
           }
       - name: Publish self-contained Windows x64 build
