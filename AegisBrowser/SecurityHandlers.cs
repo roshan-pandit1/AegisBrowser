@@ -107,6 +107,13 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
     private readonly TaskCompletionSource<bool> closeReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal Task OwnerCloseReady => closeReady.Task;
 
+    private bool ownerClosing; // Accessed only on the CEF UI thread.
+
+    private void CompleteOwnerClose()
+    {
+        if (ownerClosing && popups.IsEmpty && closeReady.TrySetResult(true)) ownerCloseReady?.Invoke();
+    }
+
     protected override bool DoClose(IWebBrowser control, IBrowser browser)
     {
         if (browser.IsPopup) return false;
@@ -114,7 +121,8 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
         // embedded host only after this native close callback has returned.
         Cef.UIThreadTaskFactory.StartNew(() =>
         {
-            if (closeReady.TrySetResult(true)) ownerCloseReady?.Invoke();
+            ownerClosing = true;
+            CompleteOwnerClose();
         });
         return true;
     }
@@ -140,8 +148,13 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
 
     protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
     {
-        if (browser.IsPopup) popups.TryRemove(browser.Identifier, out _);
-
+        if (browser.IsPopup)
+        {
+            popups.TryRemove(browser.Identifier, out _);
+            // Keep the embedded owner and its shared handler alive until all
+            // native popup close callbacks have finished.
+            Cef.UIThreadTaskFactory.StartNew(CompleteOwnerClose);
+        }
     }
 
     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,
