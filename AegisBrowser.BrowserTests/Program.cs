@@ -1,4 +1,5 @@
 using AegisBrowser;
+using AegisBrowser.Core;
 using CefSharp;
 using CefSharp.WinForms;
 using System.Net;
