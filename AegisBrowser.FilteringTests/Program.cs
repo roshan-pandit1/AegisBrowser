@@ -47,7 +47,7 @@ internal static class Program
         var config = new PrivacyConfiguration { Mode = PrivacyMode.Custom, UserRules = "/blocked.png" };
         var session = new PrivacySession(config);
         using var web = new ChromiumWebBrowser("about:blank") { Dock = DockStyle.Fill };
-        web.RequestHandler = new SafeRequests(_ => { }, Console.WriteLine, session.Evaluate,
+        web.RequestHandler = new SafeRequests(Console.WriteLine, session.Evaluate,
             (request, decision) => Console.WriteLine($"Decision: mode={session.Configuration.Mode} top={request.TopUrl} url={request.Url} type={request.Type} main={request.MainFrame} third={decision.ThirdParty} blocked={decision.Blocked} rule={decision.Rule}"));
         // Subscribe before handle creation so CEF installs its load event adapter.
         web.FrameLoadEnd += (_, _) => { };

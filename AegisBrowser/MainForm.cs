@@ -16,6 +16,7 @@ public sealed class MainForm : Form
     private readonly PrivacySession privacy;
     private readonly PrivacySettingsStore? privacyStore;
     private PrivacyForm? privacyWindow;
+    private readonly HashSet<TabPage> retiring = new();
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
     public MainForm(string profile, string? profilePath = null)
@@ -63,8 +64,9 @@ public sealed class MainForm : Form
             if (url is null) status.Text = "Enter an HTTP(S) address without credentials, or aegis:diagnostics.";
             else Current?.Load(url);
         };
+        address.Leave += (_, _) => UpdateNavigation();
         var bottom = new StatusStrip();
-        bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: deny all |"));
+        bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: ask by origin |"));
         bottom.Items.Add(status);
         Controls.Add(tabs);
         Controls.Add(bar);
@@ -72,6 +74,11 @@ public sealed class MainForm : Form
         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
         FormClosing += (_, _) => closing = true;
+        FormClosed += (_, _) =>
+        {
+            foreach (var page in retiring.ToArray()) page.Dispose();
+            retiring.Clear();
+        };
     }
 
     private static Button MakeButton(string text, Action action)
@@ -92,13 +99,28 @@ public sealed class MainForm : Form
     private void NewTab(string url)
     {
         if (closing) return;
-        var page = new TabPage("New tab");
+        var page = new TabPage("New tab") { Tag = "Loading…" };
         var browser = new ChromiumWebBrowser(url) { Dock = DockStyle.Fill };
-        void Report(string message) => Post(() => { if (tabs.SelectedTab == page) status.Text = message; });
-        void Open(string target) => Post(() => { if (!page.IsDisposed) NewTab(target); });
-        browser.PermissionHandler = new DenyPermissions(Report);
-        browser.RequestHandler = new SafeRequests(Open, Report, privacy.Evaluate);
-        browser.LifeSpanHandler = new SafePopups(Open, Report);
+        void Report(string message) => Post(() =>
+        {
+            if (page.IsDisposed) return;
+            page.Tag = message;
+            if (tabs.SelectedTab == page) status.Text = message;
+        });
+        browser.PermissionHandler = new OriginPermissions(Report);
+        browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
+        var popups = new SafePopups(Report, () => Post(() =>
+        {
+            retiring.Remove(page);
+            page.Dispose();
+        }));
+        browser.IsBrowserInitializedChanged += (_, _) => Post(() =>
+        {
+            if (retiring.Contains(page) && browser.IsBrowserInitialized)
+                browser.GetBrowserHost().CloseBrowser(true);
+        });
+        browser.LifeSpanHandler = popups;
+        page.Disposed += (_, _) => popups.ClosePopups();
         browser.DownloadHandler = new DenyDownloads(Report);
         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
@@ -110,9 +132,16 @@ public sealed class MainForm : Form
             page.Text = title.Length > 28 ? title[..28] + "…" : title;
             page.ToolTipText = title;
         });
+        browser.FrameLoadStart += (_, e) => { if (e.Frame.IsMain) Report("Loading…"); };
+        browser.FrameLoadEnd += (_, e) =>
+        {
+            if (!e.Frame.IsMain) return;
+            if (e.HttpStatusCode >= 400) Report($"HTTP {e.HttpStatusCode} from {BrowserPolicy.DisplayOrigin(e.Url)}. Reload to retry.");
+            else if (e.HttpStatusCode is >= 200 and < 400) Report("Ready");
+        };
         browser.LoadError += (_, e) =>
         {
-            if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Page failed to load: {e.ErrorCode}");
+            if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Load failed: {e.ErrorCode} at {BrowserPolicy.DisplayOrigin(e.FailedUrl)}. Reload to retry.");
         };
         page.Controls.Add(browser);
         tabs.TabPages.Add(page);
@@ -122,7 +151,9 @@ public sealed class MainForm : Form
     private void UpdateNavigation()
     {
         var browser = Current;
-        address.Text = browser?.Address ?? "";
+        // Loading events must not overwrite an address the user is typing.
+        if (!address.Focused) address.Text = browser?.Address ?? "";
+        status.Text = tabs.SelectedTab?.Tag as string ?? "Ready";
         back.Enabled = browser?.CanGoBack == true;
         forward.Enabled = browser?.CanGoForward == true;
         reload.Text = browser?.IsLoading == true ? "Stop" : "Reload";
@@ -131,8 +162,13 @@ public sealed class MainForm : Form
     private void CloseTab()
     {
         if (tabs.SelectedTab is not { } page) return;
+        var browser = Current!;
+        retiring.Add(page);
+        ((SafePopups)browser.LifeSpanHandler).ClosePopups();
         tabs.TabPages.Remove(page);
-        page.Dispose();
+        // Native creation/closure is asynchronous. Dispose the HWND only after CEF's
+        // OnBeforeClose; disposing during creation can destroy a window CEF still uses.
+        if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
         if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
     }
 

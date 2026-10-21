@@ -18,7 +18,7 @@ dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-con
 .\artifacts\win-x64\AegisBrowser.exe --profile=Personal
 ```
 
-Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 151.3.240; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The first Windows CI run restored successfully but failed compilation; local API fixes await upload and a new CI run. The workflow does not perform GUI acceptance tests. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
+Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 151.3.240; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The workflow also runs actual CEF browser integration tests and a limited published-app window smoke test; these do not replace full manual GUI acceptance. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
 
 ## Profiles
 
@@ -33,8 +33,8 @@ Profiles isolate stored browsing state, not OS users, IP addresses or hardware c
 - Ctrl+L focuses the address bar; bare hosts default to HTTPS. Explicit HTTP is supported. Embedded URL credentials and unsupported top-level schemes are rejected.
 - Ctrl+T / Ctrl+W open and close tabs; Ctrl+Tab cycles tabs. The last closed tab is replaced by diagnostics.
 - Alt+Left / Alt+Right navigate; F5 reloads; Escape stops. F12 or the DevTools button opens Chromium tools.
-- User-initiated HTTP(S) popup targets open in independent tabs. Automatic popups are blocked. Opener-dependent login flows and script-created blank popup windows may not work.
-- All CEF permission prompts and media requests are denied immediately and reported in the status bar. There are no remembered grants or allow controls in this version. Camera, microphone, screen capture and location dependent sites will not work.
+- User-initiated HTTP(S) and blank popups use native Chromium windows, preserving opener relationships, redirects, POST data and postMessage for OAuth. Automatic popups and unsupported targets are blocked. Native popup windows close when their owner tab closes. Chromium still enforces same-origin policy and COOP; identity providers that prohibit embedded browsers remain unsupported.
+- Location, notifications, camera and microphone may use Chromium's native origin-labelled consent UI when the requesting origin matches the top-level origin and is HTTPS or loopback. The app never grants a request automatically. Chromium owns consent, dismissal/navigation cancellation and any profile-scoped permission persistence. Cross-origin frames, insecure non-loopback origins, diagnostics, unknown permission types, screen capture and device pan/tilt/zoom are denied. To fully reset a disposable profile's grants and stored data, close it and remove its profile directory; no custom permission database is maintained.
 - Downloads are disabled. Invalid certificates are rejected without an override. No remote debugging port, privileged JavaScript binding, user-agent override, certificate bypass or web-security disabling switch is configured.
 
 The application preserves CefSharp/CEF defaults for Chromium security mechanisms. CefSharp is an embedded engine and does not provide all security services or sandbox guarantees of Google Chrome; this app does not claim Chrome-equivalent hardening or Safe Browsing. No additional sandbox-disabling flags are added. It has no automatic engine updater.
@@ -51,14 +51,28 @@ On a Windows machine, also verify:
 
 1. Launch two different profiles; set persistent cookies/localStorage in DevTools on the same test origin. Confirm data differs and survives a restart. A second process for the same profile must fail clearly.
 2. Browse two pages and use back/forward, reload/stop, close tabs during loading and close the window with multiple tabs. Exercise shortcuts while web content has focus.
-3. Request geolocation and camera from a secure test page: both must reject. Test a notification prompt, automatic popup, user-clicked web popup and a download.
+3. Request supported permissions on a secure same-origin page: verify the native prompt names the correct origin, dismiss/deny it, then separately test explicit allow using test hardware. Cross-origin/insecure/unsupported requests must reject. Test navigation/closure while a prompt is visible. Never treat a missing-device/OS error as proof of browser policy.
 4. Visit a controlled invalid-certificate endpoint; navigation must fail. Confirm ordinary valid HTTPS still loads.
 5. Disconnect networking and reload diagnostics; check the DevTools network panel for no outbound diagnostics requests.
 6. Run the published executable on a clean Windows x64 machine with the VC++ runtime, and verify subprocess startup and DevTools.
 
-Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. The first remote Windows CI run also failed compilation; corrections are prepared locally, but the GitHub integration rejected writes with HTTP 403. No release artifact has been produced. See BUILD-STATUS.md for the run link, compiler diagnostics and pending fixes.
+Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. Windows CI is the source of executable verification. See BUILD-STATUS.md for exact tested revisions and results; local compilation is unavailable.
 
 Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/151.3.240), [CefSharp project](https://github.com/cefsharp/CefSharp).
+
+## Browser integration suite
+
+On Windows, use a fresh root for each complete write/read pair:
+
+```powershell
+dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+$root = Join-Path $env:TEMP ('aegis-tests-' + [guid]::NewGuid().ToString('N'))
+dotnet run --project AegisBrowser.BrowserTests -c Release --no-build -- write $root
+# Run read only if write passed; it starts a separate CEF process over the same caches.
+dotnet run --project AegisBrowser.BrowserTests -c Release --no-build -- read $root
+```
+
+The test-only WinForms executable uses the production handlers and in-memory HTTPS fixtures. It checks real cookies/localStorage across contexts, browsers and process restarts, OAuth-style redirects/opener messaging, rapid tab disposal and renderer recovery. It invokes CDP inside the test process to simulate user activation and crash a renderer; no network debugging listener or security bypass is enabled. Real-provider OAuth and interactive grant/deny UX remain manual checks.
 
 ## Privacy filtering
 

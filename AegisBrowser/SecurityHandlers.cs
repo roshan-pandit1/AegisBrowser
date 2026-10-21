@@ -4,12 +4,22 @@ using CefSharp.Handler;
 
 namespace AegisBrowser;
 
-// No asynchronous permission grants to survive navigation or closure: all requests fail closed.
-internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
+// Chromium owns the origin-labelled consent UI and cancellation lifecycle. We never
+// manufacture a grant or persist an application-side permission decision.
+internal sealed class OriginPermissions(Action<string> report) : PermissionHandler
 {
     protected override bool OnShowPermissionPrompt(IWebBrowser control, IBrowser browser, ulong promptId,
         string origin, PermissionRequestType permissions, IPermissionPromptCallback callback)
     {
+        const PermissionRequestType supported = PermissionRequestType.Geolocation | PermissionRequestType.Notifications;
+        using var main = browser.MainFrame;
+        if (permissions != PermissionRequestType.None && (permissions & ~supported) == 0
+            && BrowserPolicy.CanPromptPermission(origin, main.Url))
+        {
+            callback.Dispose();
+            report($"Permission decision requested for {BrowserPolicy.DisplayOrigin(origin)}: {permissions}");
+            return false; // Chrome runtime displays its native, origin-scoped permission UI.
+        }
         using (callback) callback.Continue(PermissionRequestResult.Deny);
         report($"Permission blocked: {permissions} ({origin})");
         return true;
@@ -18,14 +28,23 @@ internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
     protected override bool OnRequestMediaAccessPermission(IWebBrowser control, IBrowser browser, IFrame frame,
         string origin, MediaAccessPermissionType permissions, IMediaAccessCallback callback)
     {
+        const MediaAccessPermissionType supported = MediaAccessPermissionType.AudioCapture | MediaAccessPermissionType.VideoCapture;
+        using var main = browser.MainFrame;
+        if (permissions != MediaAccessPermissionType.None && (permissions & ~supported) == 0
+            && BrowserPolicy.CanPromptPermission(origin, main.Url)
+            && BrowserPolicy.CanPromptPermission(frame.Url, main.Url))
+        {
+            callback.Dispose();
+            report($"Media decision requested for {BrowserPolicy.DisplayOrigin(origin)}: {permissions}");
+            return false; // Native device consent. No blanket capture grant or screen-selection bypass.
+        }
         using (callback) callback.Cancel();
         report($"Media access blocked ({origin})");
         return true;
     }
 }
 
-internal sealed class SafeRequests(Action<string> openTab, Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null,
-    Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
+internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null, Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
 {
     // During document replacement CEF can expose an empty MainFrame.Url to early
     // subresource callbacks. Keep only URL strings, never native frame wrappers.
@@ -62,8 +81,14 @@ internal sealed class SafeRequests(Action<string> openTab, Action<string> report
     protected override bool OnOpenUrlFromTab(IWebBrowser control, IBrowser browser, IFrame frame,
         string url, WindowOpenDisposition disposition, bool userGesture)
     {
-        if (userGesture && BrowserPolicy.IsWebUrl(url)) openTab(url);
-        return true;
+        // Preserve CEF's disposition/opener handling instead of synthesizing an unrelated tab.
+        return !BrowserPolicy.IsWebUrl(url) && url != "about:blank";
+    }
+
+    protected override void OnRenderProcessTerminated(IWebBrowser control, IBrowser browser,
+        CefTerminationStatus status, int errorCode, string errorMessage)
+    {
+        report($"Renderer stopped: {status} ({errorCode}). Reload to recover; unsaved edits may be lost.");
     }
 
     protected override bool OnCertificateError(IWebBrowser control, IBrowser browser, CefErrorCode code,
@@ -75,16 +100,46 @@ internal sealed class SafeRequests(Action<string> openTab, Action<string> report
     }
 }
 
-internal sealed class SafePopups(Action<string> openTab, Action<string> report) : LifeSpanHandler
+internal sealed class SafePopups(Action<string> report, Action? ownerClosed = null) : LifeSpanHandler
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
+    private volatile bool closing;
+    internal int PopupCount => popups.Count;
+
+    internal void ClosePopups()
+    {
+        closing = true;
+        Cef.UIThreadTaskFactory.StartNew(() =>
+        {
+            foreach (var popup in popups.Values)
+                if (!popup.IsDisposed) popup.GetHost().CloseBrowser(true);
+        });
+    }
+
+    protected override void OnAfterCreated(IWebBrowser control, IBrowser browser)
+    {
+        if (!browser.IsPopup) return;
+        popups[browser.Identifier] = browser;
+        if (closing) browser.GetHost().CloseBrowser(true);
+    }
+
+    protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
+    {
+        if (browser.IsPopup) popups.TryRemove(browser.Identifier, out _);
+        else ownerClosed?.Invoke();
+    }
+
     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,
         string targetUrl, string targetFrameName, WindowOpenDisposition disposition, bool userGesture,
         IPopupFeatures features, IWindowInfo windowInfo, IBrowserSettings settings,
         ref bool noJavascriptAccess, out IWebBrowser newBrowser)
     {
         newBrowser = null!;
-        if (userGesture && BrowserPolicy.IsWebUrl(targetUrl)) openTab(targetUrl);
-        else report("Popup blocked.");
+        // Keep CEF's original browsing context: window.opener, POST data, named-window
+        // reuse and postMessage are required by OAuth. CEF still enforces COOP/SOP.
+        if (!closing && userGesture && (string.IsNullOrEmpty(targetUrl) || targetUrl == "about:blank"
+            || BrowserPolicy.IsWebUrl(targetUrl))) return false;
+        report("Popup blocked: a user gesture and a web destination are required.");
         return true;
     }
 }
