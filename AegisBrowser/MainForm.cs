@@ -189,13 +189,10 @@ public sealed class MainForm : Form
     {
         if (tabs.SelectedTab is not { } page) return;
         var browser = Current!;
-        retiring.Add(page);
+        if (!retiring.Add(page)) return;
         ((SafePopups)browser.LifeSpanHandler).ClosePopups();
-        tabs.TabPages.Remove(page);
-        // Native creation/closure is asynchronous. Dispose the HWND only after CEF's
-        // DoClose readiness; disposing during creation can destroy a window CEF still uses.
+        // Keep the TabPage parent HWND alive until CEF reports DoClose readiness; disposing during creation can destroy a window CEF still uses.
         if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
-        if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>

@@ -281,6 +281,7 @@ internal static class Program
         Check(address.Text == "editing.example/path", "loading does not overwrite an address being typed");
         await LoadReady(navigating, BrowserPolicy.DiagnosticsUrl);
         for (var i = 0; i < 5; i++) { Button("+").PerformClick(); Button("×").PerformClick(); }
+        await Wait(() => tabs.TabCount == 1, "rapid native tab closure");
         Check(tabs.TabCount == 1, "rapid tab creation and disposal during loading");
         Button("+").PerformClick(); await Ready(Current());
         var damaged = Current();
@@ -299,8 +300,11 @@ internal static class Program
         Check(await Js(owner, "window.blankOpener") == "True", "user-initiated about:blank preserves opener");
         Button("×").PerformClick();
         await Wait(() => ownerPopups.PopupCount == 0, "owner tab closes its native popup");
+        await Wait(() => tabs.TabCount == 1, "owner tab removed after native close readiness");
         Check(true, "popup lifecycle ends with owner tab");
+        var last = Current();
         Button("×").PerformClick();
+        await Wait(() => tabs.TabCount == 1 && Current() != last, "last tab replacement created");
         await Ready(Current()); Check(tabs.TabCount == 1, "last-tab replacement");
         form.Close();
         await Wait(() => form.IsDisposed, "asynchronous window shutdown");

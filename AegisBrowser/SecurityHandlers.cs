@@ -114,8 +114,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
         // embedded host only after this native close callback has returned.
         Cef.UIThreadTaskFactory.StartNew(() =>
         {
-            closeReady.TrySetResult(true);
-            ownerCloseReady?.Invoke();
+            if (closeReady.TrySetResult(true)) ownerCloseReady?.Invoke();
         });
         return true;
     }
