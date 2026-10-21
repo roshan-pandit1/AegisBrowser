@@ -53,10 +53,14 @@ internal static class Program
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine(ex);
-                    var log = Path.Combine(root, "cef-test.log");
-                    if (File.Exists(log)) Console.Error.WriteLine(File.ReadAllText(log));
                     result = 1;
+                    Console.Error.WriteLine(ex);
+                    try
+                    {
+                        var log = Path.Combine(root, "cef-test.log");
+                        if (File.Exists(log)) Console.Error.WriteLine(File.ReadAllText(log));
+                    }
+                    catch (IOException logError) { Console.Error.WriteLine("Log unavailable: " + logError.Message); }
                 }
                 finally { host.Close(); }
             };
@@ -105,6 +109,20 @@ internal static class Program
         }
         // A completed JS round trip also proves the live renderer is responsive.
         await Js(browser, "document.readyState");
+    }
+
+    private static async Task ReloadReady(ChromiumWebBrowser browser)
+    {
+        var loaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<FrameLoadEndEventArgs> handler = (_, e) => { if (e.Frame.IsMain) loaded.TrySetResult(true); };
+        browser.FrameLoadEnd += handler;
+        try
+        {
+            browser.Reload();
+            await loaded.Task.WaitAsync(TimeSpan.FromSeconds(25));
+            await Ready(browser);
+        }
+        finally { browser.FrameLoadEnd -= handler; }
     }
 
     private static void Observe(ChromiumWebBrowser web)
@@ -233,9 +251,9 @@ internal static class Program
         await Cef.UIThreadTaskFactory.StartNew(() => damaged.GetBrowserHost().ExecuteDevToolsMethod(0, "Page.crash", new Dictionary<string, object>()));
         await Wait(() => status.Text?.Contains("Renderer stopped") == true, "renderer termination diagnostic");
         Check(true, "renderer crash reports recoverable per-tab diagnostic");
-        damaged.Reload(); await Ready(damaged);
+        await ReloadReady(damaged);
         Check(await Js(damaged, "document.title") == "Aegis · Local diagnostics", "renderer reload recovery");
-        tabs.SelectedIndex = 0; Current().Reload(); await Ready(Current());
+        tabs.SelectedIndex = 0; await ReloadReady(Current());
         Check(await Js(Current(), "document.title") == "Aegis · Local diagnostics", "remaining tab can recover even if Chromium shared its renderer");
         var owner = Current();
         var ownerPopups = (SafePopups)owner.LifeSpanHandler;

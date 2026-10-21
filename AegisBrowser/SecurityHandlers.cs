@@ -76,7 +76,7 @@ internal sealed class SafeRequests(Action<string> report) : RequestHandler
     }
 }
 
-internal sealed class SafePopups(Action<string> report) : LifeSpanHandler
+internal sealed class SafePopups(Action<string> report, Action? ownerClosed = null) : LifeSpanHandler
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
     private volatile bool closing;
@@ -99,8 +99,11 @@ internal sealed class SafePopups(Action<string> report) : LifeSpanHandler
         if (closing) browser.GetHost().CloseBrowser(true);
     }
 
-    protected override void OnBeforeClose(IWebBrowser control, IBrowser browser) =>
-        popups.TryRemove(browser.Identifier, out _);
+    protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
+    {
+        if (browser.IsPopup) popups.TryRemove(browser.Identifier, out _);
+        else ownerClosed?.Invoke();
+    }
 
     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,
         string targetUrl, string targetFrameName, WindowOpenDisposition disposition, bool userGesture,

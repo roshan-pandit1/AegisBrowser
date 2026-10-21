@@ -13,6 +13,7 @@ public sealed class MainForm : Form
     private readonly Button forward;
     private readonly Button reload;
     private bool closing;
+    private readonly HashSet<TabPage> retiring = new();
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
     public MainForm(string profile)
@@ -54,6 +55,11 @@ public sealed class MainForm : Form
         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
         FormClosing += (_, _) => closing = true;
+        FormClosed += (_, _) =>
+        {
+            foreach (var page in retiring.ToArray()) page.Dispose();
+            retiring.Clear();
+        };
     }
 
     private static Button MakeButton(string text, Action action)
@@ -84,7 +90,16 @@ public sealed class MainForm : Form
         });
         browser.PermissionHandler = new OriginPermissions(Report);
         browser.RequestHandler = new SafeRequests(Report);
-        var popups = new SafePopups(Report);
+        var popups = new SafePopups(Report, () => Post(() =>
+        {
+            retiring.Remove(page);
+            page.Dispose();
+        }));
+        browser.IsBrowserInitializedChanged += (_, _) => Post(() =>
+        {
+            if (retiring.Contains(page) && browser.IsBrowserInitialized)
+                browser.GetBrowserHost().CloseBrowser(true);
+        });
         browser.LifeSpanHandler = popups;
         page.Disposed += (_, _) => popups.ClosePopups();
         browser.DownloadHandler = new DenyDownloads(Report);
@@ -128,8 +143,13 @@ public sealed class MainForm : Form
     private void CloseTab()
     {
         if (tabs.SelectedTab is not { } page) return;
+        var browser = Current!;
+        retiring.Add(page);
+        ((SafePopups)browser.LifeSpanHandler).ClosePopups();
         tabs.TabPages.Remove(page);
-        page.Dispose();
+        // Native creation/closure is asynchronous. Dispose the HWND only after CEF's
+        // OnBeforeClose; disposing during creation can destroy a window CEF still uses.
+        if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
         if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
     }
 
