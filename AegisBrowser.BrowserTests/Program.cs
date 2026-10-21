@@ -169,6 +169,8 @@ internal static class Program
         using var b = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-b") }, Handler());
         using var first = new ChromiumWebBrowser(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Left, Width = 450 };
         using var second = new ChromiumWebBrowser(Origin, requestContext: b) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
+        host.FormClosing += (_, e) => Console.WriteLine("HOST CLOSE " + e.CloseReason);
+        second.Disposed += (_, _) => Console.WriteLine("SECOND DISPOSED");
         first.RequestHandler = new SafeRequests(Console.WriteLine);
         first.PermissionHandler = new OriginPermissions(Console.WriteLine);
         var popupHandler = new SafePopups(Console.WriteLine);
@@ -204,8 +206,11 @@ internal static class Program
             using var flushA = new Completion(); using var flushB = new Completion();
             if (!cookiesA.FlushStore(flushA) || !cookiesB.FlushStore(flushB)) throw new Exception("FlushStore refused");
             await Task.WhenAll(flushA.Done.Task, flushB.Done.Task).WaitAsync(TimeSpan.FromSeconds(10));
-            popupHandler.ClosePopups();
+            Console.WriteLine("Before popup drain: host=" + host.IsDisposed + " second=" + second.IsDisposed + " popups=" + popupHandler.PopupCount);
+            await Wait(() => popupHandler.PopupCount == 0, "OAuth popup self-close completes");
+            Console.WriteLine("Before closing shared browser: host=" + host.IsDisposed + " second=" + second.IsDisposed);
             await CloseWeb(same);
+            Console.WriteLine("After closing shared browser: host=" + host.IsDisposed + " second=" + second.IsDisposed);
         }
         Check(await Js(first, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=A|A", phase + " profile A persistence");
         Check(await Js(second, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=B|B", phase + " profile B persistence");
