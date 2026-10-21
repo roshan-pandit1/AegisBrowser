@@ -4,7 +4,7 @@ using CefSharp.Handler;
 
 namespace AegisBrowser;
 
-internal sealed class FilteringResourceHandler(Func<RequestFilter> filter, string? topUrl,
+internal sealed class FilteringResourceHandler(Func<NetworkRequest, FilterDecision> filter, string? topUrl,
     Action<NetworkRequest, FilterDecision>? observe = null) : ResourceRequestHandler
 {
     private static string Type(ResourceType type) => type.ToString() switch
@@ -17,7 +17,7 @@ internal sealed class FilteringResourceHandler(Func<RequestFilter> filter, strin
         IFrame frame, IRequest request, IRequestCallback callback)
     {
         var input = new NetworkRequest(request.Url, topUrl, Type(request.ResourceType), request.ResourceType == ResourceType.MainFrame);
-        var decision = filter().Evaluate(input);
+        var decision = filter(input);
         observe?.Invoke(input, decision);
         // Synchronous decision; never retain a CEF request, frame or callback.
         return decision.Blocked ? CefReturnValue.Cancel : CefReturnValue.Continue;

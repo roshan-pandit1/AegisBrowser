@@ -48,6 +48,20 @@ internal static class PrivacyTests
         Check(!new RequestFilter(config with { Mode = PrivacyMode.Custom }).Evaluate(tracking).Blocked, "Custom list opt-in");
         Check(new RequestFilter(config with { Mode = PrivacyMode.Custom, UseListsInCustom = true }).Evaluate(tracking).Blocked, "Custom enabled list");
         Check(new RequestFilter(config with { Mode = PrivacyMode.Custom, UserRules = "||cdn.test^" }).Evaluate(cdn).Blocked, "Custom user rules");
+        var session = new PrivacySession(config with { Mode = PrivacyMode.Strict });
+        Check(session.Evaluate(cdn).Blocked, "session policy wired");
+        session.Paused = true;
+        Check(!session.Evaluate(cdn).Blocked, "temporary pause");
+        session.Paused = false;
+        Check(session.Evaluate(cdn).Blocked, "resume filtering");
+        for (var i = 0; i < 600; i++) session.Evaluate(cdn with { Url = "https://cdn.test/secret?token=secret" });
+        var snapshot = session.Snapshot();
+        Check(snapshot.Blocked == 602 && snapshot.Allowed == 1 && snapshot.Requests.Length == 500, "bounded history and counters");
+        Check(snapshot.Requests.All(r => !r.Destination.Contains("secret")), "inspector does not retain URL secrets");
+        session.ClearHistory();
+        Check(session.Snapshot().Allowed == 0 && session.Snapshot().Blocked == 0 && session.Snapshot().Requests.Length == 0, "clear inspector");
+        session.Apply(config with { AllowedDomains = ["cdn.test"], Mode = PrivacyMode.Strict });
+        Check(!session.Evaluate(cdn).Blocked, "live policy replacement");
         Console.WriteLine($"PASS: {count} privacy checks");
     }
 }

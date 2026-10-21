@@ -24,7 +24,7 @@ internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
     }
 }
 
-internal sealed class SafeRequests(Action<string> openTab, Action<string> report, Func<RequestFilter>? filter = null,
+internal sealed class SafeRequests(Action<string> openTab, Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null,
     Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
 {
     protected override IResourceRequestHandler GetResourceRequestHandler(IWebBrowser control, IBrowser browser,

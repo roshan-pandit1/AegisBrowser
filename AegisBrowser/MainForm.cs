@@ -13,6 +13,8 @@ public sealed class MainForm : Form
     private readonly Button forward;
     private readonly Button reload;
     private bool closing;
+    private readonly PrivacySession privacy = new();
+    private PrivacyForm? privacyWindow;
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
     public MainForm(string profile)
@@ -21,8 +23,8 @@ public sealed class MainForm : Form
         Width = 1250;
         Height = 850;
         MinimumSize = new Size(750, 450);
-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 8 };
-        for (var i = 0; i < 8; i++)
+        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 9 };
+        for (var i = 0; i < 9; i++)
             bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
                 i == 3 ? 100 : i >= 6 ? 100 : 48));
         back = MakeButton("←", () => Current?.Back());
@@ -36,6 +38,12 @@ public sealed class MainForm : Form
         bar.Controls.Add(MakeButton("×", CloseTab), 5, 0);
         bar.Controls.Add(MakeButton("Diagnostics", () => NewTab(BrowserPolicy.DiagnosticsUrl)), 6, 0);
         bar.Controls.Add(MakeButton("DevTools", () => Current?.ShowDevTools()), 7, 0);
+        bar.Controls.Add(MakeButton("Privacy", () =>
+        {
+            if (privacyWindow is null || privacyWindow.IsDisposed)
+                privacyWindow = new PrivacyForm(privacy, Current?.Address);
+            privacyWindow.Show(this); privacyWindow.BringToFront();
+        }), 8, 0);
         address.KeyDown += (_, e) =>
         {
             if (e.KeyCode != Keys.Enter) return;
