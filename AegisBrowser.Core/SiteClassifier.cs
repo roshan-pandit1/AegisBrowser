@@ -34,7 +34,7 @@ public sealed class SiteClassifier
     }
     public static string? Host(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var uri)
         && uri.Scheme is "http" or "https" ? NormalizeHost(uri.IdnHost) : null;
-    public static bool DomainMatches(string host, string domain) => host == domain || host.EndsWith("." + domain, StringComparison.Ordinal);
+    public static bool DomainMatches(string host, string domain) => host == domain || (!IPAddress.TryParse(host, out _) && host.EndsWith("." + domain, StringComparison.Ordinal));
     public string Site(string host)
     {
         host = NormalizeHost(host);

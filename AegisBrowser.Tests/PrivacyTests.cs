@@ -99,6 +99,14 @@ internal static class PrivacyTests
             Check(fresh.Snapshot().Allowed + fresh.Snapshot().Blocked == 1000, "concurrent settings and request accounting");
         }
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+        Check(!SiteClassifier.DomainMatches("127.0.0.1", "0.0.1"), "IP hosts are exact matches");
+        var optionsOnly = new RequestFilter(new NetworkFilterList("$third-party,image"));
+        Check(optionsOnly.Evaluate(cdn with { Type = "image" }).Blocked, "ABP options-only pattern");
+        Check(new NetworkFilterList("@@/regex/\n||tracker.test^$unknown").Unsupported.Count == 2, "unsupported exception regex rejected");
+        var large = new NetworkFilterList(string.Join('\n', Enumerable.Range(0, 10000).Select(i => "||tracker" + i + ".test^")));
+        Check(new RequestFilter(large).Evaluate(cdn with { Url = "https://tracker9999.test/pixel" }).Blocked, "indexed large hostname list");
+        Check(new RequestFilter(new NetworkFilterList("/blocked.png")).Evaluate(cdn with { Url = "https://cdn.test/blocked.png" }).Blocked,
+            "path rule is not mistaken for regex literal");
         Console.WriteLine($"PASS: {count} privacy checks");
     }
 }

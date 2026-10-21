@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace AegisBrowser.Core;
@@ -8,9 +9,11 @@ public sealed record FilterDecision(bool Blocked, bool? ThirdParty, string Rule)
 /// <summary>Supported ABP network syntax only. Unsupported options reject the entire rule.</summary>
 public sealed class NetworkFilterList
 {
-    private sealed record Rule(string Text, bool Allow, Regex Pattern, bool? ThirdParty,
+    private sealed record Rule(string Text, bool Allow, Regex? Pattern, string? Host, bool? ThirdParty,
         string[] Domains, string[] Types, bool MatchCase);
     private readonly Rule[] rules;
+    private readonly Rule[] generic;
+    private readonly Dictionary<string, Rule[]> byHost;
     public IReadOnlyList<string> Unsupported { get; }
     public int RuleCount => rules.Length;
     private static readonly HashSet<string> ResourceTypes = new(["script", "image", "stylesheet", "font", "media", "xmlhttprequest", "subdocument", "other", "ping", "websocket"], StringComparer.Ordinal);
@@ -27,14 +30,17 @@ public sealed class NetworkFilterList
             else accepted.Add(rule!);
         }
         rules = accepted.ToArray(); Unsupported = unsupported.AsReadOnly();
+        generic = rules.Where(r => r.Host is null).ToArray();
+        byHost = rules.Where(r => r.Host is not null).GroupBy(r => r.Host!).ToDictionary(g => g.Key, g => g.ToArray());
     }
     private static bool TryParse(string text, out Rule? rule)
     {
         rule = null;
-        if (text.Length > 2048 || text.Contains('#') || text.StartsWith('/') || text.Contains("$redirect")) return false;
+        if (text.Length > 2048 || text.Contains('#') || text.Contains("$redirect")) return false;
         var allow = text.StartsWith("@@");
         var parts = (allow ? text[2..] : text).Split('$');
-        if (parts.Length > 2 || parts[0].Length == 0) return false;
+        if (parts.Length > 2 || (parts[0].Length > 1 && parts[0].StartsWith('/') && parts[0].EndsWith('/'))) return false;
+        if (parts[0].Length == 0) { if (parts.Length == 1) return false; parts[0] = "*"; }
         bool? thirdParty = null; bool matchCase = false;
         var domains = Array.Empty<string>(); var types = new List<string>();
         if (parts.Length == 2)
@@ -63,9 +69,14 @@ public sealed class NetworkFilterList
         var expression = prefix + Regex.Escape(pattern).Replace(@"\*", ".*").Replace(@"\^", @"(?:[^a-zA-Z0-9_\-.%]|$)") + suffix;
         try
         {
-            var regex = new Regex(expression, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking
+            string? host = null;
+            if (prefix.StartsWith("^https") && suffix.Length == 0 && pattern.EndsWith('^'))
+            {
+                try { host = ValidateDomain(pattern[..^1]); } catch (ArgumentException) { }
+            }
+            var regex = host is not null ? null : new Regex(expression, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking
                 | (matchCase ? RegexOptions.None : RegexOptions.IgnoreCase), TimeSpan.FromMilliseconds(50));
-            rule = new(text, allow, regex, thirdParty, domains, types.ToArray(), matchCase);
+            rule = new(text, allow, regex, host, thirdParty, domains, types.ToArray(), matchCase);
             return true;
         }
         catch (ArgumentException) { return false; }
@@ -79,8 +90,26 @@ public sealed class NetworkFilterList
     public string? Match(NetworkRequest request, bool? thirdParty, bool allow)
     {
         var top = SiteClassifier.Host(request.TopUrl);
-        foreach (var rule in rules)
+        var started = Stopwatch.GetTimestamp();
+        var host = SiteClassifier.Host(request.Url);
+        IEnumerable<Rule> Candidates()
         {
+            if (host is not null)
+            {
+                var part = host;
+                while (true)
+                {
+                    if (byHost.TryGetValue(part, out var matches)) foreach (var candidate in matches) yield return candidate;
+                    var dot = part.IndexOf('.');
+                    if (dot < 0) break;
+                    part = part[(dot + 1)..];
+                }
+            }
+            foreach (var candidate in generic) yield return candidate;
+        }
+        foreach (var rule in Candidates())
+        {
+            if (Stopwatch.GetElapsedTime(started).TotalMilliseconds > 25) throw new FilterBudgetExceededException();
             if (rule.Allow != allow || (rule.ThirdParty.HasValue && thirdParty != rule.ThirdParty)) continue;
             if (rule.Domains.Length > 0)
             {
@@ -90,8 +119,8 @@ public sealed class NetworkFilterList
             }
             if (rule.Types.Contains("~" + request.Type)) continue;
             if (rule.Types.Any(t => !t.StartsWith('~')) && !rule.Types.Contains(request.Type)) continue;
-            try { if (rule.Pattern.IsMatch(request.Url)) return rule.Text; }
-            catch (RegexMatchTimeoutException) { /* An expensive rule must not stall CEF's IO thread. */ }
+            if (rule.Host is not null ? host is not null && SiteClassifier.DomainMatches(host, rule.Host)
+                : rule.Pattern!.IsMatch(request.Url)) return rule.Text;
         }
         return null;
     }
@@ -123,6 +152,12 @@ public sealed class RequestFilter
     }
     public FilterDecision Evaluate(NetworkRequest request)
     {
+        try { return EvaluateCore(request); }
+        catch (Exception ex) when (ex is FilterBudgetExceededException or RegexMatchTimeoutException)
+        { return new(false, SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl), "Filter evaluation budget exceeded: allowed"); }
+    }
+    private FilterDecision EvaluateCore(NetworkRequest request)
+    {
         var third = SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl);
         FilterDecision Result(bool block, string rule) => new(block, third, rule);
         var host = SiteClassifier.Host(request.Url);
@@ -139,3 +174,5 @@ public sealed class RequestFilter
         return Result(false, third is null ? "Unknown document site: allowed" : "No matching rule");
     }
 }
+
+internal sealed class FilterBudgetExceededException : Exception { }

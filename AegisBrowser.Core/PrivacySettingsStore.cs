@@ -35,7 +35,9 @@ public sealed class PrivacySettingsStore(string profileDirectory)
             throw new ArgumentException("Combined lists exceed 8 million characters.");
         if (configuration.BlockedDomains.Concat(configuration.AllowedDomains).Concat(configuration.SiteExceptions).Any(d => d is null))
             throw new ArgumentException("Domain rules cannot be null.");
-        _ = new RequestFilter(configuration);
+        if (!Enum.IsDefined(configuration.Mode)) throw new ArgumentException("Unknown privacy mode.");
+        foreach (var domain in configuration.BlockedDomains.Concat(configuration.AllowedDomains).Concat(configuration.SiteExceptions))
+            NetworkFilterList.ValidateDomain(domain);
     }
     public void Save(PrivacyConfiguration configuration)
     {
