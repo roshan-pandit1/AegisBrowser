@@ -13,6 +13,7 @@ public sealed class MainForm : Form
     private readonly Button forward;
     private readonly Button reload;
     private bool closing;
+    private bool closeComplete;
     private readonly PrivacySession privacy;
     private readonly PrivacySettingsStore? privacyStore;
     private PrivacyForm? privacyWindow;
@@ -73,7 +74,22 @@ public sealed class MainForm : Form
         Controls.Add(bottom);
         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
-        FormClosing += (_, _) => closing = true;
+        FormClosing += (_, e) =>
+        {
+            if (closeComplete) return;
+            e.Cancel = true;
+            if (closing) return;
+            closing = true;
+            foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
+            {
+                retiring.Add(page);
+                var web = page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
+                if (web is null || web.IsDisposed) { retiring.Remove(page); continue; }
+                ((SafePopups)web.LifeSpanHandler).ClosePopups();
+                if (web.IsBrowserInitialized) web.GetBrowserHost().CloseBrowser(true);
+            }
+            if (retiring.Count == 0) { closeComplete = true; BeginInvoke((Action)Close); }
+        };
         FormClosed += (_, _) =>
         {
             foreach (var page in retiring.ToArray()) page.Dispose();
@@ -96,6 +112,13 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { /* Handle destroyed during shutdown. */ }
     }
 
+    private void PostLifetime(Action action)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke((Action)(() => { if (!IsDisposed) action(); })); }
+        catch (InvalidOperationException) { }
+    }
+
     private void NewTab(string url)
     {
         if (closing) return;
@@ -109,12 +132,15 @@ public sealed class MainForm : Form
         });
         browser.PermissionHandler = new OriginPermissions(Report);
         browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
-        var popups = new SafePopups(Report, () => Post(() =>
+        var popups = new SafePopups(Report, () => PostLifetime(() =>
         {
             retiring.Remove(page);
+            tabs.TabPages.Remove(page);
             page.Dispose();
+            if (closing && retiring.Count == 0) { closeComplete = true; Close(); }
+            else if (!closing && tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
         }));
-        browser.IsBrowserInitializedChanged += (_, _) => Post(() =>
+        browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
         {
             if (retiring.Contains(page) && browser.IsBrowserInitialized)
                 browser.GetBrowserHost().CloseBrowser(true);
@@ -167,7 +193,7 @@ public sealed class MainForm : Form
         ((SafePopups)browser.LifeSpanHandler).ClosePopups();
         tabs.TabPages.Remove(page);
         // Native creation/closure is asynchronous. Dispose the HWND only after CEF's
-        // OnBeforeClose; disposing during creation can destroy a window CEF still uses.
+        // DoClose readiness; disposing during creation can destroy a window CEF still uses.
         if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
         if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
     }

@@ -100,10 +100,26 @@ internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, F
     }
 }
 
-internal sealed class SafePopups(Action<string> report, Action? ownerClosed = null) : LifeSpanHandler
+internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null) : LifeSpanHandler
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
     private volatile bool closing;
+    private readonly TaskCompletionSource<bool> closeReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task OwnerCloseReady => closeReady.Task;
+
+    protected override bool DoClose(IWebBrowser control, IBrowser browser)
+    {
+        if (browser.IsPopup) return false;
+        // Suppress CEF's WM_CLOSE to the top-level WinForms owner. Release the
+        // embedded host only after this native close callback has returned.
+        Cef.UIThreadTaskFactory.StartNew(() =>
+        {
+            closeReady.TrySetResult(true);
+            ownerCloseReady?.Invoke();
+        });
+        return true;
+    }
+
     internal int PopupCount => popups.Count;
 
     internal void ClosePopups()
@@ -126,7 +142,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerClosed = nu
     protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
     {
         if (browser.IsPopup) popups.TryRemove(browser.Identifier, out _);
-        else ownerClosed?.Invoke();
+
     }
 
     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,

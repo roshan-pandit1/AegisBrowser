@@ -34,6 +34,7 @@ internal static class Program
                 Console.WriteLine(dependency + ": " + File.Exists(dependencyPath));
                 if (dependency.EndsWith(".json") && File.Exists(dependencyPath)) Console.WriteLine(File.ReadAllText(dependencyPath));
             }
+            Cef.EnableWaitForBrowsersToClose();
             initialized = Cef.Initialize(new CefSettings
             {
                 RootCachePath = root, CachePath = Path.Combine(root, "global"),
@@ -69,7 +70,7 @@ internal static class Program
             Application.Run(host);
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
-        finally { if (initialized) Cef.Shutdown(); }
+        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
         return result;
     }
 
@@ -138,10 +139,21 @@ internal static class Program
 
     private static void Observe(ChromiumWebBrowser web)
     {
+        if (web.LifeSpanHandler is not SafePopups) web.LifeSpanHandler = new SafePopups(Console.WriteLine);
         // Subscribe before creating the handle, ensuring CEF's load handler is installed.
         web.FrameLoadEnd += (_, e) => { if (e.Frame.IsMain) Console.WriteLine($"Loaded {e.Url}: HTTP {e.HttpStatusCode}"); };
         web.LoadError += (_, e) => Console.WriteLine($"Load error {e.ErrorCode}: {e.FailedUrl}");
         web.IsBrowserInitializedChanged += (_, _) => Console.WriteLine($"Initialized: {web.IsBrowserInitialized}");
+    }
+
+    private static async Task CloseWeb(ChromiumWebBrowser web)
+    {
+        if (web.IsDisposed) return;
+        var life = (SafePopups)web.LifeSpanHandler;
+        life.ClosePopups();
+        web.GetBrowserHost().CloseBrowser(true);
+        await life.OwnerCloseReady.WaitAsync(TimeSpan.FromSeconds(10));
+        web.Dispose();
     }
 
     private static async Task Storage(Form host, string root, string phase)
@@ -157,8 +169,6 @@ internal static class Program
         using var b = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-b") }, Handler());
         using var first = new ChromiumWebBrowser(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Left, Width = 450 };
         using var second = new ChromiumWebBrowser(Origin, requestContext: b) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
-        second.Disposed += (_, _) => Console.Error.WriteLine("SECOND DISPOSED: " + Environment.StackTrace);
-        host.FormClosing += (_, e) => Console.Error.WriteLine("HOST CLOSING: " + e.CloseReason + " " + Environment.StackTrace);
         first.RequestHandler = new SafeRequests(Console.WriteLine);
         first.PermissionHandler = new OriginPermissions(Console.WriteLine);
         var popupHandler = new SafePopups(Console.WriteLine);
@@ -195,9 +205,11 @@ internal static class Program
             if (!cookiesA.FlushStore(flushA) || !cookiesB.FlushStore(flushB)) throw new Exception("FlushStore refused");
             await Task.WhenAll(flushA.Done.Task, flushB.Done.Task).WaitAsync(TimeSpan.FromSeconds(10));
             popupHandler.ClosePopups();
+            await CloseWeb(same);
         }
         Check(await Js(first, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=A|A", phase + " profile A persistence");
         Check(await Js(second, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=B|B", phase + " profile B persistence");
+        await CloseWeb(first); await CloseWeb(second);
         host.Controls.Remove(first); host.Controls.Remove(second);
     }
 
@@ -243,7 +255,7 @@ internal static class Program
             var code = await failure.Task.WaitAsync(TimeSpan.FromSeconds(20));
             Check(code.ToString().StartsWith("Cert", StringComparison.Ordinal), "untrusted TLS certificate rejected by production handler: " + code);
         }
-        finally { stop.Cancel(); await serving; host.Controls.Remove(web); }
+        finally { stop.Cancel(); await serving; await CloseWeb(web); host.Controls.Remove(web); }
     }
 
     private static async Task TabsAndRenderer()
@@ -291,6 +303,8 @@ internal static class Program
         Button("×").PerformClick();
         await Ready(Current()); Check(tabs.TabCount == 1, "last-tab replacement");
         form.Close();
+        await Wait(() => form.IsDisposed, "asynchronous window shutdown");
+        Check(true, "window closes after tab close readiness");
     }
 
     private sealed class Completion : ICompletionCallback

@@ -28,6 +28,7 @@ internal static class Program
             };
             // Do not pass application command-line arguments through to Chromium.
             settings.CommandLineArgsDisabled = true;
+            Cef.EnableWaitForBrowsersToClose();
             initialized = Cef.Initialize(settings);
             if (!initialized) throw new InvalidOperationException("Chromium initialization failed.");
             using var context = Cef.GetGlobalRequestContext();
@@ -44,7 +45,7 @@ internal static class Program
         }
         finally
         {
-            if (initialized) Cef.Shutdown();
+            if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); }
             lease?.Dispose();
         }
     }

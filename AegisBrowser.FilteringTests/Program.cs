@@ -20,6 +20,7 @@ internal static partial class Program
         var initialized = false; var exit = 1;
         try
         {
+            Cef.EnableWaitForBrowsersToClose();
             initialized = Cef.Initialize(new CefSettings { RootCachePath = root, CachePath = Path.Combine(root, "cache"),
                 CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef.log") });
             if (!initialized) throw new Exception("CEF initialization failed");
@@ -38,7 +39,7 @@ internal static partial class Program
             Application.Run(host);
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); }
-        finally { if (initialized) Cef.Shutdown(); Console.WriteLine("CEF test profile: " + root); }
+        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } Console.WriteLine("CEF test profile: " + root); }
         return exit;
     }
     private static void Check(bool ok, string message)
@@ -50,7 +51,7 @@ internal static partial class Program
     {
         var config = new PrivacyConfiguration { Mode = PrivacyMode.Custom, UserRules = "/blocked.png" };
         var session = new PrivacySession(config);
-        using var web = new ChromiumWebBrowser("about:blank") { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
+        using var web = new ChromiumWebBrowser("about:blank") { LifeSpanHandler = new SafePopups(Console.WriteLine), Dock = DockStyle.Fill };
         web.RequestHandler = new SafeRequests(Console.WriteLine, session.Evaluate,
             (request, decision) => Console.WriteLine($"Decision: mode={session.Configuration.Mode} top={request.TopUrl} url={request.Url} type={request.Type} main={request.MainFrame} third={decision.ThirdParty} blocked={decision.Blocked} rule={decision.Rule}"));
         // Subscribe before handle creation so CEF installs its load event adapter.
@@ -103,6 +104,7 @@ internal static partial class Program
         using var settings = new PrivacyForm(session, server.Origin);
         settings.Show(host); await Task.Delay(200);
         Check(settings.Visible, "native privacy window opens"); settings.Close();
+        await CloseWeb(web);
     }
     private static async Task Wait(Func<Task<bool>> predicate, string name)
     {

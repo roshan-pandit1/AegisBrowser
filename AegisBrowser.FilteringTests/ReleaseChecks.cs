@@ -20,6 +20,13 @@ internal static partial class Program
         if (!web.IsBrowserInitialized || !web.CanExecuteJavascriptInMainFrame || web.IsLoading) return false;
         try { return await Js(web, "document.readyState") == "complete"; } catch { return false; }
     }, "rendered document ready");
+    private static async Task CloseWeb(ChromiumWebBrowser web)
+    {
+        var life = (SafePopups)web.LifeSpanHandler;
+        life.ClosePopups(); web.GetBrowserHost().CloseBrowser(true);
+        await life.OwnerCloseReady.WaitAsync(TimeSpan.FromSeconds(10));
+        web.Dispose();
+    }
     private static async Task RestartProfile(Form host, string root, bool write)
     {
         using var form = new MainForm("restart", root); form.Show(host);
@@ -43,7 +50,9 @@ internal static partial class Program
                 && Named<TextBox>(settings, "SiteExceptions").Text == "example.com", "settings survive actual browser process restart");
             Check(!pause.Checked && Named<DataGridView>(settings, "Requests").Rows.Count <= 1, "restart clears pause and previous request history");
         }
-        settings.Close(); form.Close(); Check(form.IsDisposed, "main window normal shutdown");
+        settings.Close(); form.Close();
+        await Wait(() => Task.FromResult(form.IsDisposed), "asynchronous window shutdown");
+        Check(form.IsDisposed, "main window normal shutdown");
     }
     private static async Task SettingsReview(Form host, FixtureServer server)
     {
@@ -74,12 +83,13 @@ internal static partial class Program
             }
             finally { File.Delete(file); settings.Close(); }
         }
-        using var web = new ChromiumWebBrowser(server.Origin + "/landing") { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
+        using var web = new ChromiumWebBrowser(server.Origin + "/landing") { LifeSpanHandler = new SafePopups(Console.WriteLine), Dock = DockStyle.Fill };
         web.RequestHandler = new SafeRequests(Console.WriteLine, session.Evaluate);
         web.FrameLoadEnd += (_, _) => { }; host.Controls.Add(web); await Ready(web);
         await Js(web, $"window.corsResult='pending'; fetch('{server.ThirdOrigin}/landing').then(()=>window.corsResult='allowed').catch(()=>window.corsResult='denied');");
         await Wait(async () => await Js(web, "window.corsResult") != "pending", "cross-origin fetch outcome");
         Check(await Js(web, "window.corsResult") == "denied", "Chromium denies cross-origin response without CORS permission");
+        await CloseWeb(web);
         host.Controls.Remove(web);
     }
 }
