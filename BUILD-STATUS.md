@@ -4,18 +4,20 @@
 
 ## Latest completed verification
 
-[Windows run 39570856734](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39570856734) for `76fd0a3383663c45434687370b78a56204bcd144` **failed**. Logs were inspected:
+[Windows run 39616815340](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39616815340) for `868e7716fc1eb4db27b38d0ad6da4b6ecb85596b` **failed**. Logs were inspected:
 
 - Application restore and win-x64 Release build passed; Windows SDK selected .NET 8.0.426.
 - 56 privacy and 50 policy/profile checks passed.
-- Browser integration passed rendered diagnostics, back/forward navigation, preserving address edits, rapid tab closure, renderer failure/recovery and blank-popup opener checks. It then timed out closing the owner tab's native popup. A native Chromium observer assertion also occurred. The full suite did not complete; cookie restart and TLS coverage are not certified by this run.
+- Browser integration passed rendered diagnostics, back/forward navigation, preserving address edits, rapid tab closure, renderer failure/recovery and blank-popup opener checks. Owner-popup closure, last-tab replacement, normal window shutdown, initial cookie/localStorage isolation, shared-profile storage and the OAuth redirect/postMessage fixture also passed. However, native Aura window assertions occurred, and closing the shared-profile control unexpectedly closed the test host before profile B could be checked. An observer assertion followed. The full suite did not complete; cookie restart and TLS coverage are not certified by this run.
 - 20 Chromium filtering checks passed: all three modes, redirect/iframe cancellation, explicit exceptions, pause/resume, preserved navigation, import/apply/remove/invalid edits, inspector selection and enforced CORS.
 - Browser settings restart checks passed in separate processes (2 write checks, 3 read checks), including normal window shutdown and reset of temporary pause/history.
 - Publish and both artifact uploads were skipped because the browser suite failed. No portable ZIP from this source is available or certified.
 
 Earlier review runs exposed a missing test namespace import (fixed), unexpected native closure of the storage fixture host, and native shutdown assertions. These are real verification failures, not passing tests. The workflow now rejects native assertions even when a process returns zero.
 
-The latest lifecycle revision keeps the owner handler alive until popup closure completes. Revision `00210f26f7117554524a056988bef00f2c4c7cb7` is pushed. [Windows run 39616815340](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39616815340) for follow-up documentation head `868e7716fc1eb4db27b38d0ad6da4b6ecb85596b` is queued awaiting a runner. Verification is pending; no fix success is claimed. Inspector selection retention is fixed and its Windows regression check passes. Packaging and installation instructions are implemented but await a fully passing run; see [installation instructions](docs/INSTALL-WINDOWS.md).
+The popup-handler lifetime fix passed its owner-popup check in this run, but did not fix the remaining native shutdown failures. Follow-up `dfc1aa0fb71d623bf9cbcb39a2873959b79dcc30` introduces `BrowserView`: release the WinForms host handle after CEF close readiness, wait for the native close callback, then dispose the managed adapter (whose disposal itself requests native closure). The app and both harnesses share this ordering. This follow-up is **NOT YET VERIFIED**: no Windows run was listed for it when checked. The workflow is enabled; use Actions → Windows build and release artifact → Run workflow on `feature/privacy-filtering` if automatic execution does not appear.
+
+Inspector selection retention is fixed and its Windows regression check passes. Packaging and installation instructions are implemented but await a fully passing run; see [installation instructions](docs/INSTALL-WINDOWS.md).
 
 ## Remaining release gates
 
