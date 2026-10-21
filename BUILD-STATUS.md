@@ -15,7 +15,7 @@
 
 Earlier review runs exposed a missing test namespace import (fixed), unexpected native closure of the storage fixture host, and native shutdown assertions. These are real verification failures, not passing tests. The workflow now rejects native assertions even when a process returns zero.
 
-The latest lifecycle revision keeps the owner handler alive until popup closure completes. Revision `00210f26f7117554524a056988bef00f2c4c7cb7` is pushed, but GitHub has not created a workflow run for it as of 2026-10-21 14:25 UTC. Verification is pending; no fix success is claimed. Inspector selection retention is fixed and its Windows regression check passes. Packaging and installation instructions are implemented but await a fully passing run; see [installation instructions](docs/INSTALL-WINDOWS.md).
+The latest lifecycle revision keeps the owner handler alive until popup closure completes. Revision `00210f26f7117554524a056988bef00f2c4c7cb7` is pushed. [Windows run 39616815340](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39616815340) for follow-up documentation head `868e7716fc1eb4db27b38d0ad6da4b6ecb85596b` is queued awaiting a runner. Verification is pending; no fix success is claimed. Inspector selection retention is fixed and its Windows regression check passes. Packaging and installation instructions are implemented but await a fully passing run; see [installation instructions](docs/INSTALL-WINDOWS.md).
 
 ## Remaining release gates
 
