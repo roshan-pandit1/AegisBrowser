@@ -7,15 +7,15 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
-internal static class Program
+internal static partial class Program
 {
     private static int checks;
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        var root = Path.Combine(Path.GetTempPath(), "aegis-filtering-" + Guid.NewGuid());
+        var root = args.Length == 2 ? Path.GetFullPath(args[1]) : Path.Combine(Path.GetTempPath(), "aegis-filtering-" + Guid.NewGuid());
         Directory.CreateDirectory(root);
         var initialized = false; var exit = 1;
         try
@@ -23,11 +23,15 @@ internal static class Program
             initialized = Cef.Initialize(new CefSettings { RootCachePath = root, CachePath = Path.Combine(root, "cache"),
                 CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef.log") });
             if (!initialized) throw new Exception("CEF initialization failed");
+            using var context = Cef.GetGlobalRequestContext();
+            if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory())) throw new Exception("Diagnostics registration failed");
             using var server = new FixtureServer();
             using var host = new Form { Width = 1000, Height = 700 };
             host.Shown += async (_, _) =>
             {
-                try { await Run(host, server); Console.WriteLine($"PASS: {checks} Chromium filtering checks"); exit = 0; }
+                try { if (args.Length == 2) await RestartProfile(host, root, args[0] == "write");
+                    else { await Run(host, server); await SettingsReview(host, server); }
+                    Console.WriteLine($"PASS: {checks} Chromium filtering checks"); exit = 0; }
                 catch (Exception ex) { Console.Error.WriteLine(ex); }
                 finally { host.Close(); }
             };
@@ -46,7 +50,7 @@ internal static class Program
     {
         var config = new PrivacyConfiguration { Mode = PrivacyMode.Custom, UserRules = "/blocked.png" };
         var session = new PrivacySession(config);
-        using var web = new ChromiumWebBrowser("about:blank") { Dock = DockStyle.Fill };
+        using var web = new ChromiumWebBrowser("about:blank") { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
         web.RequestHandler = new SafeRequests(Console.WriteLine, session.Evaluate,
             (request, decision) => Console.WriteLine($"Decision: mode={session.Configuration.Mode} top={request.TopUrl} url={request.Url} type={request.Type} main={request.MainFrame} third={decision.ThirdParty} blocked={decision.Blocked} rule={decision.Rule}"));
         // Subscribe before handle creation so CEF installs its load event adapter.
@@ -72,6 +76,9 @@ internal static class Program
         Check(server.Hits("/redirect") > 0, "redirect source requested");
         Check(server.Hits("/blocked.png") == 0, "direct, redirected and iframe blocked resources never reach server");
         Check(session.Snapshot().Requests.Any(r => r.Result == "Blocked" && r.Rule == "/blocked.png"), "inspector reports matching rule");
+        session.Apply(config with { Mode = PrivacyMode.Standard, UserRules = "", FilterList = "||localhost^$third-party,image" });
+        await Page();
+        Check(server.Hits("/third.png") == 0 && server.Hits("/first.png") > 0, "Standard list blocks matching third-party resources");
         session.Apply(config with { Mode = PrivacyMode.Strict, UserRules = "" });
         await Page();
         Check(server.Hits("/third.png") == 0, "Strict blocks third-party request at network boundary");

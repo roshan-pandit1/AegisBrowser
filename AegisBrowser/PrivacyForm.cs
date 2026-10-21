@@ -18,6 +18,8 @@ internal sealed class PrivacyForm : Form
     public PrivacyForm(PrivacySession session, string? currentUrl, Action<PrivacyConfiguration>? apply = null)
     {
         this.session = session;
+        mode.Name = "PrivacyMode"; blocks.Name = "BlockedDomains"; allows.Name = "AllowedDomains";
+        sites.Name = "SiteExceptions"; rules.Name = "UserRules"; list.Name = "TrackingList"; network.Name = "Requests";
         this.apply = apply ?? (configuration => session.Apply(configuration));
         Text = "Aegis Privacy — profile settings and network inspector";
         Width = 1100; Height = 760; MinimumSize = new(800, 550);
@@ -85,38 +87,52 @@ internal sealed class PrivacyForm : Form
     {
         if (network.CurrentRow?.DataBoundItem is RequestObservation row && SiteClassifier.Host(row.Destination) is { } host) AddLine(target, host);
     }
+    internal void ImportFile(string path)
+    {
+        if (new FileInfo(path).Length > 8_000_000) throw new IOException("List exceeds 8 MB.");
+        list.Text = File.ReadAllText(path, new System.Text.UTF8Encoding(false, true));
+    }
     private void Import()
     {
         using var dialog = new OpenFileDialog { Filter = "Text filter lists|*.txt|All files|*.*" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         try
         {
-            if (new FileInfo(dialog.FileName).Length > 8_000_000) throw new IOException("List exceeds 8 MB.");
-            list.Text = File.ReadAllText(dialog.FileName, new System.Text.UTF8Encoding(false, true));
+            ImportFile(dialog.FileName);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
         { MessageBox.Show(this, ex.Message, "Could not import list"); }
     }
-    private void Apply()
+    internal void ApplyEdits()
     {
-        try
-        {
             string[] Domains(TextBox box) => box.Lines.Where(s => !string.IsNullOrWhiteSpace(s)).Select(NetworkFilterList.ValidateDomain).Distinct().ToArray();
             var config = new PrivacyConfiguration { Mode = Enum.Parse<PrivacyMode>((string)mode.SelectedItem!),
                 UseListsInCustom = customList.Checked, FilterList = list.Text, UserRules = rules.Text,
                 BlockedDomains = Domains(blocks), AllowedDomains = Domains(allows), SiteExceptions = Domains(sites) };
             apply(config);
+    }
+    private void Apply()
+    {
+        try
+        {
+            ApplyEdits();
             RefreshInspector();
             MessageBox.Show(this, $"Settings applied to new requests. Reload pages to retry blocked resources.\n{session.RuleCount} active rules; {session.Unsupported.Count} unsupported rules skipped.", "Privacy settings");
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
         { MessageBox.Show(this, ex.Message, "Settings were not applied"); }
     }
-    private void RefreshInspector()
+    internal void RefreshInspector()
     {
         var snapshot = session.Snapshot();
         summary.Text = $"Allowed: {snapshot.Allowed}   Blocked: {snapshot.Blocked}";
+        var selected = (network.CurrentRow?.DataBoundItem as RequestObservation)?.Number;
         network.DataSource = snapshot.Requests.Reverse().Where(r => !thirdParty.Checked || r.Party == "Third-party").ToArray();
+        network.ClearSelection(); network.CurrentCell = null;
+        if (selected.HasValue)
+            foreach (DataGridViewRow row in network.Rows)
+                if (row.DataBoundItem is RequestObservation item && item.Number == selected)
+                { network.CurrentCell = row.Cells[0]; row.Selected = true; break; }
         var report = string.Join(Environment.NewLine, session.Unsupported);
         if (unsupported.Text != report) unsupported.Text = report;
     }
