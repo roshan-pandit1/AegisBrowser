@@ -8,7 +8,15 @@ namespace AegisBrowser;
 internal sealed class BrowserView(string address, IRequestContext? requestContext = null)
     : ChromiumWebBrowser(address, requestContext: requestContext)
 {
-    internal async Task ReleaseNativeHostAsync()
+    private Task? releaseTask;
+
+    internal Task ReleaseNativeHostAsync()
+    {
+        if (InvokeRequired) throw new InvalidOperationException("Release the browser host on its WinForms thread.");
+        return releaseTask ??= ReleaseNativeHostCoreAsync();
+    }
+
+    private async Task ReleaseNativeHostCoreAsync()
     {
         var lifetime = (SafePopups)LifeSpanHandler;
         await lifetime.OwnerCloseReady;

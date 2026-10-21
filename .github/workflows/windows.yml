@@ -43,6 +43,9 @@ jobs:
             if (!(($output -join "`n") -match "PASS: \d+ browser integration checks \($phase\)")) {
               throw "Browser $phase phase did not report suite completion"
             }
+            if (!(($output -join "`n") -match "PASS: CEF shutdown completed \($phase\)")) {
+              throw "Browser $phase phase did not complete CEF shutdown"
+            }
           }
       - name: Build Chromium filtering tests
         if: ${{ !cancelled() }}

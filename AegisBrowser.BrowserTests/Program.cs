@@ -71,6 +71,7 @@ internal static class Program
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
         finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
+        if (result == 0) Console.WriteLine("PASS: CEF shutdown completed (" + args[0] + ")");
         return result;
     }
 
@@ -153,7 +154,10 @@ internal static class Program
         life.ClosePopups();
         web.GetBrowserHost().CloseBrowser(true);
         await life.OwnerCloseReady.WaitAsync(TimeSpan.FromSeconds(10));
-        await ((BrowserView)web).ReleaseNativeHostAsync();
+        var release = ((BrowserView)web).ReleaseNativeHostAsync();
+        Check(ReferenceEquals(release, ((BrowserView)web).ReleaseNativeHostAsync()), "duplicate host release shares one operation");
+        await release;
+        Check(life.OwnerClosed.IsCompletedSuccessfully && !web.IsHandleCreated, "native browser closed before adapter disposal");
         web.Dispose();
     }
 
@@ -170,8 +174,9 @@ internal static class Program
         using var b = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-b") }, Handler());
         using var first = new BrowserView(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Left, Width = 450 };
         using var second = new BrowserView(Origin, requestContext: b) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
-        host.FormClosing += (_, e) => Console.WriteLine("HOST CLOSE " + e.CloseReason);
-        second.Disposed += (_, _) => Console.WriteLine("SECOND DISPOSED");
+        var unexpectedHostClose = false;
+        FormClosingEventHandler closingHandler = (_, _) => unexpectedHostClose = true;
+        host.FormClosing += closingHandler;
         first.RequestHandler = new SafeRequests(Console.WriteLine);
         first.PermissionHandler = new OriginPermissions(Console.WriteLine);
         var popupHandler = new SafePopups(Console.WriteLine);
@@ -207,15 +212,20 @@ internal static class Program
             using var flushA = new Completion(); using var flushB = new Completion();
             if (!cookiesA.FlushStore(flushA) || !cookiesB.FlushStore(flushB)) throw new Exception("FlushStore refused");
             await Task.WhenAll(flushA.Done.Task, flushB.Done.Task).WaitAsync(TimeSpan.FromSeconds(10));
-            Console.WriteLine("Before popup drain: host=" + host.IsDisposed + " second=" + second.IsDisposed + " popups=" + popupHandler.PopupCount);
             await Wait(() => popupHandler.PopupCount == 0, "OAuth popup self-close completes");
-            Console.WriteLine("Before closing shared browser: host=" + host.IsDisposed + " second=" + second.IsDisposed);
             await CloseWeb(same);
-            Console.WriteLine("After closing shared browser: host=" + host.IsDisposed + " second=" + second.IsDisposed);
+            // Drain both message loops; a queued WM_CLOSE must not escape detection.
+            await Cef.UIThreadTaskFactory.StartNew(() => { });
+            await Js(second, "document.readyState");
+            Check(!unexpectedHostClose && !host.IsDisposed && !second.IsDisposed, "closing one browser preserves its host and sibling");
         }
         Check(await Js(first, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=A|A", phase + " profile A persistence");
         Check(await Js(second, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=B|B", phase + " profile B persistence");
-        await CloseWeb(first); await CloseWeb(second);
+        await CloseWeb(first);
+        Check(await Js(second, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=B|B", "sibling storage survives owner disposal");
+        await CloseWeb(second);
+        Check(!unexpectedHostClose && !host.IsDisposed, "closing all embedded browsers preserves application host");
+        host.FormClosing -= closingHandler;
         host.Controls.Remove(first); host.Controls.Remove(second);
     }
 
@@ -305,6 +315,7 @@ internal static class Program
         await Wait(() => ownerPopups.PopupCount == 1, "blank popup created");
         Check(await Js(owner, "window.blankOpener") == "True", "user-initiated about:blank preserves opener");
         Button("×").PerformClick();
+        Button("×").PerformClick(); // Idempotent while the selected tab is retiring.
         await Wait(() => ownerPopups.PopupCount == 0, "owner tab closes its native popup");
         await Wait(() => tabs.TabCount == 1, "owner tab removed after native close readiness");
         Check(true, "popup lifecycle ends with owner tab");
@@ -312,7 +323,9 @@ internal static class Program
         Button("×").PerformClick();
         await Wait(() => tabs.TabCount == 1 && Current() != last, "last tab replacement created");
         await Ready(Current()); Check(tabs.TabCount == 1, "last-tab replacement");
+        for (var i = 0; i < 4; i++) Button("+").PerformClick();
         form.Close();
+        form.Close(); // Repeated window-close requests during tab initialization.
         await Wait(() => form.IsDisposed, "asynchronous window shutdown");
         Check(true, "window closes after tab close readiness");
     }
