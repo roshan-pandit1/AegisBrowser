@@ -156,6 +156,8 @@ internal static class Program
         using var b = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-b") }, Handler());
         using var first = new ChromiumWebBrowser(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Left, Width = 450 };
         using var second = new ChromiumWebBrowser(Origin, requestContext: b) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
+        second.Disposed += (_, _) => Console.Error.WriteLine("SECOND DISPOSED: " + Environment.StackTrace);
+        host.FormClosing += (_, e) => Console.Error.WriteLine("HOST CLOSING: " + e.CloseReason + " " + Environment.StackTrace);
         first.RequestHandler = new SafeRequests(Console.WriteLine);
         first.PermissionHandler = new OriginPermissions(Console.WriteLine);
         var popupHandler = new SafePopups(Console.WriteLine);
