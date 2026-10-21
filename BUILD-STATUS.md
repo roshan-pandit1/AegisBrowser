@@ -1,3 +1,48 @@
+# Privacy filtering verification — 2026-10-21
+
+[PR #4](https://github.com/roshan-pandit1/AegisBrowser/pull/4), branch `feature/privacy-filtering`, implements the four privacy phases on the existing .NET 8 / WinForms / CefSharp 151.3.240 architecture. It is based on `main` at `ee2f01a` and does not include or overwrite the separate unfinished browser-compatibility work in PR #3 or its local working files.
+
+## Verified Windows result
+
+[Windows run 39532140250](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39532140250), [job 119000279921](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39532140250/job/119000279921), passed for implementation commit `02311a01636032b0826e40a2bb3b573ee9b3dbf1`. Completed job logs and the artifact listing were inspected. This status update changes documentation only after that verified implementation.
+
+| Check | Actual result |
+| --- | --- |
+| Runner and SDK | `windows-latest`, Windows x64, .NET SDK 8.0.426 selected by global.json |
+| Restore and Release win-x64 app build | PASS; zero warnings/errors |
+| Privacy policy and persistence tests | PASS: 56 checks |
+| Existing policy/profile tests | PASS: 40 checks |
+| Chromium filtering harness build | PASS; zero warnings/errors |
+| Real Chromium filtering tests | PASS: 13 checks, explicit suite completion and zero exit required |
+| Self-contained win-x64 publish and payload checks | PASS |
+| Published-app startup/cache/normal-close smoke | PASS |
+| Complete publish directory upload | PASS: 259,044,111 bytes |
+
+[Download AegisBrowser-win-x64](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39532140250/artifacts/12316165284). Artifact ID `12316165284`; SHA-256 `977a9f225759bbd9649ab33046b0ceb0a3649161a8e37c30e888f4d3c9423af0`.
+
+The Chromium harness used the production request handler and a loopback server on Windows. Server hit counts confirmed allowed first-party/unlisted resources, cancellation of direct/redirect/iframe blocked resources, Strict third-party blocking, site and resource exceptions, pause/resume, and preserved top-level navigation. It also opened the native Privacy form. This is **not** a full interactive GUI or real-world OAuth acceptance pass.
+
+## Sequential phase verification and fixes
+
+- Phase 1: [run 39529897738](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39529897738), 20 privacy checks plus 40 existing checks, Windows build/publish/smoke passed.
+- Phase 2: [run 39530635531](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39530635531), 32 privacy checks plus 40 existing checks passed before UI work.
+- Phase 3: [run 39531044621](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39531044621), 39 privacy checks plus 40 existing checks, Windows build/publish/smoke passed before persistence/reliability work.
+- Phase 4 first live failure: [run 39531526664](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39531526664). `/blocked.png` was incorrectly rejected as a regex literal. Corrected path-pattern parsing and added a regression check. Publish/upload were skipped.
+- Subsequent live failure: [run 39531685073](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39531685073), confirmed by fixture diagnostics in [run 39531914737](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39531914737). During navigation replacement, early subresources received an empty CEF main-frame URL and Strict mode failed open as unknown. The request handler now retains the accepted navigation URL as a fallback for that gap. Redirect targets are re-evaluated by CEF's resource callbacks. The final live tests passed. The harness's generated ApplicationConfiguration name warning was also removed.
+- Local restore, build, test and publish attempts failed with exit 127 (`dotnet: command not found`) on macOS ARM64. Windows verification above comes from CI, not local execution.
+
+## Remaining acceptance and limitations
+
+See [privacy documentation and manual cases](docs/privacy.md). Interactive rule editing/import/removal, inspector selection and counts under sustained traffic, settings warnings/restart UX, real-site authentication, cross-origin nested frames, service-worker/cache behavior, rapid loading-tab closure, and display scaling remain **NOT RUN manually**. Native Privacy-window opening was automated; its complete interactive flow was not.
+
+The filter-list parser supports a documented ABP network subset and reports unsupported rules. The starter list is small, not all of EasyPrivacy. Generic matching has a time budget and fails open with an inspector reason if exceeded. Unknown document sites and traffic outside CEF resource callbacks are not a complete firewall. Strict can break third-party content; users can add explicit exceptions. Imported lists are local snapshots without automatic refresh. Existing popup/OAuth limitations on main remain separate PR #3 work.
+
+Settings persist per profile with atomic replacement; malformed files are preserved and reported. Temporary pause and the bounded, origin-only inspector history never persist. No identity spoofing, scriptlet injection, CAPTCHA bypass, security-check detection or anti-fraud evasion was added. TLS rejection, Chromium command-line restrictions, sandbox/web-security defaults and permission handlers remain unchanged.
+
+---
+
+# Historical v0.1 acceptance record
+
 # Aegis Browser v0.1 verification — 2026-10-20
 
 ## Confirmed Windows automation
