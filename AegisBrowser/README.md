@@ -59,3 +59,11 @@ On a Windows machine, also verify:
 Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. The first remote Windows CI run also failed compilation; corrections are prepared locally, but the GitHub integration rejected writes with HTTP 403. No release artifact has been produced. See BUILD-STATUS.md for the run link, compiler diagnostics and pending fixes.
 
 Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/151.3.240), [CefSharp project](https://github.com/cefsharp/CefSharp).
+
+## Privacy filtering
+
+The **Privacy** toolbar button opens Standard/Strict/Custom settings, editable domain and ABP-style network rules, per-site exceptions, a temporary pause, and a local request inspector. Settings persist separately in each profile's `privacy.json`. The inspector records only origins in memory and displays matching rules and allowed/blocked decision counts.
+
+The bundled tracking list is intentionally small. Import standard UTF-8 privacy lists to extend it; unsupported syntax is reported. This is a documented network-syntax subset, not a full EasyList/uBlock implementation. Strict mode can break third-party dependencies and embedded authentication; explicit exceptions restore compatibility without changing Chromium security settings.
+
+See [privacy filtering documentation](../docs/privacy.md) for syntax, precedence, persistence, limitations and Windows acceptance cases. Real Chromium filtering tests are built and run by the Windows workflow before publishing. Consult [BUILD-STATUS.md](../BUILD-STATUS.md) for verified results; a compiled binary alone does not establish GUI acceptance.

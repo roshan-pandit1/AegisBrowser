@@ -46,3 +46,19 @@ The Network inspector shows the last 500 decisions with first/third-party classi
 8. Open local diagnostics offline and DevTools. Verify invalid TLS certificates still fail, permission policy is unchanged and no security-disabling Chromium switches were added.
 
 These cases require an actual Windows desktop. CI startup smoke does not establish their outcomes.
+
+## Persistence, performance and compatibility
+
+Settings are stored in `privacy.json` next to the profile's Chromium cache. Writes use a flushed temporary file followed by replacement in the same directory. A failed save leaves the active policy unchanged. Malformed settings trigger a visible warning, activate defaults and prevent overwriting the original file until it is repaired/renamed and the browser restarted. Settings are per profile; pause and network history are not persisted. Atomic replacement protects normal interrupted writes, but is not a backup against disk failure.
+
+Hostname-only list rules use an index. Generic patterns use .NET's non-backtracking regex engine with a 50 ms per-pattern timeout and a 25 ms scan budget (checked between rules). If a budget is exhausted, the request is allowed and the inspector states this; availability takes precedence over blocking in this exceptional case. Large generic-pattern lists may therefore provide incomplete coverage. Policy compilation occurs only when applying settings, not in CEF callbacks; large imports can briefly occupy the settings UI.
+
+Third-party classification is relative to the top-level page. The supported `domain=` restriction likewise uses the top-level hostname; this differs from engines that scope it to a nested frame's document. Unknown top-level contexts fail open for third-party-only rules. This interception is not a system-wide firewall: service-worker/cache paths, WebSockets, WebRTC and other Chromium background traffic may not have a usable browser/frame context or pass through these callbacks. The inspector is a resource-decision inspector, not a complete packet capture.
+
+Strict mode can break embedded sign-in, payment widgets, video, fonts and CDN dependencies. Add a narrowly scoped resource-domain exception, or temporarily pause for the site and reload. No automatic authentication/security-check detection or bypass is implemented. Top-level navigation, redirects and POST semantics are not rewritten by this engine. Existing popup limitations on `main` remain; the independent popup/OAuth compatibility work is in PR #3.
+
+## Automated verification
+
+Run the existing console tests with `dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64`. On Windows, build and run `AegisBrowser.FilteringTests` with `dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true`, then run its generated executable. This harness uses the production request handler with a loopback HTTP fixture; it tests server-side arrival of allowed requests and absence of blocked direct/redirect/iframe requests, Strict mode, exceptions, pause/resume and top-level navigation. It also opens the native Privacy form, but does not automate editing every control.
+
+The workflow runs on `windows-latest`, installs .NET 8, requires the harness's completion marker and exit code, and only then publishes and uploads the complete self-contained win-x64 directory. See BUILD-STATUS.md for actual results and remaining manual tests.

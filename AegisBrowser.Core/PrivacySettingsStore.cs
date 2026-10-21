@@ -16,6 +16,7 @@ public sealed class PrivacySettingsStore(string profileDirectory)
             var configuration = JsonSerializer.Deserialize<PrivacyConfiguration>(File.ReadAllText(path))
                 ?? throw new InvalidDataException("Privacy settings are empty.");
             Validate(configuration);
+            _ = new RequestFilter(configuration);
             return configuration;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
