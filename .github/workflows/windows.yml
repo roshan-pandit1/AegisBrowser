@@ -28,6 +28,21 @@ jobs:
         run: dotnet restore AegisBrowser.Tests/AegisBrowser.Tests.csproj -r win-x64
       - name: Run Windows x64 automated tests
         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
+      - name: Build browser integration tests
+        run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Browser storage, OAuth, tab and renderer tests
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-browser-tests-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('write', 'read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if ($code -ne 0) { throw "Browser $phase phase exited with $code" }
+            if (!(($output -join "`n") -match "PASS: \d+ browser integration checks \($phase\)")) {
+              throw "Browser $phase phase did not report suite completion"
+            }
+          }
       - name: Publish self-contained Windows x64 build
         run: dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -o artifacts/win-x64
       - name: Check release payload
