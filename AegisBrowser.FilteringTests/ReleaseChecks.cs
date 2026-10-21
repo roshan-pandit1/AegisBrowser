@@ -25,6 +25,7 @@ internal static partial class Program
         var life = (SafePopups)web.LifeSpanHandler;
         life.ClosePopups(); web.GetBrowserHost().CloseBrowser(true);
         await life.OwnerCloseReady.WaitAsync(TimeSpan.FromSeconds(10));
+        await ((BrowserView)web).ReleaseNativeHostAsync();
         web.Dispose();
     }
     private static async Task RestartProfile(Form host, string root, bool write)
@@ -83,7 +84,7 @@ internal static partial class Program
             }
             finally { File.Delete(file); settings.Close(); }
         }
-        using var web = new ChromiumWebBrowser(server.Origin + "/landing") { LifeSpanHandler = new SafePopups(Console.WriteLine), Dock = DockStyle.Fill };
+        using var web = new BrowserView(server.Origin + "/landing") { LifeSpanHandler = new SafePopups(Console.WriteLine), Dock = DockStyle.Fill };
         web.RequestHandler = new SafeRequests(Console.WriteLine, session.Evaluate);
         web.FrameLoadEnd += (_, _) => { }; host.Controls.Add(web); await Ready(web);
         await Js(web, $"window.corsResult='pending'; fetch('{server.ThirdOrigin}/landing').then(()=>window.corsResult='allowed').catch(()=>window.corsResult='denied');");

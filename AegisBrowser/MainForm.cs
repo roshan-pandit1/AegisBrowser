@@ -123,7 +123,7 @@ public sealed class MainForm : Form
     {
         if (closing) return;
         var page = new TabPage("New tab") { Tag = "Loading…" };
-        var browser = new ChromiumWebBrowser(url) { Dock = DockStyle.Fill };
+        var browser = new BrowserView(url) { Dock = DockStyle.Fill };
         void Report(string message) => Post(() =>
         {
             if (page.IsDisposed) return;
@@ -132,8 +132,10 @@ public sealed class MainForm : Form
         });
         browser.PermissionHandler = new OriginPermissions(Report);
         browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
-        var popups = new SafePopups(Report, () => PostLifetime(() =>
+        var popups = new SafePopups(Report, () => PostLifetime(async () =>
         {
+            try { await browser.ReleaseNativeHostAsync(); }
+            catch (TimeoutException) { Report("Browser shutdown timed out; close the window to retry."); return; }
             retiring.Remove(page);
             tabs.TabPages.Remove(page);
             page.Dispose();

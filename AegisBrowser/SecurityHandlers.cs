@@ -106,6 +106,8 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
     private volatile bool closing;
     private readonly TaskCompletionSource<bool> closeReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal Task OwnerCloseReady => closeReady.Task;
+    private readonly TaskCompletionSource<bool> closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task OwnerClosed => closed.Task;
 
     private bool ownerClosing; // Accessed only on the CEF UI thread.
 
@@ -155,6 +157,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
             // native popup close callbacks have finished.
             Cef.UIThreadTaskFactory.StartNew(CompleteOwnerClose);
         }
+        else Cef.UIThreadTaskFactory.StartNew(() => closed.TrySetResult(true));
     }
 
     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,

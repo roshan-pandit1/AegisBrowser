@@ -153,6 +153,7 @@ internal static class Program
         life.ClosePopups();
         web.GetBrowserHost().CloseBrowser(true);
         await life.OwnerCloseReady.WaitAsync(TimeSpan.FromSeconds(10));
+        await ((BrowserView)web).ReleaseNativeHostAsync();
         web.Dispose();
     }
 
@@ -167,8 +168,8 @@ internal static class Program
         });
         using var a = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-a") }, Handler());
         using var b = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-b") }, Handler());
-        using var first = new ChromiumWebBrowser(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Left, Width = 450 };
-        using var second = new ChromiumWebBrowser(Origin, requestContext: b) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
+        using var first = new BrowserView(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Left, Width = 450 };
+        using var second = new BrowserView(Origin, requestContext: b) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
         host.FormClosing += (_, e) => Console.WriteLine("HOST CLOSE " + e.CloseReason);
         second.Disposed += (_, _) => Console.WriteLine("SECOND DISPOSED");
         first.RequestHandler = new SafeRequests(Console.WriteLine);
@@ -186,7 +187,7 @@ internal static class Program
             await Js(first, "document.cookie='marker=A; Max-Age=86400; Secure; SameSite=Lax; Path=/'; localStorage.setItem('marker','A'); 'ok'");
             Check(await Js(second, "document.cookie + localStorage.getItem('marker')") == "null", "actual CEF cookie and localStorage isolation");
             await Js(second, "document.cookie='marker=B; Max-Age=86400; Secure; SameSite=Lax; Path=/'; localStorage.setItem('marker','B'); 'ok'");
-            using var same = new ChromiumWebBrowser(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Bottom, Height = 150 };
+            using var same = new BrowserView(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Bottom, Height = 150 };
             Observe(same); host.Controls.Add(same); await Ready(same);
             Check(await Js(same, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=A|A", "same-profile browser shares storage");
             // User activation is injected through CDP only in this test process. Production has no remote-debugging port.
@@ -247,7 +248,7 @@ internal static class Program
             }
             catch (OperationCanceledException) { }
         });
-        using var web = new ChromiumWebBrowser("about:blank") { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
+        using var web = new BrowserView("about:blank") { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
         var failure = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
         web.RequestHandler = new SafeRequests(Console.WriteLine);
         Observe(web);
