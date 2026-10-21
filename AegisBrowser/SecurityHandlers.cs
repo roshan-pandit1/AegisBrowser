@@ -27,6 +27,10 @@ internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
 internal sealed class SafeRequests(Action<string> openTab, Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null,
     Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
 {
+    // During document replacement CEF can expose an empty MainFrame.Url to early
+    // subresource callbacks. Keep only URL strings, never native frame wrappers.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> navigationSites = new();
+
     protected override IResourceRequestHandler GetResourceRequestHandler(IWebBrowser control, IBrowser browser,
         IFrame frame, IRequest request, bool isNavigation, bool isDownload, string requestInitiator,
         ref bool disableDefaultHandling)
@@ -34,13 +38,23 @@ internal sealed class SafeRequests(Action<string> openTab, Action<string> report
         if (filter is null) return null!;
         using var main = browser?.MainFrame;
         var top = request.ResourceType == ResourceType.MainFrame ? request.Url : main?.Url;
+        if (browser is not null)
+        {
+            if (request.ResourceType == ResourceType.MainFrame) navigationSites[browser.Identifier] = request.Url;
+            else if (SiteClassifier.Host(top) is null) navigationSites.TryGetValue(browser.Identifier, out top);
+        }
         return new FilteringResourceHandler(filter, top, observe);
     }
 
     protected override bool OnBeforeBrowse(IWebBrowser control, IBrowser browser, IFrame frame,
         IRequest request, bool userGesture, bool isRedirect)
     {
-        if (!frame.IsMain || BrowserPolicy.IsWebUrl(request.Url) || request.Url == "about:blank") return false;
+        if (!frame.IsMain) return false;
+        if (BrowserPolicy.IsWebUrl(request.Url) || request.Url == "about:blank")
+        {
+            navigationSites[browser.Identifier] = request.Url;
+            return false;
+        }
         report("Navigation blocked: unsupported scheme or embedded credentials.");
         return true;
     }
