@@ -4,7 +4,8 @@ if (!$IsWindows) { throw 'Packaging verification requires Windows.' }
 $source = (Resolve-Path $PublishDirectory).Path
 New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
 $output = (Resolve-Path $OutputDirectory).Path
-$stage = Join-Path $env:RUNNER_TEMP ('aegis-portable-' + [guid]::NewGuid().ToString('N'))
+$tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+$stage = Join-Path $tempRoot ('aegis-portable-' + [guid]::NewGuid().ToString('N'))
 $bundle = Join-Path $stage 'AegisBrowser'
 New-Item -ItemType Directory -Force $bundle | Out-Null
 Copy-Item "$source/*" $bundle -Recurse

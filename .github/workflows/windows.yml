@@ -44,8 +44,10 @@ jobs:
             }
           }
       - name: Build Chromium filtering tests
+        if: ${{ !cancelled() }}
         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
       - name: Run Chromium filtering tests
+        if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: |
           $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe 2>&1
@@ -54,6 +56,7 @@ jobs:
           if ($code -ne 0) { throw "Chromium filtering tests exited with $code" }
           if (!(($output -join "`n") -match 'PASS: \d+ Chromium filtering checks')) { throw 'Chromium filtering suite did not complete' }
       - name: Browser privacy settings process restart
+        if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-settings-' + [guid]::NewGuid().ToString('N'))
