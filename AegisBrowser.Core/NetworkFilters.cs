@@ -102,6 +102,19 @@ public sealed class RequestFilter
     private readonly NetworkFilterList list;
     private readonly string[] blocks;
     private readonly string[] allows;
+    private readonly PrivacyMode mode;
+    private readonly string[] siteExceptions = [];
+    public IReadOnlyList<string> Unsupported => list.Unsupported;
+    public int RuleCount => list.RuleCount;
+    public RequestFilter(PrivacyConfiguration configuration)
+        : this(new NetworkFilterList((configuration.Mode != PrivacyMode.Custom || configuration.UseListsInCustom
+            ? configuration.FilterList + "\n" : "") + configuration.UserRules),
+            configuration.BlockedDomains, configuration.AllowedDomains)
+    {
+        if (!Enum.IsDefined(configuration.Mode)) throw new ArgumentException("Unknown privacy mode.");
+        mode = configuration.Mode;
+        siteExceptions = configuration.SiteExceptions.Select(NetworkFilterList.ValidateDomain).ToArray();
+    }
     public RequestFilter(NetworkFilterList list, IEnumerable<string>? blockedDomains = null, IEnumerable<string>? allowedDomains = null)
     {
         this.list = list;
@@ -115,10 +128,14 @@ public sealed class RequestFilter
         var host = SiteClassifier.Host(request.Url);
         if (host is null || host == "aegis-diagnostics.invalid") return Result(false, "Internal / non-network resource");
         if (request.MainFrame) return Result(false, "Top-level navigation");
+        var top = SiteClassifier.Host(request.TopUrl);
+        if (top is not null && siteExceptions.FirstOrDefault(d => SiteClassifier.DomainMatches(top, d)) is { } site)
+            return Result(false, "Site exception: " + site);
         if (allows.FirstOrDefault(d => SiteClassifier.DomainMatches(host, d)) is { } allowed) return Result(false, "Allow domain: " + allowed);
         if (list.Match(request, third, true) is { } exception) return Result(false, exception);
         if (blocks.FirstOrDefault(d => SiteClassifier.DomainMatches(host, d)) is { } blocked) return Result(true, "Block domain: " + blocked);
         if (list.Match(request, third, false) is { } match) return Result(true, match);
-        return Result(false, "No matching rule");
+        if (mode == PrivacyMode.Strict && third == true) return Result(true, "Strict: third-party request");
+        return Result(false, third is null ? "Unknown document site: allowed" : "No matching rule");
     }
 }

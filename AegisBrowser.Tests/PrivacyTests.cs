@@ -30,6 +30,24 @@ internal static class PrivacyTests
         Check(!Test("https://blocked.test/login", main: true).Blocked, "navigation preserved");
         Check(!Test(BrowserPolicy.DiagnosticsUrl).Blocked, "internal diagnostics");
         Check(!Test("data:text/plain,hello").Blocked, "nonnetwork resources");
+        var config = new PrivacyConfiguration();
+        var standard = new RequestFilter(config);
+        var tracking = new NetworkRequest("https://google-analytics.com/collect", "https://example.com", "ping");
+        Check(standard.Evaluate(tracking).Blocked, "Standard starter tracking list");
+        var cdn = new NetworkRequest("https://cdn.test/app.js", "https://example.com", "script");
+        Check(!standard.Evaluate(cdn).Blocked, "Standard permits unknown third parties");
+        var strict = new RequestFilter(config with { Mode = PrivacyMode.Strict });
+        Check(strict.Evaluate(cdn).Blocked, "Strict blocks third parties");
+        Check(!strict.Evaluate(cdn with { Url = "https://cdn.example.com/a.js" }).Blocked, "Strict permits first party");
+        Check(!strict.Evaluate(cdn with { MainFrame = true }).Blocked, "Strict permits top-level OAuth navigation");
+        Check(!strict.Evaluate(cdn with { TopUrl = "about:blank" }).Blocked, "Strict unknown site fail open");
+        var excepted = new RequestFilter(config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"] });
+        Check(!excepted.Evaluate(cdn).Blocked, "site exception overrides Strict");
+        Check(excepted.Evaluate(cdn with { TopUrl = "https://example.com.evil.test" }).Blocked, "site exception hostname boundary");
+        Check(!new RequestFilter(config with { Mode = PrivacyMode.Strict, AllowedDomains = ["cdn.test"] }).Evaluate(cdn).Blocked, "Strict explicit resource exception");
+        Check(!new RequestFilter(config with { Mode = PrivacyMode.Custom }).Evaluate(tracking).Blocked, "Custom list opt-in");
+        Check(new RequestFilter(config with { Mode = PrivacyMode.Custom, UseListsInCustom = true }).Evaluate(tracking).Blocked, "Custom enabled list");
+        Check(new RequestFilter(config with { Mode = PrivacyMode.Custom, UserRules = "||cdn.test^" }).Evaluate(cdn).Blocked, "Custom user rules");
         Console.WriteLine($"PASS: {count} privacy checks");
     }
 }
