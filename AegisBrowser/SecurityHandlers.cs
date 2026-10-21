@@ -24,8 +24,19 @@ internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
     }
 }
 
-internal sealed class SafeRequests(Action<string> openTab, Action<string> report) : RequestHandler
+internal sealed class SafeRequests(Action<string> openTab, Action<string> report, Func<RequestFilter>? filter = null,
+    Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
 {
+    protected override IResourceRequestHandler GetResourceRequestHandler(IWebBrowser control, IBrowser browser,
+        IFrame frame, IRequest request, bool isNavigation, bool isDownload, string requestInitiator,
+        ref bool disableDefaultHandling)
+    {
+        if (filter is null) return null!;
+        using var main = browser?.MainFrame;
+        var top = request.ResourceType == ResourceType.MainFrame ? request.Url : main?.Url;
+        return new FilteringResourceHandler(filter, top, observe);
+    }
+
     protected override bool OnBeforeBrowse(IWebBrowser control, IBrowser browser, IFrame frame,
         IRequest request, bool userGesture, bool isRedirect)
     {
