@@ -86,7 +86,7 @@ public sealed class MainForm : Form
         void Report(string message) => Post(() => { if (tabs.SelectedTab == page) status.Text = message; });
         void Open(string target) => Post(() => { if (!page.IsDisposed) NewTab(target); });
         browser.PermissionHandler = new DenyPermissions(Report);
-        browser.RequestHandler = new SafeRequests(Open, Report);
+        browser.RequestHandler = new SafeRequests(Open, Report, privacy.Evaluate);
         browser.LifeSpanHandler = new SafePopups(Open, Report);
         browser.DownloadHandler = new DenyDownloads(Report);
         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
