@@ -18,7 +18,7 @@ dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-con
 .\artifacts\win-x64\AegisBrowser.exe --profile=Personal
 ```
 
-Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 151.3.240; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The workflow also runs actual CEF browser integration tests and a limited published-app window smoke test; these do not replace full manual GUI acceptance. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
+Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 154.0.340; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The workflow also runs actual CEF browser integration tests and a limited published-app window smoke test; these do not replace full manual GUI acceptance. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
 
 ## Profiles
 
@@ -58,7 +58,7 @@ On a Windows machine, also verify:
 
 Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. Windows CI is the source of executable verification. See BUILD-STATUS.md for exact tested revisions and results; local compilation is unavailable.
 
-Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/151.3.240), [CefSharp project](https://github.com/cefsharp/CefSharp).
+Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/154.0.340), [CefSharp project](https://github.com/cefsharp/CefSharp).
 
 ## Browser integration suite
 

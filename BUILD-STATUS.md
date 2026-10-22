@@ -1,23 +1,35 @@
-# Windows release review — 2026-10-21
+# Windows release review — 2026-10-22
 
-**Release blocked; PR #4 remains draft and unmerged.** The review branch now includes main at `90a4f69` and the privacy work, retaining .NET 8 / WinForms / CefSharp 151.3.240. Historical green runs below do not certify this combined release candidate.
+**Windows automation passes; manual release acceptance remains incomplete. PR #4 is draft and unmerged.** Architecture remains .NET 8 / WinForms / CefSharp. CefSharp is now pinned to **154.0.340** (Chromium 154.0.8037.98) in the app and both browser harnesses.
 
-## Latest completed verification
+## Verified Windows result
 
-[Windows run 39616815340](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39616815340) for `868e7716fc1eb4db27b38d0ad6da4b6ecb85596b` **failed**. Logs were inspected:
+[Windows run 39709234492](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492), [job 119596331252](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/job/119596331252), completed successfully for implementation `487e1419cdafd5bdf9e2d13bc3e916726bbef9e8`. Completed logs and artifact metadata were inspected. This status update changes documentation after that verified implementation.
 
-- Application restore and win-x64 Release build passed; Windows SDK selected .NET 8.0.426.
-- 56 privacy and 50 policy/profile checks passed.
-- Browser integration passed rendered diagnostics, back/forward navigation, preserving address edits, rapid tab closure, renderer failure/recovery and blank-popup opener checks. Owner-popup closure, last-tab replacement, normal window shutdown, initial cookie/localStorage isolation, shared-profile storage and the OAuth redirect/postMessage fixture also passed. However, native Aura window assertions occurred, and closing the shared-profile control unexpectedly closed the test host before profile B could be checked. An observer assertion followed. The full suite did not complete; cookie restart and TLS coverage are not certified by this run.
-- 20 Chromium filtering checks passed: all three modes, redirect/iframe cancellation, explicit exceptions, pause/resume, preserved navigation, import/apply/remove/invalid edits, inspector selection and enforced CORS.
-- Browser settings restart checks passed in separate processes (2 write checks, 3 read checks), including normal window shutdown and reset of temporary pause/history.
-- Publish and both artifact uploads were skipped because the browser suite failed. No portable ZIP from this source is available or certified.
+| Check | Actual result |
+| --- | --- |
+| Runner / SDK | windows-latest, Windows x64, .NET 8.0.426 |
+| Restore / Release win-x64 app and harness builds | PASS; zero warnings and errors |
+| Privacy / policy and profile checks | PASS: 56 + 50 |
+| Browser integration write process | PASS: 31 checks, including popup ownership, tab/loading shutdown, renderer recovery, native close acknowledgement, sibling survival and TLS rejection (`CertAuthorityInvalid`) |
+| Persistent cookie/localStorage reads | PASS: 8 checks in each of three fresh processes using the same saved profiles |
+| Clean process termination | PASS: CEF-shutdown marker and zero exit in all four integration processes; native assertion gate remained enabled |
+| Chromium privacy filtering / settings | PASS: 20 checks, including all modes, import/rules/exceptions/pause and enforced CORS |
+| Settings process restart | PASS: 2 write + 3 read checks |
+| Self-contained publish and app smoke | PASS |
+| Portable ZIP round trip | PASS: 711 file hashes verified; extracted application startup/normal-close smoke passed |
+| Publish directory and portable artifact uploads | PASS |
 
-Earlier review runs exposed a missing test namespace import (fixed), unexpected native closure of the storage fixture host, and native shutdown assertions. These are real verification failures, not passing tests. The workflow now rejects native assertions even when a process returns zero.
+[Portable Windows x64 candidate](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/artifacts/12396835295), artifact ID `12396835295`, 262,457,683 bytes. The artifact contains the application ZIP and its checksum file. **Inner portable ZIP SHA-256:** `99265af54af447c70e6bd6b32b10c0e7b653e9687fa887e4b42449e299fc8af1`. GitHub's outer artifact digest is different: `3116c15622e4aea01cb5e900a1e92d1d9178b4f344d4875eb531792de4ee1892`.
 
-The popup-handler lifetime fix passed its owner-popup check in this run, but did not fix the remaining native shutdown failures. Follow-up `dfc1aa0fb71d623bf9cbcb39a2873959b79dcc30` introduces `BrowserView`: release the WinForms host handle after CEF close readiness, wait for the native close callback, then dispose the managed adapter (whose disposal itself requests native closure). The app and both harnesses share this ordering. This follow-up is **NOT YET VERIFIED**: no Windows run was listed for it when checked. The workflow is enabled; use Actions → Windows build and release artifact → Run workflow on `feature/privacy-filtering` if automatic execution does not appear.
+[Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/artifacts/12396033393), artifact ID `12396033393`, 261,647,790 bytes. See [installation instructions](docs/INSTALL-WINDOWS.md).
 
-Inspector selection retention is fixed and its Windows regression check passes. Packaging and installation instructions are implemented but await a fully passing run; see [installation instructions](docs/INSTALL-WINDOWS.md).
+## Failures investigated and corrections
+
+1. [Run 39616815340](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39616815340) failed with Aura assertions and unexpected `WM_CLOSE` of the storage host. `DoClose` returns true for embedded browsers, leaving host teardown to the app. Disposing the adapter at this point queues another native close while handlers are released. `BrowserView` now releases its WinForms host after close readiness, waits for `OnBeforeClose` to finish, then permits adapter disposal. Readiness also waits for owned popups. Repeated release calls share one task. Tests explicitly prove sibling browsers and their storage remain usable.
+2. [Run 39619861386](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39619861386) reached the previously blocked TLS test, which failed with `ConnectionClosed`. The fixture's ephemeral key was unsuitable for .NET 8 Schannel. It now imports a temporary user key container without adding certificate trust. Certificate-specific rejection is still required; transport failure is not accepted.
+3. [Run 39620364932](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39620364932) completed write and read checks but retained an intermittent Aura assertion. Direct native destruction and hide-before-destroy experiments on CEF 151 also failed, including [run 39708655361](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39708655361). The assertion maps to `Window::GetToplevelWindow()` after destruction in bundled Chromium 151.0.7922.174, including CEF-managed popup closure. Those Win32 workarounds were removed. Upgrading all harnesses and the app to stable CefSharp 154.0.340 cleared the remaining native failure with the same assertion gate and expanded tests. No individual upstream fixing commit is claimed.
+4. Inspector selection now follows the request observation ID across refresh; its Windows regression passes. No timeout increases, assertion exclusions, security switches or runtime-style changes were used to obtain the passing run.
 
 ## Remaining release gates
 
