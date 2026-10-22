@@ -51,7 +51,17 @@ internal static partial class Program
                 && Named<TextBox>(settings, "SiteExceptions").Text == "example.com", "settings survive actual browser process restart");
             Check(!pause.Checked && Named<DataGridView>(settings, "Requests").Rows.Count <= 1, "restart clears pause and previous request history");
         }
-        settings.Close(); form.Close();
+        settings.Close();
+        All(form).OfType<Button>().Single(c => c.Text == "Search").PerformClick();
+        var search = form.OwnedForms.OfType<SearchSettingsForm>().Single();
+        if (write)
+        {
+            Named<ComboBox>(search, "SearchEngine").SelectedItem = SearchEngines.Get("brave");
+            search.SaveSelection();
+            Check(form.SearchEngineId == "brave" && File.Exists(Path.Combine(root, "search.json")), "search selection saved through settings UI");
+        }
+        else Check(form.SearchEngineId == "brave" && ((SearchEngine)Named<ComboBox>(search, "SearchEngine").SelectedItem!).Id == "brave", "search selection survives browser process restart");
+        search.Close(); form.Close();
         await Wait(() => Task.FromResult(form.IsDisposed), "asynchronous window shutdown");
         Check(form.IsDisposed, "main window normal shutdown");
     }
