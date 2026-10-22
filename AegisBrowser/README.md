@@ -18,7 +18,7 @@ dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-con
 .\artifacts\win-x64\AegisBrowser.exe --profile=Personal
 ```
 
-Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 151.3.240; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The workflow also runs actual CEF browser integration tests and a limited published-app window smoke test; these do not replace full manual GUI acceptance. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
+Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 154.0.340; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The workflow also runs actual CEF browser integration tests and a limited published-app window smoke test; these do not replace full manual GUI acceptance. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
 
 ## Profiles
 
@@ -58,7 +58,7 @@ On a Windows machine, also verify:
 
 Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. Windows CI is the source of executable verification. See BUILD-STATUS.md for exact tested revisions and results; local compilation is unavailable.
 
-Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/151.3.240), [CefSharp project](https://github.com/cefsharp/CefSharp).
+Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/154.0.340), [CefSharp project](https://github.com/cefsharp/CefSharp).
 
 ## Browser integration suite
 
@@ -73,3 +73,15 @@ dotnet run --project AegisBrowser.BrowserTests -c Release --no-build -- read $ro
 ```
 
 The test-only WinForms executable uses the production handlers and in-memory HTTPS fixtures. It checks real cookies/localStorage across contexts, browsers and process restarts, OAuth-style redirects/opener messaging, rapid tab disposal and renderer recovery. It invokes CDP inside the test process to simulate user activation and crash a renderer; no network debugging listener or security bypass is enabled. Real-provider OAuth and interactive grant/deny UX remain manual checks.
+
+## Privacy filtering
+
+The **Privacy** toolbar button opens Standard/Strict/Custom settings, editable domain and ABP-style network rules, per-site exceptions, a temporary pause, and a local request inspector. Settings persist separately in each profile's `privacy.json`. The inspector records only origins in memory and displays matching rules and allowed/blocked decision counts.
+
+The bundled tracking list is intentionally small. Import standard UTF-8 privacy lists to extend it; unsupported syntax is reported. This is a documented network-syntax subset, not a full EasyList/uBlock implementation. Strict mode can break third-party dependencies and embedded authentication; explicit exceptions restore compatibility without changing Chromium security settings.
+
+See [privacy filtering documentation](../docs/privacy.md) for syntax, precedence, persistence, limitations and Windows acceptance cases. Real Chromium filtering tests are built and run by the Windows workflow before publishing. Consult [BUILD-STATUS.md](../BUILD-STATUS.md) for verified results; a compiled binary alone does not establish GUI acceptance.
+
+## Portable release candidate
+
+See [Windows installation instructions](../docs/INSTALL-WINDOWS.md) and [release review gates](../docs/release-review.md). Windows CI packages `AegisBrowser-v0.1.0-rc1-win-x64-portable.zip` with a SHA-256 checksum, verifies every extracted file and smoke-tests the extracted executable. The app folder is portable; profile data remains in LocalAppData. A successful candidate build does not replace manual stable-release acceptance.

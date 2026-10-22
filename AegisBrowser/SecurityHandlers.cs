@@ -44,12 +44,36 @@ internal sealed class OriginPermissions(Action<string> report) : PermissionHandl
     }
 }
 
-internal sealed class SafeRequests(Action<string> report) : RequestHandler
+internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null, Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
 {
+    // During document replacement CEF can expose an empty MainFrame.Url to early
+    // subresource callbacks. Keep only URL strings, never native frame wrappers.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> navigationSites = new();
+
+    protected override IResourceRequestHandler GetResourceRequestHandler(IWebBrowser control, IBrowser browser,
+        IFrame frame, IRequest request, bool isNavigation, bool isDownload, string requestInitiator,
+        ref bool disableDefaultHandling)
+    {
+        if (filter is null) return null!;
+        using var main = browser?.MainFrame;
+        var top = request.ResourceType == ResourceType.MainFrame ? request.Url : main?.Url;
+        if (browser is not null)
+        {
+            if (request.ResourceType == ResourceType.MainFrame) navigationSites[browser.Identifier] = request.Url;
+            else if (SiteClassifier.Host(top) is null) navigationSites.TryGetValue(browser.Identifier, out top);
+        }
+        return new FilteringResourceHandler(filter, top, observe);
+    }
+
     protected override bool OnBeforeBrowse(IWebBrowser control, IBrowser browser, IFrame frame,
         IRequest request, bool userGesture, bool isRedirect)
     {
-        if (!frame.IsMain || BrowserPolicy.IsWebUrl(request.Url) || request.Url == "about:blank") return false;
+        if (!frame.IsMain) return false;
+        if (BrowserPolicy.IsWebUrl(request.Url) || request.Url == "about:blank")
+        {
+            navigationSites[browser.Identifier] = request.Url;
+            return false;
+        }
         report("Navigation blocked: unsupported scheme or embedded credentials.");
         return true;
     }
@@ -76,10 +100,35 @@ internal sealed class SafeRequests(Action<string> report) : RequestHandler
     }
 }
 
-internal sealed class SafePopups(Action<string> report, Action? ownerClosed = null) : LifeSpanHandler
+internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null) : LifeSpanHandler
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
     private volatile bool closing;
+    private readonly TaskCompletionSource<bool> closeReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task OwnerCloseReady => closeReady.Task;
+    private readonly TaskCompletionSource<bool> closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task OwnerClosed => closed.Task;
+
+    private bool ownerClosing; // Accessed only on the CEF UI thread.
+
+    private void CompleteOwnerClose()
+    {
+        if (ownerClosing && popups.IsEmpty && closeReady.TrySetResult(true)) ownerCloseReady?.Invoke();
+    }
+
+    protected override bool DoClose(IWebBrowser control, IBrowser browser)
+    {
+        if (browser.IsPopup) return false;
+        // Suppress CEF's WM_CLOSE to the top-level WinForms owner. Release the
+        // embedded host only after this native close callback has returned.
+        Cef.UIThreadTaskFactory.StartNew(() =>
+        {
+            ownerClosing = true;
+            CompleteOwnerClose();
+        });
+        return true;
+    }
+
     internal int PopupCount => popups.Count;
 
     internal void ClosePopups()
@@ -101,8 +150,14 @@ internal sealed class SafePopups(Action<string> report, Action? ownerClosed = nu
 
     protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
     {
-        if (browser.IsPopup) popups.TryRemove(browser.Identifier, out _);
-        else ownerClosed?.Invoke();
+        if (browser.IsPopup)
+        {
+            popups.TryRemove(browser.Identifier, out _);
+            // Keep the embedded owner and its shared handler alive until all
+            // native popup close callbacks have finished.
+            Cef.UIThreadTaskFactory.StartNew(CompleteOwnerClose);
+        }
+        else Cef.UIThreadTaskFactory.StartNew(() => closed.TrySetResult(true));
     }
 
     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,

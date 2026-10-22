@@ -1,4 +1,5 @@
 using AegisBrowser;
+using AegisBrowser.Core;
 using CefSharp;
 using CefSharp.WinForms;
 using System.Net;
@@ -33,6 +34,7 @@ internal static class Program
                 Console.WriteLine(dependency + ": " + File.Exists(dependencyPath));
                 if (dependency.EndsWith(".json") && File.Exists(dependencyPath)) Console.WriteLine(File.ReadAllText(dependencyPath));
             }
+            Cef.EnableWaitForBrowsersToClose();
             initialized = Cef.Initialize(new CefSettings
             {
                 RootCachePath = root, CachePath = Path.Combine(root, "global"),
@@ -41,6 +43,7 @@ internal static class Program
             if (!initialized) throw new Exception("CEF initialization failed");
             using var global = Cef.GetGlobalRequestContext();
             global.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory());
+            global.RegisterSchemeHandlerFactory("https", "browser-tests.invalid", new Fixture());
             using var host = new Form { Width = 1000, Height = 700, Text = "Aegis CEF integration tests" };
             host.Shown += async (_, _) =>
             {
@@ -67,7 +70,8 @@ internal static class Program
             Application.Run(host);
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
-        finally { if (initialized) Cef.Shutdown(); }
+        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
+        if (result == 0) Console.WriteLine("PASS: CEF shutdown completed (" + args[0] + ")");
         return result;
     }
 
@@ -111,6 +115,15 @@ internal static class Program
         await Js(browser, "document.readyState");
     }
 
+    private static async Task LoadReady(ChromiumWebBrowser web, string url)
+    {
+        var loaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<FrameLoadEndEventArgs> handler = (_, e) => { if (e.Frame.IsMain && e.Url == url) loaded.TrySetResult(true); };
+        web.FrameLoadEnd += handler;
+        try { web.Load(url); await loaded.Task.WaitAsync(TimeSpan.FromSeconds(25)); await Ready(web); }
+        finally { web.FrameLoadEnd -= handler; }
+    }
+
     private static async Task ReloadReady(ChromiumWebBrowser browser)
     {
         var loaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -127,10 +140,25 @@ internal static class Program
 
     private static void Observe(ChromiumWebBrowser web)
     {
+        if (web.LifeSpanHandler is not SafePopups) web.LifeSpanHandler = new SafePopups(Console.WriteLine);
         // Subscribe before creating the handle, ensuring CEF's load handler is installed.
         web.FrameLoadEnd += (_, e) => { if (e.Frame.IsMain) Console.WriteLine($"Loaded {e.Url}: HTTP {e.HttpStatusCode}"); };
         web.LoadError += (_, e) => Console.WriteLine($"Load error {e.ErrorCode}: {e.FailedUrl}");
         web.IsBrowserInitializedChanged += (_, _) => Console.WriteLine($"Initialized: {web.IsBrowserInitialized}");
+    }
+
+    private static async Task CloseWeb(ChromiumWebBrowser web)
+    {
+        if (web.IsDisposed) return;
+        var life = (SafePopups)web.LifeSpanHandler;
+        life.ClosePopups();
+        web.GetBrowserHost().CloseBrowser(true);
+        await life.OwnerCloseReady.WaitAsync(TimeSpan.FromSeconds(10));
+        var release = ((BrowserView)web).ReleaseNativeHostAsync();
+        Check(ReferenceEquals(release, ((BrowserView)web).ReleaseNativeHostAsync()), "duplicate host release shares one operation");
+        await release;
+        Check(life.OwnerClosed.IsCompletedSuccessfully && !web.IsHandleCreated, "native browser closed before adapter disposal");
+        web.Dispose();
     }
 
     private static async Task Storage(Form host, string root, string phase)
@@ -144,8 +172,11 @@ internal static class Program
         });
         using var a = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-a") }, Handler());
         using var b = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "profile-b") }, Handler());
-        using var first = new ChromiumWebBrowser(Origin, requestContext: a) { Dock = DockStyle.Left, Width = 450 };
-        using var second = new ChromiumWebBrowser(Origin, requestContext: b) { Dock = DockStyle.Fill };
+        using var first = new BrowserView(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Left, Width = 450 };
+        using var second = new BrowserView(Origin, requestContext: b) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
+        var unexpectedHostClose = false;
+        FormClosingEventHandler closingHandler = (_, _) => unexpectedHostClose = true;
+        host.FormClosing += closingHandler;
         first.RequestHandler = new SafeRequests(Console.WriteLine);
         first.PermissionHandler = new OriginPermissions(Console.WriteLine);
         var popupHandler = new SafePopups(Console.WriteLine);
@@ -161,7 +192,7 @@ internal static class Program
             await Js(first, "document.cookie='marker=A; Max-Age=86400; Secure; SameSite=Lax; Path=/'; localStorage.setItem('marker','A'); 'ok'");
             Check(await Js(second, "document.cookie + localStorage.getItem('marker')") == "null", "actual CEF cookie and localStorage isolation");
             await Js(second, "document.cookie='marker=B; Max-Age=86400; Secure; SameSite=Lax; Path=/'; localStorage.setItem('marker','B'); 'ok'");
-            using var same = new ChromiumWebBrowser(Origin, requestContext: a) { Dock = DockStyle.Bottom, Height = 150 };
+            using var same = new BrowserView(Origin, requestContext: a) { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Bottom, Height = 150 };
             Observe(same); host.Controls.Add(same); await Ready(same);
             Check(await Js(same, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=A|A", "same-profile browser shares storage");
             // User activation is injected through CDP only in this test process. Production has no remote-debugging port.
@@ -181,10 +212,20 @@ internal static class Program
             using var flushA = new Completion(); using var flushB = new Completion();
             if (!cookiesA.FlushStore(flushA) || !cookiesB.FlushStore(flushB)) throw new Exception("FlushStore refused");
             await Task.WhenAll(flushA.Done.Task, flushB.Done.Task).WaitAsync(TimeSpan.FromSeconds(10));
-            popupHandler.ClosePopups();
+            await Wait(() => popupHandler.PopupCount == 0, "OAuth popup self-close completes");
+            await CloseWeb(same);
+            // Drain both message loops; a queued WM_CLOSE must not escape detection.
+            await Cef.UIThreadTaskFactory.StartNew(() => { });
+            await Js(second, "document.readyState");
+            Check(!unexpectedHostClose && !host.IsDisposed && !second.IsDisposed, "closing one browser preserves its host and sibling");
         }
         Check(await Js(first, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=A|A", phase + " profile A persistence");
         Check(await Js(second, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=B|B", phase + " profile B persistence");
+        await CloseWeb(first);
+        Check(await Js(second, "document.cookie + '|' + localStorage.getItem('marker')") == "marker=B|B", "sibling storage survives owner disposal");
+        await CloseWeb(second);
+        Check(!unexpectedHostClose && !host.IsDisposed, "closing all embedded browsers preserves application host");
+        host.FormClosing -= closingHandler;
         host.Controls.Remove(first); host.Controls.Remove(second);
     }
 
@@ -194,7 +235,11 @@ internal static class Program
         var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("localhost");
         request.CertificateExtensions.Add(san.Build());
-        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+        using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+        // Schannel on .NET 8 cannot use CreateSelfSigned's ephemeral key.
+        // Import a temporary user key container; do not add trust to any store.
+        using var certificate = new X509Certificate2(generated.Export(X509ContentType.Pfx),
+            (string?)null, X509KeyStorageFlags.UserKeySet);
         using var server = new TcpListener(IPAddress.Loopback, 0); server.Start();
         var port = ((IPEndPoint)server.LocalEndpoint).Port;
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -211,13 +256,13 @@ internal static class Program
                         await stream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate }, stop.Token);
                         await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nuntrusted"), stop.Token);
                     }
-                    catch (AuthenticationException) { }
-                    catch (IOException) { }
+                    catch (AuthenticationException ex) { Console.WriteLine("TLS fixture handshake: " + ex); }
+                    catch (IOException ex) { Console.WriteLine("TLS fixture transport: " + ex.Message); }
                 }
             }
             catch (OperationCanceledException) { }
         });
-        using var web = new ChromiumWebBrowser("about:blank") { Dock = DockStyle.Fill };
+        using var web = new BrowserView("about:blank") { LifeSpanHandler = new CefSharp.Handler.LifeSpanHandler(), Dock = DockStyle.Fill };
         var failure = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
         web.RequestHandler = new SafeRequests(Console.WriteLine);
         Observe(web);
@@ -230,7 +275,7 @@ internal static class Program
             var code = await failure.Task.WaitAsync(TimeSpan.FromSeconds(20));
             Check(code.ToString().StartsWith("Cert", StringComparison.Ordinal), "untrusted TLS certificate rejected by production handler: " + code);
         }
-        finally { stop.Cancel(); await serving; host.Controls.Remove(web); }
+        finally { stop.Cancel(); await serving; await CloseWeb(web); host.Controls.Remove(web); }
     }
 
     private static async Task TabsAndRenderer()
@@ -244,7 +289,19 @@ internal static class Program
         ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
         await Wait(() => tabs.TabCount == 1, "initial tab"); await Ready(Current());
         Check(await Js(Current(), "document.querySelector('#result').textContent.includes('userAgent')") == "True", "embedded diagnostics renders in CEF");
+        var navigating = Current();
+        await LoadReady(navigating, Origin + "one");
+        await LoadReady(navigating, Origin + "two");
+        Button("←").PerformClick(); await Wait(() => navigating.Address == Origin + "one" && !navigating.IsLoading, "back navigation");
+        Button("→").PerformClick(); await Wait(() => navigating.Address == Origin + "two" && !navigating.IsLoading, "forward navigation");
+        Check(true, "back and forward navigation buttons");
+        var address = toolbar.Controls.OfType<TextBox>().Single();
+        address.Focus(); address.Text = "editing.example/path";
+        await ReloadReady(navigating);
+        Check(address.Text == "editing.example/path", "loading does not overwrite an address being typed");
+        await LoadReady(navigating, BrowserPolicy.DiagnosticsUrl);
         for (var i = 0; i < 5; i++) { Button("+").PerformClick(); Button("×").PerformClick(); }
+        await Wait(() => tabs.TabCount == 1, "rapid native tab closure");
         Check(tabs.TabCount == 1, "rapid tab creation and disposal during loading");
         Button("+").PerformClick(); await Ready(Current());
         var damaged = Current();
@@ -262,11 +319,19 @@ internal static class Program
         await Wait(() => ownerPopups.PopupCount == 1, "blank popup created");
         Check(await Js(owner, "window.blankOpener") == "True", "user-initiated about:blank preserves opener");
         Button("×").PerformClick();
+        Button("×").PerformClick(); // Idempotent while the selected tab is retiring.
         await Wait(() => ownerPopups.PopupCount == 0, "owner tab closes its native popup");
+        await Wait(() => tabs.TabCount == 1, "owner tab removed after native close readiness");
         Check(true, "popup lifecycle ends with owner tab");
+        var last = Current();
         Button("×").PerformClick();
+        await Wait(() => tabs.TabCount == 1 && Current() != last, "last tab replacement created");
         await Ready(Current()); Check(tabs.TabCount == 1, "last-tab replacement");
+        for (var i = 0; i < 4; i++) Button("+").PerformClick();
         form.Close();
+        form.Close(); // Repeated window-close requests during tab initialization.
+        await Wait(() => form.IsDisposed, "asynchronous window shutdown");
+        Check(true, "window closes after tab close readiness");
     }
 
     private sealed class Completion : ICompletionCallback

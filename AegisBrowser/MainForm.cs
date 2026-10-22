@@ -13,17 +13,31 @@ public sealed class MainForm : Form
     private readonly Button forward;
     private readonly Button reload;
     private bool closing;
+    private bool closeComplete;
+    private readonly PrivacySession privacy;
+    private readonly PrivacySettingsStore? privacyStore;
+    private PrivacyForm? privacyWindow;
     private readonly HashSet<TabPage> retiring = new();
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
-    public MainForm(string profile)
+    public MainForm(string profile, string? profilePath = null)
     {
+        var configuration = new PrivacyConfiguration();
+        string? privacyWarning = null;
+        if (profilePath is not null)
+        {
+            privacyStore = new(profilePath);
+            try { configuration = privacyStore.Load(); }
+            catch (IOException ex) { privacyWarning = ex.Message; }
+        }
+        privacy = new(configuration);
+        if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
         Text = $"Aegis Browser — {profile}";
         Width = 1250;
         Height = 850;
         MinimumSize = new Size(750, 450);
-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 8 };
-        for (var i = 0; i < 8; i++)
+        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 9 };
+        for (var i = 0; i < 9; i++)
             bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
                 i == 3 ? 100 : i >= 6 ? 100 : 48));
         back = MakeButton("←", () => Current?.Back());
@@ -37,6 +51,12 @@ public sealed class MainForm : Form
         bar.Controls.Add(MakeButton("×", CloseTab), 5, 0);
         bar.Controls.Add(MakeButton("Diagnostics", () => NewTab(BrowserPolicy.DiagnosticsUrl)), 6, 0);
         bar.Controls.Add(MakeButton("DevTools", () => Current?.ShowDevTools()), 7, 0);
+        bar.Controls.Add(MakeButton("Privacy", () =>
+        {
+            if (privacyWindow is null || privacyWindow.IsDisposed)
+                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save));
+            privacyWindow.Show(this); privacyWindow.BringToFront();
+        }), 8, 0);
         address.KeyDown += (_, e) =>
         {
             if (e.KeyCode != Keys.Enter) return;
@@ -54,7 +74,22 @@ public sealed class MainForm : Form
         Controls.Add(bottom);
         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
-        FormClosing += (_, _) => closing = true;
+        FormClosing += (_, e) =>
+        {
+            if (closeComplete) return;
+            e.Cancel = true;
+            if (closing) return;
+            closing = true;
+            foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
+            {
+                retiring.Add(page);
+                var web = page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
+                if (web is null || web.IsDisposed) { retiring.Remove(page); continue; }
+                ((SafePopups)web.LifeSpanHandler).ClosePopups();
+                if (web.IsBrowserInitialized) web.GetBrowserHost().CloseBrowser(true);
+            }
+            if (retiring.Count == 0) { closeComplete = true; BeginInvoke((Action)Close); }
+        };
         FormClosed += (_, _) =>
         {
             foreach (var page in retiring.ToArray()) page.Dispose();
@@ -77,11 +112,18 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { /* Handle destroyed during shutdown. */ }
     }
 
+    private void PostLifetime(Action action)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke((Action)(() => { if (!IsDisposed) action(); })); }
+        catch (InvalidOperationException) { }
+    }
+
     private void NewTab(string url)
     {
         if (closing) return;
         var page = new TabPage("New tab") { Tag = "Loading…" };
-        var browser = new ChromiumWebBrowser(url) { Dock = DockStyle.Fill };
+        var browser = new BrowserView(url) { Dock = DockStyle.Fill };
         void Report(string message) => Post(() =>
         {
             if (page.IsDisposed) return;
@@ -89,13 +131,18 @@ public sealed class MainForm : Form
             if (tabs.SelectedTab == page) status.Text = message;
         });
         browser.PermissionHandler = new OriginPermissions(Report);
-        browser.RequestHandler = new SafeRequests(Report);
-        var popups = new SafePopups(Report, () => Post(() =>
+        browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
+        var popups = new SafePopups(Report, () => PostLifetime(async () =>
         {
+            try { await browser.ReleaseNativeHostAsync(); }
+            catch (TimeoutException) { Report("Browser shutdown timed out; close the window to retry."); return; }
             retiring.Remove(page);
+            tabs.TabPages.Remove(page);
             page.Dispose();
+            if (closing && retiring.Count == 0) { closeComplete = true; Close(); }
+            else if (!closing && tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
         }));
-        browser.IsBrowserInitializedChanged += (_, _) => Post(() =>
+        browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
         {
             if (retiring.Contains(page) && browser.IsBrowserInitialized)
                 browser.GetBrowserHost().CloseBrowser(true);
@@ -144,13 +191,10 @@ public sealed class MainForm : Form
     {
         if (tabs.SelectedTab is not { } page) return;
         var browser = Current!;
-        retiring.Add(page);
+        if (!retiring.Add(page)) return;
         ((SafePopups)browser.LifeSpanHandler).ClosePopups();
-        tabs.TabPages.Remove(page);
-        // Native creation/closure is asynchronous. Dispose the HWND only after CEF's
-        // OnBeforeClose; disposing during creation can destroy a window CEF still uses.
+        // Keep the TabPage parent HWND alive until CEF reports DoClose readiness; disposing during creation can destroy a window CEF still uses.
         if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
-        if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>

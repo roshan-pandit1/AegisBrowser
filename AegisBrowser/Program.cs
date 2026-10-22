@@ -28,12 +28,13 @@ internal static class Program
             };
             // Do not pass application command-line arguments through to Chromium.
             settings.CommandLineArgsDisabled = true;
+            Cef.EnableWaitForBrowsersToClose();
             initialized = Cef.Initialize(settings);
             if (!initialized) throw new InvalidOperationException("Chromium initialization failed.");
             using var context = Cef.GetGlobalRequestContext();
             if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory()))
                 throw new InvalidOperationException("Could not register local diagnostics.");
-            using var window = new MainForm(profile);
+            using var window = new MainForm(profile, path);
             Application.Run(window);
         }
         catch (Exception ex)
@@ -44,7 +45,7 @@ internal static class Program
         }
         finally
         {
-            if (initialized) Cef.Shutdown();
+            if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); }
             lease?.Dispose();
         }
     }
