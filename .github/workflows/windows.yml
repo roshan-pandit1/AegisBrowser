@@ -34,7 +34,8 @@ jobs:
         timeout-minutes: 5
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-browser-tests-' + [guid]::NewGuid().ToString('N'))
-          foreach ($phase in @('write', 'read')) {
+          # Reopen the same persistent profiles repeatedly to expose close races.
+          foreach ($phase in @('write', 'read', 'read', 'read')) {
             $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
