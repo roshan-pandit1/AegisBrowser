@@ -1,5 +1,6 @@
 using AegisBrowser;
 using AegisBrowser.Core;
+using AegisBrowser.Lab;
 using CefSharp;
 using CefSharp.WinForms;
 using System.Net;
@@ -52,7 +53,7 @@ internal static class Program
             {
                 try
                 {
-                    if (args[0] == "write") await TabsAndRenderer();
+                    if (args[0] == "write") { await TabsAndRenderer(); await AuthorizedLab(); }
                     await Storage(host, root, args[0]);
                     if (args[0] == "write") await RejectUntrustedTls(host);
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
@@ -355,6 +356,58 @@ internal static class Program
         form.Close(); // Repeated window-close requests during tab initialization.
         await Wait(() => form.IsDisposed, "asynchronous window shutdown");
         Check(true, "window closes after tab close readiness");
+    }
+
+    private static async Task AuthorizedLab()
+    {
+        await using var server = await LabServer.StartAsync();
+        foreach (var profile in new[] { LabProfile.Baseline, LabProfile.StrictPrivacy, LabProfile.CustomRules })
+        {
+            using var dashboard = new LabDashboard(server, profile);
+            dashboard.Show();
+            try
+            {
+                await Ready(dashboard.Browser);
+                dashboard.RunScenario("Navigation");
+                await Wait(() => dashboard.Browser.Address == server.Origin && !dashboard.Browser.IsLoading, "lab navigation");
+                await Ready(dashboard.Browser);
+                await Wait(() => server.Report.Snapshot().Any(e => e.Kind == LabEventKind.Complete), "lab network instrumentation");
+                if (profile == LabProfile.Baseline)
+                {
+                    var scriptDeadline = DateTime.UtcNow.AddSeconds(10);
+                    while (await Js(dashboard.Browser, "window.thirdPartyFixture === true") != "True")
+                    { if (DateTime.UtcNow > scriptDeadline) throw new TimeoutException("third-party fixture"); await Task.Delay(50); }
+                    Check(await Js(dashboard.Browser, "window.thirdPartyFixture === true") == "True", "lab baseline third-party script");
+                    foreach (var (name, expected) in new[] { ("Allow", 200), ("Challenge", 403), ("Deny", 403), ("Unavailable", 403) })
+                    {
+                        var loaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        EventHandler<FrameLoadEndEventArgs> handler = (_, e) => { if (e.Frame.IsMain && e.Url.EndsWith("/scenario")) loaded.TrySetResult(true); };
+                        dashboard.Browser.FrameLoadEnd += handler;
+                        try { dashboard.RunScenario(name); await loaded.Task.WaitAsync(TimeSpan.FromSeconds(25)); }
+                        finally { dashboard.Browser.FrameLoadEnd -= handler; }
+                        await Ready(dashboard.Browser);
+                        // Wait for fetch completion, not merely document load.
+                        var deadline = DateTime.UtcNow.AddSeconds(10);
+                        while (await Js(dashboard.Browser, "!!window.labResult") != "True")
+                        { if (DateTime.UtcNow > deadline) throw new TimeoutException("mock result"); await Task.Delay(50); }
+                        Check(await Js(dashboard.Browser, "window.labResult.access") == expected.ToString(), "CEF mock " + name + " enforced");
+                    }
+                    dashboard.RunScenario("Redirect");
+                    await Wait(() => server.Report.Snapshot().Count(e => e.Kind == LabEventKind.Redirect) >= 2, "lab redirects");
+                    Check(true, "lab redirect instrumentation");
+                    dashboard.RunScenario("TLS rejection");
+                    await Wait(() => server.Report.Snapshot().Any(e => e.Kind == LabEventKind.TlsFailure && e.Outcome == "CertAuthorityInvalid"), "lab TLS rejection");
+                    Check(true, "lab TLS errors recorded without override");
+                }
+                else
+                {
+                    Check(await Js(dashboard.Browser, "window.thirdPartyFixture === true") == "False", "lab " + profile + " blocks third party");
+                    Check(server.Report.Snapshot().Any(e => e.Outcome == "Blocked"), "lab filter decision recorded");
+                }
+            }
+            finally { dashboard.Close(); await Wait(() => dashboard.IsDisposed, "lab native shutdown"); }
+            Check(true, "lab dashboard clean shutdown");
+        }
     }
 
     private sealed class Completion : ICompletionCallback

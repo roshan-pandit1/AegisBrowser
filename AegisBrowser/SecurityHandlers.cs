@@ -100,7 +100,7 @@ internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, F
     }
 }
 
-internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null) : LifeSpanHandler
+internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null, bool blockAllPopups = false) : LifeSpanHandler
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
     private volatile bool closing;
@@ -168,7 +168,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
         newBrowser = null!;
         // Keep CEF's original browsing context: window.opener, POST data, named-window
         // reuse and postMessage are required by OAuth. CEF still enforces COOP/SOP.
-        if (!closing && userGesture && (string.IsNullOrEmpty(targetUrl) || targetUrl == "about:blank"
+        if (!blockAllPopups && !closing && userGesture && (string.IsNullOrEmpty(targetUrl) || targetUrl == "about:blank"
             || BrowserPolicy.IsWebUrl(targetUrl))) return false;
         report("Popup blocked: a user gesture and a web destination are required.");
         return true;
