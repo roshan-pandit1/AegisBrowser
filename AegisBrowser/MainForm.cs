@@ -17,6 +17,10 @@ public sealed class MainForm : Form
     private readonly PrivacySession privacy;
     private readonly PrivacySettingsStore? privacyStore;
     private PrivacyForm? privacyWindow;
+    private SearchSettings searchSettings = new();
+    private readonly SearchSettingsStore? searchStore;
+    private SearchSettingsForm? searchWindow;
+    internal string SearchEngineId => searchSettings.EngineId;
     private readonly HashSet<TabPage> retiring = new();
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
@@ -26,6 +30,9 @@ public sealed class MainForm : Form
         string? privacyWarning = null;
         if (profilePath is not null)
         {
+            searchStore = new(profilePath);
+            try { searchSettings = searchStore.Load(); }
+            catch (IOException ex) { Shown += (_, _) => MessageBox.Show(this, ex.Message, "Search settings warning"); }
             privacyStore = new(profilePath);
             try { configuration = privacyStore.Load(); }
             catch (IOException ex) { privacyWarning = ex.Message; }
@@ -36,8 +43,8 @@ public sealed class MainForm : Form
         Width = 1250;
         Height = 850;
         MinimumSize = new Size(750, 450);
-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 9 };
-        for (var i = 0; i < 9; i++)
+        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 10 };
+        for (var i = 0; i < 10; i++)
             bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
                 i == 3 ? 100 : i >= 6 ? 100 : 48));
         back = MakeButton("←", () => Current?.Back());
@@ -57,13 +64,24 @@ public sealed class MainForm : Form
                 privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save));
             privacyWindow.Show(this); privacyWindow.BringToFront();
         }), 8, 0);
+        bar.Controls.Add(MakeButton("Search", () =>
+        {
+            if (searchWindow is null || searchWindow.IsDisposed)
+                searchWindow = new SearchSettingsForm(searchSettings, settings =>
+                {
+                    searchStore?.Save(settings); // Publish only after persistence succeeds.
+                    searchSettings = settings;
+                    address.PlaceholderText = "Search " + SearchEngines.Get(settings.EngineId).Name + " or enter address";
+                });
+            searchWindow.Show(this); searchWindow.BringToFront();
+        }), 9, 0);
+        address.AccessibleName = "Search or enter address";
+        address.PlaceholderText = "Search " + SearchEngines.Get(searchSettings.EngineId).Name + " or enter address";
         address.KeyDown += (_, e) =>
         {
             if (e.KeyCode != Keys.Enter) return;
             e.SuppressKeyPress = true;
-            var url = BrowserPolicy.NormalizeAddress(address.Text);
-            if (url is null) status.Text = "Enter an HTTP(S) address without credentials, or aegis:diagnostics.";
-            else Current?.Load(url);
+            SubmitAddress(address.Text);
         };
         address.Leave += (_, _) => UpdateNavigation();
         var bottom = new StatusStrip();
@@ -95,6 +113,19 @@ public sealed class MainForm : Form
             foreach (var page in retiring.ToArray()) page.Dispose();
             retiring.Clear();
         };
+    }
+
+    internal bool SubmitAddress(string input)
+    {
+        var result = AddressInputResolver.Resolve(input, searchSettings.EngineId);
+        if (result.Kind == AddressInputKind.Empty) return false;
+        if (result.Kind == AddressInputKind.Rejected)
+        {
+            status.Text = "Address rejected. Use HTTP(S), aegis:diagnostics or about:blank; credentials and other schemes are not supported.";
+            return false;
+        }
+        Current?.Load(result.Url!);
+        return true;
     }
 
     private static Button MakeButton(string text, Action action)

@@ -30,7 +30,7 @@ Profiles isolate stored browsing state, not OS users, IP addresses or hardware c
 
 ## Controls and policy
 
-- Ctrl+L focuses the address bar; bare hosts default to HTTPS. Explicit HTTP is supported. Embedded URL credentials and unsupported top-level schemes are rejected.
+- Ctrl+L focuses the address bar. Press Enter to navigate or search; typing alone makes no search requests. Bare domains default to HTTPS; localhost and loopback IPs default to HTTP. The **Search** toolbar button selects DuckDuckGo, Google, Bing or Brave Search per profile. See [address bar and search settings](../docs/search.md). Embedded URL credentials and unsupported schemes are rejected.
 - Ctrl+T / Ctrl+W open and close tabs; Ctrl+Tab cycles tabs. The last closed tab is replaced by diagnostics.
 - Alt+Left / Alt+Right navigate; F5 reloads; Escape stops. F12 or the DevTools button opens Chromium tools.
 - User-initiated HTTP(S) and blank popups use native Chromium windows, preserving opener relationships, redirects, POST data and postMessage for OAuth. Automatic popups and unsupported targets are blocked. Native popup windows close when their owner tab closes. Chromium still enforces same-origin policy and COOP; identity providers that prohibit embedded browsers remain unsupported.

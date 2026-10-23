@@ -11,6 +11,7 @@ if (args.Length == 2 && args[0] == "--probe-lock")
 }
 
 PrivacyTests.Run();
+AddressTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {

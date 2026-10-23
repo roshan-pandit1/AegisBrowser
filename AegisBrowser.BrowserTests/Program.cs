@@ -44,6 +44,9 @@ internal static class Program
             using var global = Cef.GetGlobalRequestContext();
             global.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory());
             global.RegisterSchemeHandlerFactory("https", "browser-tests.invalid", new Fixture());
+            // Local HTTPS fixtures exercise the actual omnibox without contacting search providers.
+            foreach (var engine in SearchEngines.All)
+                global.RegisterSchemeHandlerFactory("https", new Uri(engine.Template.Replace("{searchTerms}", "test")).Host, new Fixture());
             using var host = new Form { Width = 1000, Height = 700, Text = "Aegis CEF integration tests" };
             host.Shown += async (_, _) =>
             {
@@ -299,6 +302,26 @@ internal static class Program
         address.Focus(); address.Text = "editing.example/path";
         await ReloadReady(navigating);
         Check(address.Text == "editing.example/path", "loading does not overwrite an address being typed");
+        var previousUrl = navigating.Address;
+        address.Text = "news";
+        await Js(navigating, "document.readyState");
+        Check(navigating.Address == previousUrl, "typing does not navigate or search");
+        Check(form.SubmitAddress(address.Text), "omnibox submission accepted");
+        await Wait(() => navigating.Address == SearchEngines.Get("duckduckgo").Search("news") && !navigating.IsLoading, "default search navigation");
+        await Ready(navigating);
+        Check(await Js(navigating, "location.hostname") == "duckduckgo.com", "search loads selected provider in current tab");
+        Button("←").PerformClick(); await Wait(() => navigating.Address == previousUrl && !navigating.IsLoading, "back from search");
+        Button("→").PerformClick(); await Wait(() => navigating.Address.StartsWith("https://duckduckgo.com/") && !navigating.IsLoading, "forward to search");
+        Check(tabs.TabCount == 1, "search preserves tab count and history");
+        Button("Search").PerformClick();
+        var searchForm = form.OwnedForms.OfType<SearchSettingsForm>().Single();
+        var picker = searchForm.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<ComboBox>().Single();
+        picker.SelectedItem = SearchEngines.Get("google"); searchForm.SaveSelection(); searchForm.Close();
+        Check(form.SearchEngineId == "google" && form.SubmitAddress("日本語 + café"), "selected search engine applies immediately");
+        await Wait(() => navigating.Address == SearchEngines.Get("google").Search("日本語 + café") && !navigating.IsLoading, "encoded Google query");
+        await Ready(navigating);
+        Check(await Js(navigating, "new URL(location.href).searchParams.get('q')") == "日本語 + café", "search query reaches renderer without double encoding");
+        Check(!form.SubmitAddress("javascript:alert(1)"), "omnibox rejects script schemes");
         await LoadReady(navigating, BrowserPolicy.DiagnosticsUrl);
         for (var i = 0; i < 5; i++) { Button("+").PerformClick(); Button("×").PerformClick(); }
         await Wait(() => tabs.TabCount == 1, "rapid native tab closure");
