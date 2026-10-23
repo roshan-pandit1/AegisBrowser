@@ -1,3 +1,44 @@
+# Security Lab milestone 1 — Mock Allow verification (2026-10-23)
+
+[Draft PR #7](https://github.com/roshan-pandit1/AegisBrowser/pull/7), branch `feature/security-lab-mock-allow`, starts from main `98a8835575c22268a456a64a5033b65e9d2c7840`. It is independent of the broader draft PR #6. It remains draft and unmerged.
+
+## Actual Windows results
+
+[Windows run 39970819828](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970819828), [job 120472697977](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970819828/job/120472697977), **SUCCESS** for implementation `7b662472b3ca3dc67fb2d24f628ba8d5ab692310`. Completed job logs and artifact metadata were inspected. This subsequent documentation commit records that tested implementation; its own CI result is reported on PR #7.
+
+| Check | Actual result |
+| --- | --- |
+| Restore/build | PASS: windows-latest, .NET 8, win-x64 Release; zero compiler warnings/errors |
+| Mock Allow endpoint/workflow suite | PASS: 26 checks, including loopback, provider/decision contract, unique IDs, forged Allow, session separation, reset/replay, provider errors, cancellation and redaction |
+| Existing privacy / search / profile suites | PASS: 56 + 49 + 50 checks |
+| Native browser write suite | PASS: 49 checks, including Security Lab status/workflow, local page rendering, separate memory request context, browser Allow/protected flow, reset revocation and owner shutdown |
+| Persistent cookie/localStorage reads | PASS: 8 checks in each of three fresh read processes |
+| Chromium filtering / CORS | PASS: 20 checks |
+| Settings restart | PASS: 3 write + 4 read checks |
+| Existing TLS / popup / renderer / clean shutdown regressions | PASS; native assertion gate retained |
+| Self-contained win-x64 publish and complete directory upload | PASS |
+| Published/extracted application startup and normal-close smoke | PASS |
+| Portable archive | PASS: 852 file hashes verified; ZIP and checksum uploaded |
+
+[Portable Windows x64 test artifact](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970819828/artifacts/12508009706), 274,249,352 bytes. Inner ZIP SHA-256: `448ee2a7cdad1e8bff0c5daca146eb0dc4d69af99744ccbee304ec14e5e81d31`. [Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970819828/artifacts/12508204238). The archive includes installation instructions and SECURITY-LAB-MOCK-ALLOW.md. The ASP.NET Core runtime is bundled with the self-contained build.
+
+## Failures diagnosed and corrected
+
+1. [Run 39970367638](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970367638) failed JSON validation: ASP.NET selected the RequestDelegate overload and discarded the evaluation method's IResult. The endpoint is now explicitly registered as a typed route-handler delegate. ASP0016 is treated as an error to prevent recurrence. No assertion was weakened.
+2. [Run 39970705716](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970705716) passed all endpoint checks but the browser harness failed while comparing against the normal browser's nullable request-context property. The test now compares the lab context against the explicit global context and still requires separate in-memory storage. The final run passes.
+
+## Scope and remaining manual acceptance
+
+**Manual UI acceptance is NOT RUN.** A user must run this milestone's portable build before any manual pass is recorded. Remaining checks: Security Lab toolbar and keyboard access; 100/150/200% scaling; status and ID display; repeated runs; open-page buttons; reset UX; JSON export/cancel/save-error behavior; closing during startup or active work; normal profile, privacy and Smart Search behavior with lab tabs open. Automated native controls and HTTP checks above are not a human visual acceptance claim.
+
+Run Test uses a fresh isolated HTTP session and verifies nine assertions, ending with reset/revocation. Open Test Page uses its own temporary Chromium context, separate from both the runner and ordinary profile storage. Reset Session revokes all sessions on this lab server. The report contains public request IDs, timestamps, fixed error codes and assertions, never cookies or session secrets. No real providers, external security-service calls, fingerprint modifications or security bypasses are implemented. TLS validation, Chromium protections and existing handlers remain unchanged.
+
+Local compilation is unavailable because this macOS environment lacks dotnet; executable verification is from Windows CI. To preserve earlier local work, milestone files were prepared separately under `/private/tmp/aegis-mock-allow` and committed through the GitHub connector. See [milestone instructions](docs/security-lab-mock-allow.md).
+
+---
+
+## Earlier Smart Search verification (historical)
+
 # PR #5 review and user-reported acceptance — 2026-10-23
 
 PR #5 is prepared for human review against `main`. Main at `023a5709ff3af0dbc3edf319e4ebe8b827d79cf0` contains PR #4's merge and the original privacy base `8a78d77`; retargeting does not require reintroducing those changes. No automatic merge is authorized or performed.
