@@ -382,7 +382,8 @@ internal static class Program
             if (!response.Success) throw new Exception("Lab fetch failed");
             return response.Result?.ToString() ?? "";
         }
-        Check(fixture.RequestContext.CachePath == "" && !fixture.RequestContext.IsSame(normal.RequestContext), "lab tab uses separate memory context");
+        using var globalContext = Cef.GetGlobalRequestContext();
+        Check(fixture.RequestContext.CachePath == "" && !fixture.RequestContext.IsSame(globalContext), "lab tab uses separate memory context");
         Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "403", "browser fixture initially unauthorized");
         Check(await Fetch("fetch('/api/mock-security/evaluate',{method:'POST'}).then(r=>r.json()).then(r=>r.decision)") == "allow", "browser receives mock Allow");
         Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "200", "browser session authorized by server");
