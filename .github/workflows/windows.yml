@@ -82,6 +82,8 @@ jobs:
           }
       - name: Smoke test published Windows application
         run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64
+      - name: Smoke test published authorized lab
+        run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64 -Lab
       - name: Upload complete publish directory
         uses: actions/upload-artifact@v4
         with:

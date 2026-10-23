@@ -1,3 +1,45 @@
+# Authorized mock security lab — verified 2026-10-23
+
+[Draft PR #6](https://github.com/roshan-pandit1/AegisBrowser/pull/6), `feature/authorized-testing-lab`, is based on main `98a8835575c22268a456a64a5033b65e9d2c7840` (merged Smart Search). It remains draft and unmerged. The user explicitly confirmed mock-only scope: no real provider, credentials, live adapter or external detection-service calls. `ISecurityTestAdapter` remains an extension interface; only the mock is implemented.
+
+## Actual Windows verification
+
+[Run 39939721741](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741), [job 120367883691](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/job/120367883691), **SUCCESS** for implementation `2a8476e1fbd4b9f5e1c567f32098c7da71b13982`. Completed logs and artifact metadata were inspected. This status-only commit follows that verified implementation; its own CI result is reported in PR #6.
+
+| Check | Actual result |
+| --- | --- |
+| Windows restore/build | PASS; windows-latest, .NET 8, win-x64 Release; zero compiler warnings/errors |
+| Lab server/model | PASS: 23 checks (loopback, containment, redirects, session separation, allow/challenge/deny/unavailable enforcement, invalid/canceled decisions, redaction, bounds and lab profile paths) |
+| Existing suites | PASS: 56 privacy + 49 address/search + 50 policy/profile checks |
+| Native browser suite | PASS: 54 checks, including all four lab profiles, baseline versus Strict/Custom third-party resources, mock protected-access decisions, redirect instrumentation, TLS rejection, connection failure and lab shutdown |
+| Persistent browser storage | PASS: 8 checks in each of three fresh read processes; existing cookie/localStorage isolation and persistence retained |
+| Native shutdown | PASS: completion markers and zero exit in all four browser suite processes; assertion gate retained |
+| Chromium filtering / CORS | PASS: 20 checks |
+| Settings restart | PASS: 3 write + 4 read checks |
+| Self-contained publish | PASS; complete publish directory uploaded |
+| Published/extracted application smoke | PASS for both ordinary browser and --lab=baseline, including cache creation and normal close |
+| Portable archive | PASS: 852 file hashes verified; portable ZIP and checksum uploaded |
+
+[Portable Windows x64 test artifact](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/artifacts/12495776550), 274,245,542 bytes. Inner ZIP SHA-256: `e6cd75efc3a927b57aeabcae6729a807a76bf37eecf89a8d0bf5da69ef5862f7`. [Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/artifacts/12495581854). The self-contained build includes the ASP.NET Core framework needed by the fixtures; no additional NuGet library was introduced. See [lab instructions](docs/authorized-lab.md) and [installation](docs/INSTALL-WINDOWS.md).
+
+## Failure corrected
+
+[Initial run 39938808440](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39938808440) compiled but failed waiting for the baseline third-party fixture. Diagnostic [run 39939397693](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939397693) identified `SyntaxError: Unexpected end of input`: the fixture's JavaScript loop lacked its closing brace. The script was corrected. The original assertions and timeouts remain intact; the subsequent verified run passes.
+
+## Boundaries and remaining manual acceptance
+
+No lab GUI acceptance was performed manually by this agent or reported by the user. Previous user-reported Smart Search acceptance below does not cover the lab. Remaining: all scenario controls and profile launch UX; keyboard/accessibility and 100/150/200% scaling; rule editing; JSON save/cancel/unwritable destination; simultaneous lab/normal profiles; close during initialization/traffic; DNS behavior under the user's OS resolver/proxy; and the historical real-site/permission/DevTools/offline diagnostics gates.
+
+TLS and native connection failure were exercised in CI. The explicit reserved .invalid DNS scenario is implemented but not asserted in CI; resolver/proxy outcomes vary and are not a claimed pass. Default fixtures use loopback, not a real provider. The lab request allowlist and CSP are not an OS network sandbox. Chromium background traffic and OS DNS are not comprehensively contained. Existing CefSharp 154, certificate validation, permissions, web security and normal privacy/Smart Search behavior remain enabled; no security-bypassing switches were added.
+
+Lab profiles use a separate LabProfiles root. Server authorization is deliberately memory-only and expires when the server stops. Random fixture ports can change localStorage origins between launches; CI's persistent-storage checks use the existing dedicated browser fixtures. Reports exclude raw URLs/paths, credentials, headers, cookies and bodies; they retain bounded typed events, status codes, sanitized destinations, request IDs and timing. No actual provider certification or stable-release certification is claimed.
+
+Local `dotnet --info` fails (SDK not installed on this macOS host); Windows results come from CI. Local `git diff --check` passes. Local working changes are preserved; commits were published through the authenticated GitHub connector.
+
+---
+
+## Previous Smart Search and browser verification (historical)
+
 # PR #5 review and user-reported acceptance — 2026-10-23
 
 PR #5 is prepared for human review against `main`. Main at `023a5709ff3af0dbc3edf319e4ebe8b827d79cf0` contains PR #4's merge and the original privacy base `8a78d77`; retargeting does not require reintroducing those changes. No automatic merge is authorized or performed.

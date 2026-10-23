@@ -85,3 +85,7 @@ See [privacy filtering documentation](../docs/privacy.md) for syntax, precedence
 ## Portable release candidate
 
 See [Windows installation instructions](../docs/INSTALL-WINDOWS.md) and [release review gates](../docs/release-review.md). Windows CI packages `AegisBrowser-v0.1.0-rc1-win-x64-portable.zip` with a SHA-256 checksum, verifies every extracted file and smoke-tests the extracted executable. The app folder is portable; profile data remains in LocalAppData. A successful candidate build does not replace manual stable-release acceptance.
+
+## Authorized testing lab
+
+Launch `AegisBrowser.exe --lab=baseline|strict|custom|failure` (choose one value) for the isolated, mock-only WinForms testing dashboard. See [lab fixtures, scenarios, report policy and acceptance steps](../docs/authorized-lab.md). No real detection providers or credentials are configured.

@@ -12,6 +12,7 @@ Copy-Item "$source/*" $bundle -Recurse
 Copy-Item docs/INSTALL-WINDOWS.md (Join-Path $bundle 'INSTALL-WINDOWS.md')
 Copy-Item docs/privacy.md (Join-Path $bundle 'PRIVACY.md')
 Copy-Item docs/search.md (Join-Path $bundle 'SEARCH.md')
+Copy-Item docs/authorized-lab.md (Join-Path $bundle 'AUTHORIZED-LAB.md')
 Copy-Item BUILD-STATUS.md (Join-Path $bundle 'BUILD-STATUS.md')
 $revision = git rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not record source revision' }
@@ -32,5 +33,6 @@ foreach ($file in $expected) {
     if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $restored).Hash) { throw "ZIP content mismatch: $relative" }
 }
 ./tests/acceptance/windows-smoke.ps1 -PublishDirectory $unpacked
+./tests/acceptance/windows-smoke.ps1 -PublishDirectory $unpacked -Lab
 Write-Output "PASS: portable ZIP round trip verified ($($expected.Count) files), extracted application smoke passed"
 Write-Output "Portable ZIP SHA256: $hash"

@@ -1,19 +1,26 @@
-param([string]$PublishDirectory = "artifacts/win-x64")
+param([string]$PublishDirectory = "artifacts/win-x64", [switch]$Lab)
 $ErrorActionPreference = 'Stop'
 if (!$IsWindows) { throw 'This test requires PowerShell 7 on Windows.' }
 $exe = Join-Path (Resolve-Path $PublishDirectory) 'AegisBrowser.exe'
 $profile = 'smoke-' + [guid]::NewGuid().ToString('N')
 $profilePath = Join-Path $env:LOCALAPPDATA "AegisBrowser/Profiles/profile-$profile"
+$launchArgument = "--profile=$profile"
+$expectedTitle = "Aegis Browser — $profile"
+if ($Lab) {
+    $launchArgument = '--lab=baseline'
+    $profilePath = Join-Path $env:LOCALAPPDATA 'AegisBrowser/LabProfiles/Baseline'
+    $expectedTitle = 'Aegis authorized testing lab — Baseline'
+}
 $process = $null
 try {
-    $process = Start-Process -FilePath $exe -ArgumentList "--profile=$profile" -PassThru
+    $process = Start-Process -FilePath $exe -ArgumentList $launchArgument -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     $ready = $false
     do {
         Start-Sleep -Milliseconds 250
         $process.Refresh()
         if ($process.HasExited) { throw "Browser exited during startup: $($process.ExitCode)" }
-        if ($process.MainWindowHandle -ne 0 -and $process.MainWindowTitle -eq "Aegis Browser — $profile") {
+        if ($process.MainWindowHandle -ne 0 -and $process.MainWindowTitle -eq $expectedTitle) {
             $ready = $true
             break
         }
@@ -27,7 +34,7 @@ try {
     if (!$process.CloseMainWindow()) { throw 'Could not request a normal window close.' }
     if (!$process.WaitForExit(15000)) { throw 'Browser did not exit within 15 seconds of normal close.' }
     if ($process.ExitCode -ne 0) { throw "Browser exited with code $($process.ExitCode)" }
-    Write-Output 'PASS: Windows published-app window startup, profile cache creation and normal close.'
+    Write-Output "PASS: Windows published-app window startup, profile cache creation and normal close. Lab=$Lab"
     Write-Output 'NOT TESTED: rendered content, navigation, permissions, cookie behavior or visual correctness.'
 }
 finally {

@@ -1,4 +1,5 @@
 using AegisBrowser.Core;
+using AegisBrowser.Lab;
 using CefSharp;
 using CefSharp.WinForms;
 
@@ -12,13 +13,18 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         var initialized = false;
         ProfileLease? lease = null;
+        LabServer? lab = null;
         try
         {
-            var profile = BrowserPolicy.ReadProfile(args);
+            LabProfile? labProfile = args.Length == 1 && args[0].StartsWith("--lab=", StringComparison.Ordinal)
+                ? LabProfiles.Parse(args[0][6..]) : null;
+            var profile = labProfile is null ? BrowserPolicy.ReadProfile(args) : "lab";
             var path = BrowserPolicy.ProfilePath(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AegisBrowser", "Profiles"), profile);
+            if (labProfile is not null) path = LabProfiles.PathFor(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), labProfile.Value);
             lease = new ProfileLease(path);
+            if (labProfile is not null) lab = LabServer.StartAsync().GetAwaiter().GetResult();
             var settings = new CefSettings
             {
                 RootCachePath = path,
@@ -34,7 +40,7 @@ internal static class Program
             using var context = Cef.GetGlobalRequestContext();
             if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory()))
                 throw new InvalidOperationException("Could not register local diagnostics.");
-            using var window = new MainForm(profile, path);
+            using Form window = lab is null ? new MainForm(profile, path) : new LabDashboard(lab, labProfile!.Value);
             Application.Run(window);
         }
         catch (Exception ex)
@@ -46,6 +52,7 @@ internal static class Program
         finally
         {
             if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); }
+            if (lab is not null) lab.DisposeAsync().AsTask().GetAwaiter().GetResult();
             lease?.Dispose();
         }
     }
