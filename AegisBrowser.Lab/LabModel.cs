@@ -32,7 +32,7 @@ public sealed class LabReport
         }
     }
     public LabEvent[] Snapshot() { lock (gate) return events.ToArray(); }
-    public string Export(LabProfile profile) => JsonSerializer.Serialize(new { Schema = 1, Profile = profile.ToString(), Events = Snapshot() }, new JsonSerializerOptions { WriteIndented = true });
+    public string Export(LabProfile profile) => JsonSerializer.Serialize(new { Schema = 1, Profile = profile.ToString(), Events = Snapshot() }, new JsonSerializerOptions { WriteIndented = true, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } });
 }
 
 public static class LabProfiles

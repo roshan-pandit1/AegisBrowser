@@ -33,5 +33,6 @@ foreach ($file in $expected) {
     if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $restored).Hash) { throw "ZIP content mismatch: $relative" }
 }
 ./tests/acceptance/windows-smoke.ps1 -PublishDirectory $unpacked
+./tests/acceptance/windows-smoke.ps1 -PublishDirectory $unpacked -Lab
 Write-Output "PASS: portable ZIP round trip verified ($($expected.Count) files), extracted application smoke passed"
 Write-Output "Portable ZIP SHA256: $hash"
