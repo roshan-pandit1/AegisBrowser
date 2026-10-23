@@ -37,7 +37,10 @@ internal sealed class LabDashboard : Form
         })), blockAllPopups: true);
         Browser.LoadError += (_, e) => { if (e.ErrorCode != CefErrorCode.Aborted) server.Report.Add(LabEventKind.NetworkFailure, e.FailedUrl, 0, e.ErrorCode.ToString()); };
         Browser.FrameLoadEnd += (_, e) => { if (e.Frame.IsMain) server.Report.Add(LabEventKind.Execution, e.Url, e.HttpStatusCode, "Finished"); };
-        run.Click += (_, _) => RunScenario(scenario.SelectedItem!.ToString()!);
+        run.Click += (_, _) => {
+            try { RunScenario(scenario.SelectedItem!.ToString()!); }
+            catch (ArgumentException) { MessageBox.Show(this, "Invalid custom rules; active settings were preserved."); }
+        };
         export.Click += (_, _) => {
             using var dialog = new SaveFileDialog { Filter = "JSON report|*.json", FileName = "aegis-lab-report.json" };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;

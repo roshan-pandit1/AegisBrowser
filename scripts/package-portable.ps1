@@ -12,6 +12,7 @@ Copy-Item "$source/*" $bundle -Recurse
 Copy-Item docs/INSTALL-WINDOWS.md (Join-Path $bundle 'INSTALL-WINDOWS.md')
 Copy-Item docs/privacy.md (Join-Path $bundle 'PRIVACY.md')
 Copy-Item docs/search.md (Join-Path $bundle 'SEARCH.md')
+Copy-Item docs/authorized-lab.md (Join-Path $bundle 'AUTHORIZED-LAB.md')
 Copy-Item BUILD-STATUS.md (Join-Path $bundle 'BUILD-STATUS.md')
 $revision = git rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not record source revision' }

@@ -364,6 +364,7 @@ internal static class Program
         foreach (var profile in new[] { LabProfile.Baseline, LabProfile.StrictPrivacy, LabProfile.CustomRules })
         {
             using var dashboard = new LabDashboard(server, profile);
+            dashboard.Browser.ConsoleMessage += (_, e) => Console.WriteLine("Lab fixture console: " + e.Message);
             dashboard.Show();
             try
             {
@@ -405,6 +406,7 @@ internal static class Program
                     Check(server.Report.Snapshot().Any(e => e.Outcome == "Blocked"), "lab filter decision recorded");
                 }
             }
+            catch { Console.WriteLine(server.Report.Export(profile)); throw; }
             finally { dashboard.Close(); await Wait(() => dashboard.IsDisposed, "lab native shutdown"); }
             Check(true, "lab dashboard clean shutdown");
         }
