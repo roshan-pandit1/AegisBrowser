@@ -361,7 +361,7 @@ internal static class Program
     private static async Task AuthorizedLab()
     {
         await using var server = await LabServer.StartAsync();
-        foreach (var profile in new[] { LabProfile.Baseline, LabProfile.StrictPrivacy, LabProfile.CustomRules })
+        foreach (var profile in new[] { LabProfile.Baseline, LabProfile.StrictPrivacy, LabProfile.CustomRules, LabProfile.FailureTesting })
         {
             using var dashboard = new LabDashboard(server, profile);
             dashboard.Browser.ConsoleMessage += (_, e) => Console.WriteLine("Lab fixture console: " + e.Message);
@@ -399,6 +399,13 @@ internal static class Program
                     dashboard.RunScenario("TLS rejection");
                     await Wait(() => server.Report.Snapshot().Any(e => e.Kind == LabEventKind.TlsFailure && e.Outcome == "CertAuthorityInvalid"), "lab TLS rejection");
                     Check(true, "lab TLS errors recorded without override");
+                }
+                else if (profile == LabProfile.FailureTesting)
+                {
+                    var before = server.Report.Snapshot().Last().Sequence;
+                    dashboard.RunScenario("Disconnect");
+                    await Wait(() => server.Report.Snapshot().Any(e => e.Sequence > before && e.Kind == LabEventKind.NetworkFailure), "lab connection failure");
+                    Check(true, "lab native connection failure recorded");
                 }
                 else
                 {

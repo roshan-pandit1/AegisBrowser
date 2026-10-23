@@ -30,6 +30,11 @@ internal static class LabTests
         Check(await Get("unavailable") == 503, "controlled failure");
         using var other = new HttpClient(new HttpClientHandler { UseProxy = false });
         Check((int)(await other.GetAsync(server.Origin + "protected")).StatusCode == 403, "session isolation");
+        try { server.Security.Decision = (SecurityDecision)999; throw new Exception("unknown decision accepted"); }
+        catch (ArgumentOutOfRangeException) { count++; }
+        using var cancel = new CancellationTokenSource(); cancel.Cancel();
+        try { await server.Security.EvaluateAsync(cancel.Token); throw new Exception("canceled check succeeded"); }
+        catch (OperationCanceledException) { count++; }
         var report = new LabReport();
         report.Add(LabEventKind.Request, "https://user:password@private.example/secret?token=abc#secret", 200, "password=secret");
         var json = report.Export(LabProfile.Baseline);

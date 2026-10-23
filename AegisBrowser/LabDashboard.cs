@@ -11,7 +11,7 @@ internal sealed class LabDashboard : Form
     private readonly LabProfile profile;
     private readonly PrivacySession privacy;
     private readonly ComboBox scenario = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
-    private readonly TextBox rules = new() { Width = 200, PlaceholderText = "Custom network rules", Text = "||localhost^" };
+    private readonly TextBox rules = new() { Width = 250, Height = 55, Multiline = true, AcceptsReturn = true, PlaceholderText = "Custom network rules", Text = "||localhost^" };
     private readonly Label summary = new() { Dock = DockStyle.Top, AutoSize = true };
     private readonly DataGridView events = new() { Dock = DockStyle.Bottom, Height = 200, ReadOnly = true, AutoGenerateColumns = true, AllowUserToAddRows = false };
     private readonly System.Windows.Forms.Timer refresh = new() { Interval = 500 };
