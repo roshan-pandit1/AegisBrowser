@@ -55,6 +55,7 @@ public sealed class LabServer : IAsyncDisposable
         app.MapGet("/app.js", () => Results.Content("""
             for (const [id,path] of [['login','login'],['check','security'],['access','protected']]) {
               document.getElementById(id).onclick=async()=>{try {const r=await fetch('/'+path,{method:path==='protected'?'GET':'POST'});document.getElementById('result').textContent=r.status+' '+await r.text();}catch{document.getElementById('result').textContent='Request failed';}};
+            }
             localStorage.setItem('aegis-lab','synthetic');
             const script=document.createElement('script');script.src='http://localhost:'+location.port+'/tracker.js';document.body.append(script);
             """, "text/javascript"));
