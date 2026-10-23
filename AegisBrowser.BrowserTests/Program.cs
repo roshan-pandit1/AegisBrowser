@@ -52,7 +52,7 @@ internal static class Program
             {
                 try
                 {
-                    if (args[0] == "write") await TabsAndRenderer();
+                    if (args[0] == "write") { await TabsAndRenderer(); await MockAllowLab(); }
                     await Storage(host, root, args[0]);
                     if (args[0] == "write") await RejectUntrustedTls(host);
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
@@ -355,6 +355,43 @@ internal static class Program
         form.Close(); // Repeated window-close requests during tab initialization.
         await Wait(() => form.IsDisposed, "asynchronous window shutdown");
         Check(true, "window closes after tab close readiness");
+    }
+
+    private static async Task MockAllowLab()
+    {
+        using var form = new MainForm("lab-ui-test");
+        form.Show();
+        var tabs = form.Controls.OfType<TabControl>().Single();
+        await Wait(() => tabs.TabCount == 1, "initial lab host tab");
+        var normal = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+        await Ready(normal);
+        form.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<Button>().Single(b => b.Text == "Security Lab").PerformClick();
+        var lab = form.OwnedForms.OfType<SecurityLabForm>().Single();
+        Check(lab.TestStatus == "Not Run", "Security Lab initial status");
+        await lab.RunTestAsync();
+        Check(lab.TestStatus == "Passed" && lab.Report?.Assertions.All(a => a.Passed) == true, "Security Lab complete Allow workflow");
+        Check(lab.Report?.RequestId is not null, "Security Lab decision ID displayed");
+        await lab.OpenTestPageAsync();
+        await Wait(() => tabs.TabCount == 2, "lab opens existing tab infrastructure");
+        var fixture = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+        await Ready(fixture);
+        Check(await Js(fixture, "document.title") == "Security Decisions — Aegis simulation", "local security fixture renders");
+        async Task<string> Fetch(string script)
+        {
+            var response = await fixture.EvaluateScriptAsPromiseAsync("return " + script + ";");
+            if (!response.Success) throw new Exception("Lab fetch failed");
+            return response.Result?.ToString() ?? "";
+        }
+        Check(fixture.RequestContext.CachePath == "" && !fixture.RequestContext.IsSame(normal.RequestContext), "lab tab uses separate memory context");
+        Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "403", "browser fixture initially unauthorized");
+        Check(await Fetch("fetch('/api/mock-security/evaluate',{method:'POST'}).then(r=>r.json()).then(r=>r.decision)") == "allow", "browser receives mock Allow");
+        Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "200", "browser session authorized by server");
+        lab.ResetSession();
+        Check(lab.TestStatus == "Not Run" && lab.Report is null, "Reset Session clears previous UI result");
+        Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "403", "dashboard reset revokes browser session");
+        form.Close();
+        await Wait(() => form.IsDisposed, "lab owner shutdown");
+        Check(lab.IsDisposed, "lab server window closes with browser owner");
     }
 
     private sealed class Completion : ICompletionCallback
