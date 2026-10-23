@@ -31,6 +31,13 @@ public static class AddressInputResolver
     public static AddressResolution Resolve(string? input, string engineId = SearchEngines.DefaultId)
     {
         var engine = SearchEngines.Get(engineId);
+        try { return ResolveCore(input, engine); }
+        catch (UriFormatException) { return new(AddressInputKind.Rejected); }
+        catch (ArgumentException) { return new(AddressInputKind.Rejected); }
+    }
+
+    private static AddressResolution ResolveCore(string? input, SearchEngine engine)
+    {
         var value = input?.Trim() ?? "";
         if (value.Length == 0) return new(AddressInputKind.Empty);
         if (value.Any(char.IsControl) || value.Contains('\\')) return new(AddressInputKind.Rejected);
@@ -49,8 +56,9 @@ public static class AddressInputResolver
         if (!authority.Any(char.IsWhiteSpace) && !authority.Contains('@') &&
             Uri.TryCreate("https://" + value, UriKind.Absolute, out var candidate) && IsHost(candidate))
         {
-            var local = candidate.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-                || candidate.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)
+            var host = candidate.Host.TrimEnd('.');
+            var local = host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)
                 || (IPAddress.TryParse(candidate.Host.Trim('[', ']'), out var address) && IPAddress.IsLoopback(address));
             return Navigate((local ? "http://" : "https://") + value);
         }
