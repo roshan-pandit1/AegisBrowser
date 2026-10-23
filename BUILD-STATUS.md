@@ -1,3 +1,35 @@
+# PR #5 review and user-reported acceptance — 2026-10-23
+
+PR #5 is prepared for human review against `main`. Main at `023a5709ff3af0dbc3edf319e4ebe8b827d79cf0` contains PR #4's merge and the original privacy base `8a78d77`; retargeting does not require reintroducing those changes. No automatic merge is authorized or performed.
+
+## User-reported manual results
+
+The user reported the following working in manual testing. These are **user-reported PASS**, not tests performed or independently witnessed by this agent and not CI results. The report did not specify the exact binary revision, Windows version, selected providers or display scaling.
+
+| Case | User-reported result |
+| --- | --- |
+| Single-word search | PASS |
+| Direct domain navigation | PASS |
+| Search-engine switching | PASS |
+| Search settings persist after restart | PASS |
+| Per-profile search settings | PASS |
+
+These confirmations supersede the blanket “manual acceptance not run” statement for these five cases only. No failures were reported in these cases. Full release acceptance is still incomplete.
+
+## Automated verification and regression review
+
+Before this documentation update, the latest Windows CI [run 39932369988](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39932369988) passed on `71ead1580710258138eb0d3c5f1d1eaf1b9890dc`. It verified 49 address/search, 56 privacy, 50 policy/profile, 38 browser write checks, 8 storage checks in each of three read processes, 20 filtering checks and 3 write + 4 read settings checks. Restore/build/publish, TLS rejection, CORS, native shutdown, published-app smoke and 712-file portable extraction checks passed. The prior sections preserve the detailed implementation evidence. CI for this subsequent documentation commit is reported on PR #5; this document does not pre-claim its result.
+
+Review of the 12-file feature diff found no blocking regression. The resolver separates URLs from encoded queries, permits only the supported internal addresses and HTTP(S) navigation, and does no network work while typing. Engine choices are fixed HTTPS templates. Search settings use profile-local atomic replacement and preserve unreadable files; the active engine changes only after saving succeeds. MainForm continues to use Chromium Load/Back/Forward and existing lifecycle handlers. No CefSharp version, TLS validation, permission policy, privacy engine, popup handler or native disposal code is changed by this feature. The existing browser tests retain those regression gates. This is a code/CI review, not a claim of complete GUI validation.
+
+## Remaining acceptance
+
+Not confirmed by the user's report: all four real providers individually; multiword/Unicode query UX; explicit URL, localhost and IPv6 GUI behavior; Enter/Ctrl+L with web content focused; multi-tab interaction and Back/Forward UX; keyboard-only settings; 100/150/200% scaling/accessibility; simultaneous profile processes; corrupt/unwritable settings error UX; real OAuth, permission/device prompts, DevTools, offline diagnostics and the other historical release gates. Automated coverage of some of these cases does not establish a manual pass. No stable-release certification is implied.
+
+---
+
+## Earlier implementation verification (historical)
+
 # Smart address bar verification — 2026-10-23
 
 [Draft PR #5](https://github.com/roshan-pandit1/AegisBrowser/pull/5) targets `feature/privacy-filtering` from `feature/smart-address-search`, based on `8a78d77262e9bfb59ebc6191951209dda0accb5a`. GitHub reports PR #4 already merged as of this verification; this task did not merge or modify it. PR #5 remains draft with the requested base branch. CefSharp 154.0.340, .NET 8, privacy filtering and Chromium security settings are unchanged.
