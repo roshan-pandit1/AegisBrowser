@@ -60,7 +60,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
             if (session is not null) lock(session) allowed = session.Allowed && !session.Revoked && session.Expires > DateTimeOffset.UtcNow;
             return allowed ? Results.Json(new { fixture = "protected-fixture", access = true }) : Results.Json(new { access = false }, statusCode: 403);
         });
-        app.MapPost("/" + EvaluatePath, server.Evaluate);
+        app.MapPost("/" + EvaluatePath, (Func<HttpContext, Task<IResult>>)server.Evaluate);
         app.MapPost("/" + ResetPath, (HttpContext context) => {
             var id = context.Request.Cookies[CookieName];
             if (id is not null && server.sessions.TryRemove(id, out var session)) lock(session) { session.Revoked = true; session.Allowed = false; session.Revision++; }
