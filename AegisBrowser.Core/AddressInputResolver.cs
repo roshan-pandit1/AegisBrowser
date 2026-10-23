@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 using System.Text.RegularExpressions;
 
@@ -44,7 +43,7 @@ public static class AddressInputResolver
 
         // Recognize host:port before scheme detection. Unbracketed IPv6 is a
         // host only; an IPv6 port must use [address]:port to avoid ambiguity.
-        if (IPAddress.TryParse(value, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        if (!value.StartsWith('[') && IPAddress.TryParse(value, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
             return Navigate((IPAddress.IsLoopback(ip) ? "http://[" : "https://[") + value + "]");
         var authority = value.Split('/', '?', '#')[0];
         if (!authority.Any(char.IsWhiteSpace) && !authority.Contains('@') &&
