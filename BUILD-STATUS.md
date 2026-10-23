@@ -1,3 +1,41 @@
+# Smart address bar verification — 2026-10-23
+
+[Draft PR #5](https://github.com/roshan-pandit1/AegisBrowser/pull/5) targets `feature/privacy-filtering` from `feature/smart-address-search`, based on `8a78d77262e9bfb59ebc6191951209dda0accb5a`. PR #4 remains unmerged. CefSharp 154.0.340, .NET 8, privacy filtering and Chromium security settings are unchanged.
+
+## Actual Windows results
+
+[Windows run 39931668616](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616), [job 120341176849](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/job/120341176849), **SUCCESS** for implementation `f6204a3ade0c96a993ac7b7a028a7b1263480f2a`. Completed logs and artifact metadata were inspected. This subsequent status commit documents that tested revision.
+
+| Check | Actual result |
+| --- | --- |
+| Workflow | windows-latest; setup-dotnet installs .NET 8; global.json pins 8.0.4xx |
+| Restore / Release win-x64 application and browser harness builds | PASS; zero compiler warnings/errors |
+| Address/search resolution and settings | PASS: 49 checks |
+| Existing privacy / policy/profile suites | PASS: 56 + 50 checks |
+| Native browser write suite | PASS: 38 checks, including submitted searches, no search while typing, Unicode query decoding, engine changes, current-tab navigation/history and existing popup/renderer/shutdown cases |
+| Persistent browser storage | PASS: 8 checks in each of three fresh read processes |
+| Native shutdown | PASS: all four browser processes report CEF shutdown; zero exits; native assertion gate enabled |
+| Chromium filtering / CORS | PASS: 20 checks |
+| Settings process restart | PASS: 3 write + 4 read checks, including search selection through production settings UI |
+| TLS | PASS: untrusted certificate rejected with CertAuthorityInvalid |
+| Self-contained publish, payload and published-app smoke | PASS |
+| Portable archive | PASS: 712 file hashes verified, extracted executable startup/normal-close smoke passed |
+| Publish directory and portable ZIP uploads | PASS |
+
+[Portable Windows x64 test artifact](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/artifacts/12491409149) (262,467,120 bytes) includes the inner ZIP, checksum, installation instructions and SEARCH.md. Inner ZIP SHA-256: `895c4f9311609189bf1120ec246d34c4b6d56267c2db47a9453b3862e5c6e661`. [Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/artifacts/12492570314). See [installation](docs/INSTALL-WINDOWS.md) and [search behavior/settings](docs/search.md).
+
+## Defect corrected and limits
+
+Initial [run 39716359894](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39716359894) failed `navigate [::1]:8080`: .NET's IPAddress parser accepted the bracketed authority, which the bare-IPv6 path incorrectly wrapped again. The resolver now reserves that path for unbracketed literals, with explicit bracketed loopback and non-loopback port regressions. No timeout or assertion was relaxed. The subsequent Windows run above passes all suites.
+
+Manual GUI acceptance is **NOT RUN**. Remaining cases: all four real search providers; Enter/Ctrl+L and keyboard-only settings with web content focused; multi-tab interaction; 100/150/200% display scaling; simultaneous named profiles; unwritable/corrupt settings UX; and all previous manual release gates below. Automated searches use local HTTPS fixtures, not real-provider availability or authentication tests. No CAPTCHA, identity, TLS or anti-fraud circumvention is added. This is a test candidate, not a stable-release certification.
+
+Local `dotnet --info` fails with command not found on this macOS ARM64 environment; executable results above are from Windows CI. Local `git diff --check` passes. Local working files are retained; remote commits were published through the authenticated GitHub connector because local Git metadata is restricted.
+
+---
+
+## Previous Windows release review (historical)
+
 # Windows release review — 2026-10-22
 
 **Windows automation passes; manual release acceptance remains incomplete. PR #4 is draft and unmerged.** Architecture remains .NET 8 / WinForms / CefSharp. CefSharp is now pinned to **154.0.340** (Chromium 154.0.8037.98) in the app and both browser harnesses.
