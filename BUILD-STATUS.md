@@ -1,3 +1,71 @@
+# End-to-end interaction audit — not yet complete
+
+The published feature branch remains `07da0a7b4f563bf56bc19c6f22a602c7ec8b6211`, based on main `98a8835575c22268a456a64a5033b65e9d2c7840`. Local feature HEAD matched the remote before edits. The original dirty release/windows-rc workspace remains untouched. Existing patches were not reapplied. Open GitHub items returned by the issues endpoint were PRs #1, #2, #3, #6 and #7, not separately filed issues. Their existence does not establish a new defect or authorize merging; broader lab PR #6 remains outside this mock-Allow scope.
+
+## Prioritized implementation and verification checklist
+
+1. **Blocked:** retrieve authenticated logs and artifact for the candidate; verify actual archive bytes, inner checksum, layout, dependencies and VERSION.txt.
+2. **Implemented, unverified:** extend the existing native MockAllowLab scenario with actual protected requests from an ordinary profile and a second lab tab, localStorage separation at the same origin, lab-tab disposal without harming its siblings, and ordinary search while a lab grant remains active. Context-object comparison alone did not establish these interactions.
+3. **Blocked:** build and run these added checks in the full Windows workflow, then verify the resulting exact-SHA artifact. Do not reuse the earlier green run as evidence for this new coverage.
+4. **Pending human acceptance:** only after automated criteria and artifact verification are complete, use the retained full acceptance checklist. No request to begin human testing is made now.
+
+## Whole-browser coverage map
+
+| Area | Existing automation inspected | Evidence/limit |
+| --- | --- | --- |
+| Startup/publish/extraction | Windows smoke script and portable round-trip script | Reported successful at 07da0a7; log/ZIP retrieval blocked |
+| Navigation/search/history | TabsAndRenderer, AddressTests, settings restart harness | Prior local 49 address/search checks passed; Windows job success reported |
+| Tabs/popups/renderer/native cleanup | TabsAndRenderer, CloseWeb, repeated storage processes | Windows step success reported; exact output inaccessible |
+| Privacy modes/rules/settings/CORS | FilteringTests and restart phases | Windows step success reported; no claim of full filter-syntax support |
+| Persistent profiles/cookies/localStorage | Storage write + three read processes; policy/profile runner | Windows step success reported |
+| Mock authorization/reset/errors/redaction | SecurityDecisionTests, LifecycleChecks, CancellationChecks | Windows console step success reported |
+| UI retry/export failure/active closure | LabLifecycle | Windows browser step success reported |
+| Lab/ordinary-tab interactions | New MockAllowLab assertions | Not built or executed successfully yet |
+| Save-dialog cancellation, focus/DPI/hardware permission UX | Existing UI branches and manual checklist | Not automated or human-verified in this audit |
+
+No newly reproduced production defect was established in this pass; the code change is focused missing integration coverage. Existing Chromium security, mock-only scope and application architecture are unchanged. Full EasyList compatibility, automatic engine updates, real-provider integrations and hardware/real-site acceptance are not silently claimed as implemented by this work; existing documentation describes these limitations.
+
+## Executed checks and external blockers
+
+`git diff --check` passed. A fresh Windows native-harness build was attempted with .NET SDK 8.0.426, Release, win-x64 and SelfContained=true. Restore failed with six NU1301 errors because api.nuget.org was inaccessible; compilation and tests did not execute. Do not describe this as a passing build despite its zero-warning summary.
+
+Run 40111338731 was queried again and remains completed/success for 07da0a7. This is **reported execution evidence from workflow metadata**, not independently read test output. Logs returned HTTP 403; artifact 12566329324 download returned HTTP 401. No checksum was calculated and no new artifact is claimed. GitHub integration discovery reports the connector is not installed; no authenticated download capability was available. A normal push dry run failed with `Could not resolve host: github.com`. Read-only API/ref access still works.
+
+The new coverage requires publication and Windows CI. The older artifact does not contain it. Status documentation alone cannot satisfy that requirement. No rerun of the unchanged older revision was requested. PR #7 remains draft and unmerged. The definition of done before human acceptance remains unmet.
+
+---
+
+# PR #7 published lifecycle verification — 2026-10-24
+
+**Implemented:** feature/security-lab-mock-allow is published at `07da0a7b4f563bf56bc19c6f22a602c7ec8b6211`. The remote ref, PR head and CI head agree. PR #7 targets main and remains draft and unmerged. The isolated feature checkout contained this commit and its lifecycle patch already; no patch was reapplied and no implementation changes were necessary in this verification pass. Unrelated release/windows-rc edits and saved patches were preserved.
+
+## CI-verified execution status
+
+[Windows run 40111338731](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40111338731), [job 120923525010](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40111338731/job/120923525010), is completed with conclusion **success** on the exact SHA above. Every returned step has conclusion success; none is failed, skipped or canceled. This includes Windows x64 Release restore/build, automated console tests, browser integration build and storage/OAuth/tab/renderer tests, Chromium filtering build/tests, privacy settings restart, self-contained publish, release-payload checks, published-app smoke, publish-directory upload, portable ZIP verification and portable artifact upload.
+
+This is verified run/job/step metadata. Detailed job-log download returned **HTTP 403**. Exact assertion counts, compiler-warning totals and printed checksum have not been read from this run's execution output, so they are deliberately not reported as verified. The old run's counts are not substituted.
+
+## Artifacts associated with this exact SHA
+
+- [AegisBrowser-portable-win-x64](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40111338731/artifacts/12566329324), artifact ID 12566329324, 274,255,928 bytes, unexpired at inspection.
+- [AegisBrowser-win-x64 publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40111338731/artifacts/12566364032), artifact ID 12566364032, 273,417,384 bytes, unexpired at inspection.
+
+Both artifact records identify run 40111338731 and head SHA `07da0a7b4f563bf56bc19c6f22a602c7ec8b6211`. GitHub reports the portable artifact digest as `sha256:495585c3278921dbe0a6690a33d100efd1b6829532041a407dc5e400daef4a4a`. **This is API metadata for the outer Actions artifact, not a locally verified hash and not the checksum of the inner portable ZIP.**
+
+The packaging source specifies `AegisBrowser-v0.1.0-rc1-win-x64-portable.zip` and its `.sha256` sidecar. It verifies extracted file counts and hashes and invokes the extracted-app smoke test. Payload checks require AegisBrowser.exe, CefSharp.BrowserSubprocess.exe, libcef.dll and coreclr.dll. These workflow steps report success. However, direct artifact retrieval returned **HTTP 401**: its files, VERSION.txt and inner ZIP checksum have not been independently downloaded/read here. The user must not mistake the API digest for that missing inner checksum.
+
+Target: net8.0-windows, self-contained Windows x64, CefSharp 154.0.340. Follow docs/INSTALL-WINDOWS.md: Windows 10/11 x64, complete extraction, potentially Microsoft Visual C++ x64 Redistributable; no separate .NET SDK/runtime installation required. Launch extracted AegisBrowser/AegisBrowser.exe only after completing the remaining artifact verification.
+
+## Automated-tested locally and remaining blockers
+
+Prior local execution of this implementation compiled the portable projects with 0 warnings/errors and printed 56 privacy and 49 address/search passes. Security Lab execution was blocked by loopback socket permission denial; later policy/profile checks were not reached. Local Windows restore failed NU1301. These local outcomes remain separate from successful Windows job metadata. No redundant local execution was performed in this evidence-only pass.
+
+**Blocked / unverified:** authenticated log access, artifact retrieval and independent inner ZIP checksum/content verification. No new code defect was identified and no additional implementation commit is needed on the available evidence. The definition of done is not yet fully met because these requested evidence checks remain outstanding. See review-deliverables/pr7/CONTINUE-INTEGRATION.md in the preserved workspace for authenticated retrieval commands.
+
+**Not yet manually tested:** all Security Lab human-operated acceptance remains pending. The existing checklist is retained for the final stage after artifact verification; automation is not manual acceptance. No PR readiness transition or merge was performed. This status update is local documentation only; it does not change the published or CI-verified SHA.
+
+---
+
 # End-to-end integration follow-up — verification incomplete
 
 This follow-up continues PR #7 from `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. GitHub API and remote checks reconfirmed that head and draft status before editing. The previously prepared CI documentation was already present locally and was preserved rather than applied twice. Unrelated changes in the original release/windows-rc workspace remain untouched.

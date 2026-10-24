@@ -377,9 +377,9 @@ internal static class Program
         var fixture = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
         await Ready(fixture);
         Check(await Js(fixture, "document.title") == "Security Decisions — Aegis simulation", "local security fixture renders");
-        async Task<string> Fetch(string script)
+        async Task<string> Fetch(string script, ChromiumWebBrowser? target = null)
         {
-            var response = await fixture.EvaluateScriptAsPromiseAsync("return " + script + ";");
+            var response = await (target ?? fixture).EvaluateScriptAsPromiseAsync("return " + script + ";");
             if (!response.Success) throw new Exception("Lab fetch failed");
             return response.Result?.ToString() ?? "";
         }
@@ -388,6 +388,37 @@ internal static class Program
         Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "403", "browser fixture initially unauthorized");
         Check(await Fetch("fetch('/api/mock-security/evaluate',{method:'POST'}).then(r=>r.json()).then(r=>r.decision)") == "allow", "browser receives mock Allow");
         Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "200", "browser session authorized by server");
+        // Exercise actual cookies/storage across production-created contexts at the same origin.
+        await Js(fixture, "localStorage.setItem('coexistence', 'lab'); true");
+        await LoadReady(normal, fixture.Address);
+        Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)", normal) == "403",
+            "ordinary profile cannot reuse lab authorization at the same origin");
+        Check(await Js(normal, "localStorage.getItem('coexistence') === null") == "True",
+            "ordinary profile cannot read lab localStorage");
+        await Js(normal, "localStorage.setItem('coexistence', 'normal'); true");
+        Check(await Js(fixture, "localStorage.getItem('coexistence')") == "lab",
+            "normal storage writes do not replace lab storage");
+        await lab.OpenTestPageAsync();
+        await Wait(() => tabs.TabCount == 3, "second independent lab tab");
+        var secondFixture = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+        await Ready(secondFixture);
+        Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)", secondFixture) == "403",
+            "second lab tab cannot reuse first tab authorization");
+        Check(await Js(secondFixture, "localStorage.getItem('coexistence') === null") == "True",
+            "second lab tab has independent localStorage");
+        form.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<Button>().Single(b => b.Text == "×").PerformClick();
+        await Wait(() => secondFixture.IsDisposed && tabs.TabCount == 2, "second lab tab releases native browser");
+        Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "200",
+            "closing another lab tab preserves the authorized session");
+        Check(await Js(normal, "localStorage.getItem('coexistence')") == "normal",
+            "lab tab closure preserves ordinary profile storage");
+        tabs.SelectedIndex = 0;
+        Check(form.SubmitAddress("lab coexistence"), "ordinary search accepted while lab session is active");
+        await Wait(() => normal.Address == SearchEngines.Get(form.SearchEngineId).Search("lab coexistence") && !normal.IsLoading,
+            "ordinary search completes alongside lab tab");
+        await Ready(normal);
+        Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "200",
+            "ordinary search does not revoke or replace lab session");
         lab.ResetSession();
         Check(lab.TestStatus == "Not Run" && lab.Report is null, "Reset Session clears previous UI result");
         Check(await Fetch("fetch('/api/mock-security/protected').then(r=>r.status)") == "403", "dashboard reset revokes browser session");
