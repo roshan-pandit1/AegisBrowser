@@ -15,5 +15,5 @@
     <PackageReference Include="CefSharp.WinForms.NETCore" Version="154.0.340" />
     <ProjectReference Include="../AegisBrowser.Core/AegisBrowser.Core.csproj" />
     <EmbeddedResource Include="diagnostics.html" />
-  </ItemGroup>
+  <ProjectReference Include="../AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj" /></ItemGroup>
 </Project>

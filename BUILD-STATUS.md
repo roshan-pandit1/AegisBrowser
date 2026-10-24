@@ -1,3 +1,130 @@
+# End-to-end integration follow-up — verification incomplete
+
+This follow-up continues PR #7 from `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. GitHub API and remote checks reconfirmed that head and draft status before editing. The previously prepared CI documentation was already present locally and was preserved rather than applied twice. Unrelated changes in the original release/windows-rc workspace remain untouched.
+
+## Implemented in this follow-up
+
+- Server shutdown now cancels pending provider work before draining Kestrel, rejects incoming work during shutdown, checks cancellation before committing an authorization, and shares one disposal task across repeated callers.
+- The UI discards a failed startup task so Run Test can retry, clears stale decision/ID labels on errors, and does not publish a completed report after closure begins.
+- Report writing uses a testable production method; save failures retain the report for retry and do not display a dialog after the window begins closing.
+- Existing console and Windows browser runners gained active-cancellation/late-provider, active-shutdown, repeated-disposal, startup-retry, repeated-run, report-write/failure, and close-during-startup/evaluation checks. Existing security assertions and timeouts were not weakened.
+
+Initialization, address/search handling, profile/settings persistence, native tab/popup closure, TLS denial, privacy handler integration and packaging scripts were reviewed. No unrelated browser rewrite, provider integration, security-disabling switch or dependency upgrade was introduced. CefSharp remains 154.0.340; the application target remains net8.0-windows / win-x64.
+
+## Actual local checks
+
+An isolated .NET SDK 8.0.426 (macOS ARM64) was installed under /private/tmp. Dependency-free console restore succeeded using an empty local package source. Release compilation of Core, SecurityLab and Tests succeeded with **0 warnings and 0 errors** using single-node MSBuild and shared compilation disabled. Multi-node restore did not complete in the restricted environment; single-node restore resolved that execution problem.
+
+Execution printed **PASS: 56 privacy checks** and **PASS: 49 address and search checks**. The Security Lab suite then failed to start Kestrel with `System.Net.Sockets.SocketException (13): Permission denied` while binding loopback. The remainder of that runner, including policy/profile checks, was not reached. These environmental restrictions were not worked around by relaxing tests or widening the server binding.
+
+Windows application restore was attempted with `-r win-x64 -p:SelfContained=true` and failed with **NU1301**, unable to load `https://api.nuget.org/v3/index.json`. Consequently, the changed WinForms/native harness has not compiled or executed locally. No new Windows publish, native smoke test or portable artifact is claimed. A push dry run failed with `Could not resolve host: github.com`; read-only GitHub API requests still worked.
+
+## Required next verification
+
+Push the follow-up commit only to feature/security-lab-mock-allow, then run the existing Windows workflow and inspect its complete logs. It already invokes both amended test runners before publish and ZIP verification. Any compiler errors, failing assertions or native lifecycle failures must be fixed and the workflow rerun on the final code revision. The successful run/artifact recorded below belongs to **796acfb only** and does not verify this follow-up.
+
+Manual acceptance is the final phase and is not a blocker to these automated checks. No manual UI test is claimed. The existing checklist in docs/security-lab-mock-allow.md remains pending: normal startup/navigation/search; keyboard and scaling; denial/Allow/reset; repeated runs/status; report export and failure recovery; close during active work; and compatibility with ordinary browsing/profiles/privacy. **Do not mark this follow-up complete or release-ready until Windows verification passes.** PR #7 remains draft and must not be merged automatically.
+
+---
+
+# PR #7 recovery verification — 2026-10-24
+
+The user successfully pushed review commit `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. The remote branch SHA was independently checked with `git ls-remote`; PR #7 remains draft and unmerged at that exact head. The original dirty release/windows-rc workspace was preserved. The isolated review checkout already contained the patch; it was not applied twice. Parent SHA, four-file scope, reverse-patch applicability and `git diff --check` were verified.
+
+## Windows CI on the recovered commit
+
+[Run 40109058867](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867), [job 120916744523](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/job/120916744523), completed **SUCCESS** for `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. The GitHub API reports every job step successful:
+
+- .NET 8 setup, Windows x64 restore and Release build.
+- Existing console suites, including the new expiration-boundary, overlapping-evaluation and reset-during-evaluation coverage.
+- Native storage, OAuth, tabs and renderer tests, with the existing shutdown/assertion gates.
+- Chromium filtering/CORS and settings process-restart checks.
+- Self-contained win-x64 publish, payload validation and published-application smoke.
+- Portable ZIP generation/verification and both artifact uploads.
+
+[Portable artifact 12566046409](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/artifacts/12566046409): 274,252,045 bytes, listed as unexpired. [Complete publish directory 12565678692](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/artifacts/12565678692): 273,416,606 bytes, listed as unexpired.
+
+Evidence limitation: detailed job-log retrieval returned HTTP 403. Run conclusion, individual step conclusions and artifact metadata were verified, but assertion counts, compiler-warning totals, inner ZIP checksum and payload file counts were not independently re-read from this run's logs. No artifact download/extraction was performed locally. Local dotnet remains unavailable (`command not found`); no local test pass is claimed.
+
+This documentation update follows the verified commit and is initially local only. It does not claim CI verification of a later documentation commit. Earlier sections below are historical, including statements that the coverage had not yet been pushed or run.
+
+## Remaining acceptance
+
+All Security Lab manual UI checks remain **NOT RUN**: toolbar/keyboard access, 100/150/200% scaling, status and request-ID display, repeated runs, JSON export/cancel/save failures, protected page denial/Allow/reset, closure during startup/active work, and normal browsing/privacy/profile compatibility. Follow [the checklist](docs/security-lab-mock-allow.md). Existing automation does not substitute for these human-operated checks. Active-request cancellation and shutdown-during-evaluation coverage gaps described below remain open; this successful run does not add those assertions.
+
+Recommendation: the recovered portable artifact is ready for manual testing. Keep PR #7 draft pending manual acceptance, remaining focused lifecycle verification and full log review. No automatic merge or ready-for-review transition was performed. Chromium security protections and existing tests were not weakened.
+
+---
+
+# PR #7 focused review — 2026-10-24
+
+Remote state was fetched again: PR #7 remains open, draft, unmerged and conflict-free at `4a0124cbbaf10faf28ff746a7e5d952feb07668e`, based on main `98a8835575c22268a456a64a5033b65e9d2c7840`. No reviews, inline comments or issue comments were returned. Branch-protection settings could not be read (HTTP 401), so required-check configuration is not independently confirmed.
+
+## Exact-head CI evidence
+
+[Windows run 39971483169](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169), [job 120475026009](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/job/120475026009), is **SUCCESS** on `4a0124cbbaf10faf28ff746a7e5d952feb07668e`. The API reports every step successful: restore/build, console suites, native storage/popup/tab/renderer tests, filtering/CORS, settings restart, self-contained publish, application smoke, ZIP verification and artifact uploads. The companion push run 39971474953 also succeeded on that SHA.
+
+Previously inspected logs for this head recorded 26 Mock Allow, 56 privacy, 49 address/search, 50 policy/profile, 49 native write, 8 storage checks in each of three read processes, 20 filtering/CORS and 3 write + 4 read settings checks; zero compiler warnings/errors; TLS rejection, clean CEF shutdown and 852-file portable verification. In this resumed session the run/job/artifact metadata was reconfirmed, but re-downloading detailed logs returned HTTP 403. These results apply to the named remote head, **not to the subsequent local coverage changes**.
+
+[Portable artifact 12509990722](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/artifacts/12509990722) is listed as unexpired, 274,249,884 bytes. [Publish directory artifact 12509043351](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/artifacts/12509043351) is also unexpired. Artifact contents were not downloaded again in this session.
+
+## Focused review and pending coverage
+
+The 15-file PR diff retains the existing privacy, Smart Search, profiles and native lifecycle architecture. Program.cs and SecurityHandlers.cs are unchanged by this PR. The server binds IPv4 loopback on an OS-selected port, rejects foreign Host/Origin values, uses cryptographically random HttpOnly session cookies and checks server-side authorization for protected responses. Reset marks sessions revoked and increments their revision; overlapping evaluations can only authorize the current revision. Reports accept only validated request IDs and fixed error labels. No real integration or Chromium security-setting changes were introduced.
+
+No new reproducible production defect was established. Additional coverage is prepared for the exact ten-minute expiration boundary, overlapping evaluations, and reset/reset-all during a pending evaluation. An optional TimeProvider defaults to TimeProvider.System so expiration can be tested without sleeping or changing production lifetimes. Tests use the existing console runner and real ephemeral-port Kestrel fixtures. No existing assertion or timeout was weakened.
+
+**The additional coverage is NOT RUN.** Local `dotnet --info` fails because the SDK is absent on this macOS host. Windows/native execution is unavailable locally. A new Windows CI run on the final pushed commit is required before these changes can be accepted. Active-request cancellation, server shutdown during evaluation, and startup/active-work UI closure still require focused verification; the existing pre-canceled runner and completed-work owner-close tests do not prove those cases.
+
+## Manual acceptance and recommendation
+
+All Security Lab manual UI cases remain **NOT RUN**. Follow the explicit checklist in [milestone instructions](docs/security-lab-mock-allow.md): keyboard access; 100/150/200% scaling; status/decision/IDs; repeated runs; JSON export/cancel/save failures; page denial/Allow/access/reset; close during startup/execution; Smart Search, privacy modes, tabs and profile separation. Prior user-reported Smart Search results do not establish Security Lab acceptance.
+
+Keep PR #7 draft. The existing verified artifact is available for manual testing, but completion of this review is blocked pending publication and Windows verification of the new coverage, remaining lifecycle checks, and user acceptance. Do not mark ready or merge automatically.
+
+---
+
+# Security Lab milestone 1 — Mock Allow verification (2026-10-23)
+
+[Draft PR #7](https://github.com/roshan-pandit1/AegisBrowser/pull/7), branch `feature/security-lab-mock-allow`, starts from main `98a8835575c22268a456a64a5033b65e9d2c7840`. It is independent of the broader draft PR #6. It remains draft and unmerged.
+
+## Actual Windows results
+
+[Windows run 39970819828](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970819828), [job 120472697977](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970819828/job/120472697977), **SUCCESS** for implementation `7b662472b3ca3dc67fb2d24f628ba8d5ab692310`. Completed job logs and artifact metadata were inspected. This subsequent documentation commit records that tested implementation; its own CI result is reported on PR #7.
+
+| Check | Actual result |
+| --- | --- |
+| Restore/build | PASS: windows-latest, .NET 8, win-x64 Release; zero compiler warnings/errors |
+| Mock Allow endpoint/workflow suite | PASS: 26 checks, including loopback, provider/decision contract, unique IDs, forged Allow, session separation, reset/replay, provider errors, cancellation and redaction |
+| Existing privacy / search / profile suites | PASS: 56 + 49 + 50 checks |
+| Native browser write suite | PASS: 49 checks, including Security Lab status/workflow, local page rendering, separate memory request context, browser Allow/protected flow, reset revocation and owner shutdown |
+| Persistent cookie/localStorage reads | PASS: 8 checks in each of three fresh read processes |
+| Chromium filtering / CORS | PASS: 20 checks |
+| Settings restart | PASS: 3 write + 4 read checks |
+| Existing TLS / popup / renderer / clean shutdown regressions | PASS; native assertion gate retained |
+| Self-contained win-x64 publish and complete directory upload | PASS |
+| Published/extracted application startup and normal-close smoke | PASS |
+| Portable archive | PASS: 852 file hashes verified; ZIP and checksum uploaded |
+
+[Portable Windows x64 test artifact](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970819828/artifacts/12508009706), 274,249,352 bytes. Inner ZIP SHA-256: `448ee2a7cdad1e8bff0c5daca146eb0dc4d69af99744ccbee304ec14e5e81d31`. [Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970819828/artifacts/12508204238). The archive includes installation instructions and SECURITY-LAB-MOCK-ALLOW.md. The ASP.NET Core runtime is bundled with the self-contained build.
+
+## Failures diagnosed and corrected
+
+1. [Run 39970367638](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970367638) failed JSON validation: ASP.NET selected the RequestDelegate overload and discarded the evaluation method's IResult. The endpoint is now explicitly registered as a typed route-handler delegate. ASP0016 is treated as an error to prevent recurrence. No assertion was weakened.
+2. [Run 39970705716](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39970705716) passed all endpoint checks but the browser harness failed while comparing against the normal browser's nullable request-context property. The test now compares the lab context against the explicit global context and still requires separate in-memory storage. The final run passes.
+
+## Scope and remaining manual acceptance
+
+**Manual UI acceptance is NOT RUN.** A user must run this milestone's portable build before any manual pass is recorded. Remaining checks: Security Lab toolbar and keyboard access; 100/150/200% scaling; status and ID display; repeated runs; open-page buttons; reset UX; JSON export/cancel/save-error behavior; closing during startup or active work; normal profile, privacy and Smart Search behavior with lab tabs open. Automated native controls and HTTP checks above are not a human visual acceptance claim.
+
+Run Test uses a fresh isolated HTTP session and verifies nine assertions, ending with reset/revocation. Open Test Page uses its own temporary Chromium context, separate from both the runner and ordinary profile storage. Reset Session revokes all sessions on this lab server. The report contains public request IDs, timestamps, fixed error codes and assertions, never cookies or session secrets. No real providers, external security-service calls, fingerprint modifications or security bypasses are implemented. TLS validation, Chromium protections and existing handlers remain unchanged.
+
+Local compilation is unavailable because this macOS environment lacks dotnet; executable verification is from Windows CI. To preserve earlier local work, milestone files were prepared separately under `/private/tmp/aegis-mock-allow` and committed through the GitHub connector. See [milestone instructions](docs/security-lab-mock-allow.md).
+
+---
+
+## Earlier Smart Search verification (historical)
+
 # PR #5 review and user-reported acceptance — 2026-10-23
 
 PR #5 is prepared for human review against `main`. Main at `023a5709ff3af0dbc3edf319e4ebe8b827d79cf0` contains PR #4's merge and the original privacy base `8a78d77`; retargeting does not require reintroducing those changes. No automatic merge is authorized or performed.
