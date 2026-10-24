@@ -2,7 +2,7 @@ using AegisBrowser.SecurityLab;
 
 namespace AegisBrowser;
 
-internal sealed class SecurityLabForm(Action<string> openPage) : Form
+internal sealed class SecurityLabForm(Action<string> openPage, Func<CancellationToken, Task<SecurityDecisionServer>>? startServer = null) : Form
 {
     private readonly Label status = new() { Text = "Not Run", AutoSize = true, AccessibleName = "Test status" };
     private readonly Label decision = new() { Text = "Decision: —", AutoSize = true };
@@ -34,14 +34,19 @@ internal sealed class SecurityLabForm(Action<string> openPage) : Form
         reset.Click += (_, _) => ResetSession();
         open.Click += async (_, _) => await OpenTestPageAsync();
         export.Click += async (_, _) => {
-            if (Report is not { } report) return;
+            if (Report is null) return;
             using var dialog = new SaveFileDialog { Filter = "JSON report|*.json", FileName = "aegis-mock-allow.json" };
-            if (dialog.ShowDialog(this) == DialogResult.OK)
-                try { await File.WriteAllTextAsync(dialog.FileName, report.ToJson()); }
-                catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { MessageBox.Show(this, "Could not save report."); }
+            if (dialog.ShowDialog(this) == DialogResult.OK && !await SaveReportAsync(dialog.FileName) && !closing)
+                MessageBox.Show(this, "Could not save report.", "Security Lab", MessageBoxButtons.OK, MessageBoxIcon.Error);
         };
     }
-    private Task<SecurityDecisionServer> Server() => server ??= SecurityDecisionServer.StartAsync(cancellationToken: stop.Token);
+    internal async Task<bool> SaveReportAsync(string path)
+    {
+        if (Report is not { } report) return false;
+        try { await File.WriteAllTextAsync(path, report.ToJson()); return true; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+    private Task<SecurityDecisionServer> Server() => server ??= startServer is null ? SecurityDecisionServer.StartAsync(cancellationToken: stop.Token) : startServer(stop.Token);
     internal Task RunTestAsync() => busy || closing ? Task.CompletedTask : active = ExecuteAsync(true);
     internal Task OpenTestPageAsync() => busy || closing ? Task.CompletedTask : active = ExecuteAsync(false);
     private async Task ExecuteAsync(bool test)
@@ -53,8 +58,9 @@ internal sealed class SecurityLabForm(Action<string> openPage) : Form
             var instance = await Server();
             if (test)
             {
-                Report = await new SecurityTestRunner().RunAsync(instance, stop.Token);
+                var result = await new SecurityTestRunner().RunAsync(instance, stop.Token);
                 if (!closing) {
+                    Report = result;
                     status.Text = Report.Passed ? "Passed" : "Failed";
                     decision.Text = "Decision: " + (Report.Decision ?? "unavailable");
                     requestId.Text = "Request ID: " + (Report.RequestId ?? "unavailable");
@@ -63,10 +69,13 @@ internal sealed class SecurityLabForm(Action<string> openPage) : Form
             else if (!closing) openPage(instance.PageUrl.AbsoluteUri);
         }
         catch {
+            // A failed startup is retryable; never reuse a cached faulted task.
+            if (server is { IsFaulted: true } or { IsCanceled: true }) server = null;
             if (!closing) {
                 var now = DateTimeOffset.UtcNow;
                 Report = new("Security Decisions", "AegisMock", null, null, now, now, [new("Server available", false)], false, "ServerUnavailable");
                 status.Text = "Failed";
+                decision.Text = "Decision: unavailable"; requestId.Text = "Request ID: unavailable";
             }
         }
         finally { busy = false; if (!closing) { run.Enabled = reset.Enabled = open.Enabled = true; export.Enabled = Report is not null; } }

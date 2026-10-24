@@ -21,6 +21,9 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
     private readonly WebApplication app;
     private readonly ISecurityDecisionProvider provider;
     private readonly TimeProvider clock;
+    private readonly CancellationTokenSource shutdown = new();
+    private readonly object disposeGate = new();
+    private Task? disposal;
     public Uri Origin { get; private set; } = null!;
     public Uri PageUrl => new(Origin, PagePath);
     public EvaluationEvent[] Evaluations => evaluations.ToArray();
@@ -34,6 +37,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
         var app = builder.Build();
         var server = new SecurityDecisionServer(app, provider ?? new MockSecurityDecisionProvider(), timeProvider ?? TimeProvider.System);
         app.Use(async (context, next) => {
+            if (server.shutdown.IsCancellationRequested) { context.Response.StatusCode = 503; return; }
             if (context.Request.Host.Host != "127.0.0.1") { context.Response.StatusCode = 403; return; }
             var origin = context.Request.Headers.Origin.ToString();
             if (origin.Length > 0 && origin != server.Origin?.GetLeftPart(UriPartial.Authority)) { context.Response.StatusCode = 403; return; }
@@ -88,11 +92,13 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
         lock(session) { session.Allowed = false; revision = ++session.Revision; }
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, shutdown.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
             var decision = await provider.EvaluateAsync(timeout.Token).WaitAsync(timeout.Token);
             lock(session)
             {
+                // A synchronously completed provider task can race cancellation.
+                timeout.Token.ThrowIfCancellationRequested();
                 if (decision is null || !decision.IsValidAllow || session.Revoked || session.Revision != revision || session.Expires <= clock.GetUtcNow())
                 { Record("rejected", null); return Results.StatusCode(503); }
                 session.Allowed = true;
@@ -116,5 +122,16 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
     {
         foreach(var item in sessions) if (sessions.TryRemove(item.Key, out var session)) lock(session) { session.Revoked = true; session.Allowed = false; session.Revision++; }
     }
-    public async ValueTask DisposeAsync() { ResetAllSessions(); await app.StopAsync(); await app.DisposeAsync(); }
+    public ValueTask DisposeAsync()
+    {
+        lock (disposeGate) return new ValueTask(disposal ??= StopAsync());
+    }
+    private async Task StopAsync()
+    {
+        // Cancel evaluations before draining Kestrel; no pending provider may restore a grant.
+        shutdown.Cancel();
+        ResetAllSessions();
+        try { await app.StopAsync(); }
+        finally { await app.DisposeAsync(); shutdown.Dispose(); }
+    }
 }

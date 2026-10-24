@@ -57,6 +57,7 @@ internal static class SecurityDecisionTests
         var invalidReport = await new SecurityTestRunner().RunAsync(invalid);
         Check(!invalidReport.Passed && invalid.Evaluations.Single().RequestId is null, "invalid provider response cannot authorize or leak ID");
         count += await LifecycleChecks();
+        count += await CancellationChecks();
         Console.WriteLine($"PASS: {count} mock Allow checks");
     }
     private static async Task<int> LifecycleChecks()
@@ -128,6 +129,71 @@ internal static class SecurityDecisionTests
             finally { gate.Release.TrySetResult(); }
         }
         return count;
+    }
+    private static async Task<int> CancellationChecks()
+    {
+        var count = 0;
+        void Check(bool ok, string name) { if (!ok) throw new Exception("FAIL: " + name); count++; }
+        foreach (var shuttingDown in new[] { false, true })
+        {
+            var provider = new PendingProvider();
+            await using var server = await SecurityDecisionServer.StartAsync(provider);
+            using var client = new HttpClient(new HttpClientHandler { UseProxy = false }) {
+                BaseAddress = server.Origin, Timeout = TimeSpan.FromSeconds(10)
+            };
+            using var seed = await client.PostAsync(SecurityDecisionServer.EvaluatePath, null);
+            Check(seed.StatusCode == HttpStatusCode.OK, "cancellation fixture seeded");
+            provider.Hold = true;
+            using var cancel = new CancellationTokenSource();
+            var pending = client.PostAsync(SecurityDecisionServer.EvaluatePath, null, cancel.Token);
+            await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try
+            {
+                var stopped = shuttingDown ? server.DisposeAsync().AsTask() : Task.CompletedTask;
+                if (!shuttingDown) cancel.Cancel();
+                await provider.Canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!server.Evaluations.Any(e => e.Outcome == "unavailable") && DateTime.UtcNow < deadline)
+                    await Task.Delay(10);
+                Check(server.Evaluations.Any(e => e.Outcome == "unavailable"), "active evaluation fails closed on cancellation");
+                provider.Release.TrySetResult();
+                try {
+                    using var response = await pending;
+                    Check(shuttingDown && response.StatusCode == HttpStatusCode.ServiceUnavailable,
+                        "shutdown cannot return a successful decision");
+                }
+                catch (OperationCanceledException) { Check(cancel.IsCancellationRequested, "client cancellation observed"); }
+                catch (HttpRequestException) when (shuttingDown) { Check(true, "shutdown closed pending transport"); }
+                await stopped.WaitAsync(TimeSpan.FromSeconds(5));
+                if (!shuttingDown) {
+                    using var protectedResult = await client.GetAsync(SecurityDecisionServer.ProtectedPath);
+                    Check(protectedResult.StatusCode == HttpStatusCode.Forbidden, "late provider result cannot restore canceled grant");
+                }
+                else {
+                    await server.DisposeAsync();
+                    Check(true, "shutdown is repeatable after active evaluation");
+                }
+            }
+            finally { provider.Release.TrySetResult(); }
+        }
+        return count;
+    }
+    private sealed class PendingProvider : ISecurityDecisionProvider
+    {
+        internal bool Hold;
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<SecurityDecision> EvaluateAsync(CancellationToken token)
+        {
+            if (Hold) {
+                using var registration = token.Register(() => Canceled.TrySetResult());
+                Started.TrySetResult();
+                // Deliberately finish late: the server must enforce cancellation independently.
+                await Release.Task;
+            }
+            return await new MockSecurityDecisionProvider().EvaluateAsync(CancellationToken.None);
+        }
     }
     private sealed class ManualClock : TimeProvider
     {

@@ -1,5 +1,6 @@
 using AegisBrowser;
 using AegisBrowser.Core;
+using AegisBrowser.SecurityLab;
 using CefSharp;
 using CefSharp.WinForms;
 using System.Net;
@@ -52,7 +53,7 @@ internal static class Program
             {
                 try
                 {
-                    if (args[0] == "write") { await TabsAndRenderer(); await MockAllowLab(); }
+                    if (args[0] == "write") { await TabsAndRenderer(); await MockAllowLab(); await LabLifecycle(); }
                     await Storage(host, root, args[0]);
                     if (args[0] == "write") await RejectUntrustedTls(host);
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
@@ -393,6 +394,72 @@ internal static class Program
         form.Close();
         await Wait(() => form.IsDisposed, "lab owner shutdown");
         Check(lab.IsDisposed, "lab server window closes with browser owner");
+    }
+
+    private static async Task LabLifecycle()
+    {
+        var attempts = 0;
+        using (var lab = new SecurityLabForm(_ => { }, token => ++attempts == 1
+            ? Task.FromException<SecurityDecisionServer>(new IOException("synthetic-startup-failure"))
+            : SecurityDecisionServer.StartAsync(cancellationToken: token)))
+        {
+            lab.Show();
+            await lab.RunTestAsync();
+            Check(lab.TestStatus == "Failed" && lab.Report?.Passed == false, "startup error fails the UI workflow");
+            await lab.RunTestAsync();
+            Check(lab.TestStatus == "Passed" && attempts == 2, "startup failure can be retried");
+            var id = lab.Report!.RequestId;
+            await lab.RunTestAsync();
+            Check(lab.Report?.Passed == true && lab.Report.RequestId != id, "repeated UI run has a fresh request ID");
+            var directory = Path.Combine(Path.GetTempPath(), "aegis-report-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try {
+                var path = Path.Combine(directory, "report.json");
+                Check(await lab.SaveReportAsync(path) && await File.ReadAllTextAsync(path) == lab.Report!.ToJson(), "UI exports its exact sanitized report");
+                Check(!await lab.SaveReportAsync(directory) && lab.Report!.Passed, "save failure retains report for retry");
+            }
+            finally { Directory.Delete(directory, true); }
+            lab.Close();
+            await Wait(() => lab.IsDisposed, "retry lab closes");
+        }
+        var starting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (var lab = new SecurityLabForm(_ => { }, async token => {
+            starting.TrySetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            throw new InvalidOperationException("Canceled startup must not complete");
+        }))
+        {
+            lab.Show();
+            var run = lab.RunTestAsync();
+            await starting.Task;
+            Check(lab.TestStatus == "Running", "UI reports running during startup");
+            lab.Close();
+            await run;
+            await Wait(() => lab.IsDisposed, "lab closes during startup");
+            Check(lab.Report?.Passed != true, "canceled startup cannot report pass");
+        }
+        var provider = new WaitingLabProvider();
+        using (var lab = new SecurityLabForm(_ => { }, token => SecurityDecisionServer.StartAsync(provider, token)))
+        {
+            lab.Show();
+            var run = lab.RunTestAsync();
+            await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Check(lab.TestStatus == "Running", "UI remains responsive during evaluation");
+            lab.Close();
+            await run;
+            await Wait(() => lab.IsDisposed, "lab closes during evaluation");
+            Check(lab.Report?.Passed != true, "closing active lab cannot retain successful result");
+        }
+    }
+    private sealed class WaitingLabProvider : ISecurityDecisionProvider
+    {
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<SecurityDecision> EvaluateAsync(CancellationToken token)
+        {
+            Started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            throw new InvalidOperationException("Canceled evaluation must not complete");
+        }
     }
 
     private sealed class Completion : ICompletionCallback

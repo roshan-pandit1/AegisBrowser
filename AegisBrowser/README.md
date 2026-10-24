@@ -56,7 +56,7 @@ On a Windows machine, also verify:
 5. Disconnect networking and reload diagnostics; check the DevTools network panel for no outbound diagnostics requests.
 6. Run the published executable on a clean Windows x64 machine with the VC++ runtime, and verify subprocess startup and DevTools.
 
-Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. Windows CI is the source of executable verification. See BUILD-STATUS.md for exact tested revisions and results; local compilation is unavailable.
+Windows CI is the authoritative environment for WinForms, CefSharp, TLS, shutdown and packaging checks. The portable console projects can also compile on macOS/Linux with .NET 8, but their Kestrel tests require permission to bind loopback sockets. Restricted environments may block sockets or NuGet access; these are unverified checks, not passes. See BUILD-STATUS.md for actual commands, tested revisions and results.
 
 Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/154.0.340), [CefSharp project](https://github.com/cefsharp/CefSharp).
 

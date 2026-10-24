@@ -1,3 +1,61 @@
+# End-to-end integration follow-up — verification incomplete
+
+This follow-up continues PR #7 from `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. GitHub API and remote checks reconfirmed that head and draft status before editing. The previously prepared CI documentation was already present locally and was preserved rather than applied twice. Unrelated changes in the original release/windows-rc workspace remain untouched.
+
+## Implemented in this follow-up
+
+- Server shutdown now cancels pending provider work before draining Kestrel, rejects incoming work during shutdown, checks cancellation before committing an authorization, and shares one disposal task across repeated callers.
+- The UI discards a failed startup task so Run Test can retry, clears stale decision/ID labels on errors, and does not publish a completed report after closure begins.
+- Report writing uses a testable production method; save failures retain the report for retry and do not display a dialog after the window begins closing.
+- Existing console and Windows browser runners gained active-cancellation/late-provider, active-shutdown, repeated-disposal, startup-retry, repeated-run, report-write/failure, and close-during-startup/evaluation checks. Existing security assertions and timeouts were not weakened.
+
+Initialization, address/search handling, profile/settings persistence, native tab/popup closure, TLS denial, privacy handler integration and packaging scripts were reviewed. No unrelated browser rewrite, provider integration, security-disabling switch or dependency upgrade was introduced. CefSharp remains 154.0.340; the application target remains net8.0-windows / win-x64.
+
+## Actual local checks
+
+An isolated .NET SDK 8.0.426 (macOS ARM64) was installed under /private/tmp. Dependency-free console restore succeeded using an empty local package source. Release compilation of Core, SecurityLab and Tests succeeded with **0 warnings and 0 errors** using single-node MSBuild and shared compilation disabled. Multi-node restore did not complete in the restricted environment; single-node restore resolved that execution problem.
+
+Execution printed **PASS: 56 privacy checks** and **PASS: 49 address and search checks**. The Security Lab suite then failed to start Kestrel with `System.Net.Sockets.SocketException (13): Permission denied` while binding loopback. The remainder of that runner, including policy/profile checks, was not reached. These environmental restrictions were not worked around by relaxing tests or widening the server binding.
+
+Windows application restore was attempted with `-r win-x64 -p:SelfContained=true` and failed with **NU1301**, unable to load `https://api.nuget.org/v3/index.json`. Consequently, the changed WinForms/native harness has not compiled or executed locally. No new Windows publish, native smoke test or portable artifact is claimed. A push dry run failed with `Could not resolve host: github.com`; read-only GitHub API requests still worked.
+
+## Required next verification
+
+Push the follow-up commit only to feature/security-lab-mock-allow, then run the existing Windows workflow and inspect its complete logs. It already invokes both amended test runners before publish and ZIP verification. Any compiler errors, failing assertions or native lifecycle failures must be fixed and the workflow rerun on the final code revision. The successful run/artifact recorded below belongs to **796acfb only** and does not verify this follow-up.
+
+Manual acceptance is the final phase and is not a blocker to these automated checks. No manual UI test is claimed. The existing checklist in docs/security-lab-mock-allow.md remains pending: normal startup/navigation/search; keyboard and scaling; denial/Allow/reset; repeated runs/status; report export and failure recovery; close during active work; and compatibility with ordinary browsing/profiles/privacy. **Do not mark this follow-up complete or release-ready until Windows verification passes.** PR #7 remains draft and must not be merged automatically.
+
+---
+
+# PR #7 recovery verification — 2026-10-24
+
+The user successfully pushed review commit `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. The remote branch SHA was independently checked with `git ls-remote`; PR #7 remains draft and unmerged at that exact head. The original dirty release/windows-rc workspace was preserved. The isolated review checkout already contained the patch; it was not applied twice. Parent SHA, four-file scope, reverse-patch applicability and `git diff --check` were verified.
+
+## Windows CI on the recovered commit
+
+[Run 40109058867](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867), [job 120916744523](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/job/120916744523), completed **SUCCESS** for `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. The GitHub API reports every job step successful:
+
+- .NET 8 setup, Windows x64 restore and Release build.
+- Existing console suites, including the new expiration-boundary, overlapping-evaluation and reset-during-evaluation coverage.
+- Native storage, OAuth, tabs and renderer tests, with the existing shutdown/assertion gates.
+- Chromium filtering/CORS and settings process-restart checks.
+- Self-contained win-x64 publish, payload validation and published-application smoke.
+- Portable ZIP generation/verification and both artifact uploads.
+
+[Portable artifact 12566046409](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/artifacts/12566046409): 274,252,045 bytes, listed as unexpired. [Complete publish directory 12565678692](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/artifacts/12565678692): 273,416,606 bytes, listed as unexpired.
+
+Evidence limitation: detailed job-log retrieval returned HTTP 403. Run conclusion, individual step conclusions and artifact metadata were verified, but assertion counts, compiler-warning totals, inner ZIP checksum and payload file counts were not independently re-read from this run's logs. No artifact download/extraction was performed locally. Local dotnet remains unavailable (`command not found`); no local test pass is claimed.
+
+This documentation update follows the verified commit and is initially local only. It does not claim CI verification of a later documentation commit. Earlier sections below are historical, including statements that the coverage had not yet been pushed or run.
+
+## Remaining acceptance
+
+All Security Lab manual UI checks remain **NOT RUN**: toolbar/keyboard access, 100/150/200% scaling, status and request-ID display, repeated runs, JSON export/cancel/save failures, protected page denial/Allow/reset, closure during startup/active work, and normal browsing/privacy/profile compatibility. Follow [the checklist](docs/security-lab-mock-allow.md). Existing automation does not substitute for these human-operated checks. Active-request cancellation and shutdown-during-evaluation coverage gaps described below remain open; this successful run does not add those assertions.
+
+Recommendation: the recovered portable artifact is ready for manual testing. Keep PR #7 draft pending manual acceptance, remaining focused lifecycle verification and full log review. No automatic merge or ready-for-review transition was performed. Chromium security protections and existing tests were not weakened.
+
+---
+
 # PR #7 focused review — 2026-10-24
 
 Remote state was fetched again: PR #7 remains open, draft, unmerged and conflict-free at `4a0124cbbaf10faf28ff746a7e5d952feb07668e`, based on main `98a8835575c22268a456a64a5033b65e9d2c7840`. No reviews, inline comments or issue comments were returned. Branch-protection settings could not be read (HTTP 401), so required-check configuration is not independently confirmed.
