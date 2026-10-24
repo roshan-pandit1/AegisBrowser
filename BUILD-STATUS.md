@@ -1,3 +1,31 @@
+# PR #7 focused review — 2026-10-24
+
+Remote state was fetched again: PR #7 remains open, draft, unmerged and conflict-free at `4a0124cbbaf10faf28ff746a7e5d952feb07668e`, based on main `98a8835575c22268a456a64a5033b65e9d2c7840`. No reviews, inline comments or issue comments were returned. Branch-protection settings could not be read (HTTP 401), so required-check configuration is not independently confirmed.
+
+## Exact-head CI evidence
+
+[Windows run 39971483169](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169), [job 120475026009](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/job/120475026009), is **SUCCESS** on `4a0124cbbaf10faf28ff746a7e5d952feb07668e`. The API reports every step successful: restore/build, console suites, native storage/popup/tab/renderer tests, filtering/CORS, settings restart, self-contained publish, application smoke, ZIP verification and artifact uploads. The companion push run 39971474953 also succeeded on that SHA.
+
+Previously inspected logs for this head recorded 26 Mock Allow, 56 privacy, 49 address/search, 50 policy/profile, 49 native write, 8 storage checks in each of three read processes, 20 filtering/CORS and 3 write + 4 read settings checks; zero compiler warnings/errors; TLS rejection, clean CEF shutdown and 852-file portable verification. In this resumed session the run/job/artifact metadata was reconfirmed, but re-downloading detailed logs returned HTTP 403. These results apply to the named remote head, **not to the subsequent local coverage changes**.
+
+[Portable artifact 12509990722](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/artifacts/12509990722) is listed as unexpired, 274,249,884 bytes. [Publish directory artifact 12509043351](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/artifacts/12509043351) is also unexpired. Artifact contents were not downloaded again in this session.
+
+## Focused review and pending coverage
+
+The 15-file PR diff retains the existing privacy, Smart Search, profiles and native lifecycle architecture. Program.cs and SecurityHandlers.cs are unchanged by this PR. The server binds IPv4 loopback on an OS-selected port, rejects foreign Host/Origin values, uses cryptographically random HttpOnly session cookies and checks server-side authorization for protected responses. Reset marks sessions revoked and increments their revision; overlapping evaluations can only authorize the current revision. Reports accept only validated request IDs and fixed error labels. No real integration or Chromium security-setting changes were introduced.
+
+No new reproducible production defect was established. Additional coverage is prepared for the exact ten-minute expiration boundary, overlapping evaluations, and reset/reset-all during a pending evaluation. An optional TimeProvider defaults to TimeProvider.System so expiration can be tested without sleeping or changing production lifetimes. Tests use the existing console runner and real ephemeral-port Kestrel fixtures. No existing assertion or timeout was weakened.
+
+**The additional coverage is NOT RUN.** Local `dotnet --info` fails because the SDK is absent on this macOS host. Windows/native execution is unavailable locally. A new Windows CI run on the final pushed commit is required before these changes can be accepted. Active-request cancellation, server shutdown during evaluation, and startup/active-work UI closure still require focused verification; the existing pre-canceled runner and completed-work owner-close tests do not prove those cases.
+
+## Manual acceptance and recommendation
+
+All Security Lab manual UI cases remain **NOT RUN**. Follow the explicit checklist in [milestone instructions](docs/security-lab-mock-allow.md): keyboard access; 100/150/200% scaling; status/decision/IDs; repeated runs; JSON export/cancel/save failures; page denial/Allow/access/reset; close during startup/execution; Smart Search, privacy modes, tabs and profile separation. Prior user-reported Smart Search results do not establish Security Lab acceptance.
+
+Keep PR #7 draft. The existing verified artifact is available for manual testing, but completion of this review is blocked pending publication and Windows verification of the new coverage, remaining lifecycle checks, and user acceptance. Do not mark ready or merge automatically.
+
+---
+
 # Security Lab milestone 1 — Mock Allow verification (2026-10-23)
 
 [Draft PR #7](https://github.com/roshan-pandit1/AegisBrowser/pull/7), branch `feature/security-lab-mock-allow`, starts from main `98a8835575c22268a456a64a5033b65e9d2c7840`. It is independent of the broader draft PR #6. It remains draft and unmerged.

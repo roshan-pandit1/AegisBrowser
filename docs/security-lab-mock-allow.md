@@ -48,10 +48,18 @@ The portable build includes the ASP.NET Core runtime required by the fixture ser
 
 Manual UI verification is **NOT RUN** until a user runs this portable build and reports it. Check:
 
-1. Toolbar entry and keyboard accessibility; 100/150/200% scaling and minimum window size.
-2. Not Run → Running → Passed, displayed decision/ID, repeated runs with new IDs, and report export/save-error UX.
-3. Open Test Page, denial before evaluation, Allow response, protected fixture after evaluation, and Reset Session revocation in the open tab.
-4. Close the lab/owner during startup or a running test; verify responsive UI and normal process termination.
-5. Normal Smart Search, existing profile data, privacy modes and navigation remain functional with lab tabs open.
+Record the tested commit, Windows version and display scaling with each result. All cases below remain **NOT RUN**:
+
+- [ ] Open Security Lab from the toolbar; reach and activate every control with the keyboard.
+- [ ] At 100%, 150% and 200% scaling, confirm labels, buttons, request IDs and focus indicators remain usable, including at minimum window size.
+- [ ] Observe Not Run → Running → Passed. Confirm Allow and a request ID are displayed.
+- [ ] Repeat Run Test; confirm distinct IDs and no stale result during execution.
+- [ ] Export JSON; compare its assertions and result to the UI, and check that cookies/session secrets are absent.
+- [ ] Cancel the save dialog; then attempt an unwritable destination. Confirm cancellation is harmless and save failure is reported without losing the result.
+- [ ] Open Test Page in a new lab tab. Request protected content before evaluating; expect 403.
+- [ ] Evaluate Allow on the page; request protected content and expect 200.
+- [ ] Reset on the page and through the lab window; protected requests must again return 403.
+- [ ] Close the lab and its browser owner during startup and active execution. Confirm responsiveness, no successful result from canceled work, and clean process termination.
+- [ ] Use Smart Search, Back/Forward, tabs, all privacy modes and normal profiles while lab tabs are open. Confirm normal profile data remains separate.
 
 Do not treat automation, an Allow simulation or prior Smart Search acceptance as manual acceptance of this milestone.

@@ -56,7 +56,102 @@ internal static class SecurityDecisionTests
         await using var invalid = await SecurityDecisionServer.StartAsync(new InvalidProvider());
         var invalidReport = await new SecurityTestRunner().RunAsync(invalid);
         Check(!invalidReport.Passed && invalid.Evaluations.Single().RequestId is null, "invalid provider response cannot authorize or leak ID");
+        count += await LifecycleChecks();
         Console.WriteLine($"PASS: {count} mock Allow checks");
+    }
+    private static async Task<int> LifecycleChecks()
+    {
+        var count = 0;
+        void Check(bool ok, string name) { if (!ok) throw new Exception("FAIL: " + name); count++; }
+        static HttpClient Client(SecurityDecisionServer server) => new(new HttpClientHandler {
+            UseProxy = false, AllowAutoRedirect = false, CookieContainer = new CookieContainer()
+        }) { BaseAddress = server.Origin, Timeout = TimeSpan.FromSeconds(10) };
+        static async Task<int> Get(HttpClient client) {
+            using var response = await client.GetAsync(SecurityDecisionServer.ProtectedPath);
+            return (int)response.StatusCode;
+        }
+        var clock = new ManualClock();
+        await using (var expiring = await SecurityDecisionServer.StartAsync(timeProvider: clock))
+        using (var client = Client(expiring))
+        {
+            using var evaluation = await client.PostAsync(SecurityDecisionServer.EvaluatePath, null);
+            Check(evaluation.StatusCode == HttpStatusCode.OK && await Get(client) == 200, "expiration fixture authorized");
+            clock.Advance(TimeSpan.FromMinutes(10) - TimeSpan.FromTicks(1));
+            Check(await Get(client) == 200, "grant valid immediately before expiry");
+            clock.Advance(TimeSpan.FromTicks(1));
+            Check(await Get(client) == 403, "grant denied at exact expiration boundary");
+        }
+        var provider = new GatedProvider();
+        await using var server = await SecurityDecisionServer.StartAsync(provider);
+        using var session = Client(server);
+        async Task Seed() {
+            using var response = await session.PostAsync(SecurityDecisionServer.EvaluatePath, null);
+            Check(response.StatusCode == HttpStatusCode.OK && await Get(session) == 200, "concurrency fixture authorized");
+        }
+        await Seed();
+        var older = provider.HoldNext();
+        var first = session.PostAsync(SecurityDecisionServer.EvaluatePath, null);
+        await older.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var newer = provider.HoldNext();
+        var second = session.PostAsync(SecurityDecisionServer.EvaluatePath, null);
+        await newer.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            older.Release.TrySetResult();
+            using var stale = await first;
+            Check(stale.StatusCode == HttpStatusCode.ServiceUnavailable && await Get(session) == 403,
+                "superseded evaluation cannot authorize while newer evaluation is pending");
+            newer.Release.TrySetResult();
+            using var current = await second;
+            Check(current.StatusCode == HttpStatusCode.OK && await Get(session) == 200,
+                "latest evaluation may authorize its session");
+        }
+        finally { older.Release.TrySetResult(); newer.Release.TrySetResult(); }
+        foreach (var resetAll in new[] { false, true })
+        {
+            await Seed();
+            var gate = provider.HoldNext();
+            var pending = session.PostAsync(SecurityDecisionServer.EvaluatePath, null);
+            await gate.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try
+            {
+                if (resetAll) server.ResetAllSessions();
+                else {
+                    using var reset = await session.PostAsync(SecurityDecisionServer.ResetPath, null);
+                    Check(reset.StatusCode == HttpStatusCode.NoContent, "reset endpoint succeeds during evaluation");
+                }
+                gate.Release.TrySetResult();
+                using var response = await pending;
+                Check(response.StatusCode == HttpStatusCode.ServiceUnavailable && await Get(session) == 403,
+                    resetAll ? "reset all revokes in-flight evaluation" : "session reset revokes in-flight evaluation");
+            }
+            finally { gate.Release.TrySetResult(); }
+        }
+        return count;
+    }
+    private sealed class ManualClock : TimeProvider
+    {
+        private long ticks = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).Ticks;
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
+        public void Advance(TimeSpan duration) => Interlocked.Add(ref ticks, duration.Ticks);
+    }
+    private sealed class GatedProvider : ISecurityDecisionProvider
+    {
+        internal sealed class Gate
+        {
+            internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        private readonly System.Collections.Concurrent.ConcurrentQueue<Gate> gates = new();
+        internal Gate HoldNext() { var gate = new Gate(); gates.Enqueue(gate); return gate; }
+        public async Task<SecurityDecision> EvaluateAsync(CancellationToken token)
+        {
+            if (gates.TryDequeue(out var gate)) {
+                gate.Started.TrySetResult();
+                await gate.Release.Task.WaitAsync(token);
+            }
+            return await new MockSecurityDecisionProvider().EvaluateAsync(token);
+        }
     }
     private sealed class SwitchableProvider : ISecurityDecisionProvider
     {

@@ -15,23 +15,24 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
     public const string ProtectedPath = "api/mock-security/protected";
     public const string ResetPath = "api/mock-security/reset";
     private const string CookieName = "aegis-mock-session";
-    private sealed class Session { public bool Allowed; public bool Revoked; public long Revision; public DateTimeOffset Expires = DateTimeOffset.UtcNow.AddMinutes(10); }
+    private sealed class Session(DateTimeOffset now) { public bool Allowed; public bool Revoked; public long Revision; public readonly DateTimeOffset Expires = now.AddMinutes(10); }
     private readonly ConcurrentDictionary<string, Session> sessions = new();
     private readonly ConcurrentQueue<EvaluationEvent> evaluations = new();
     private readonly WebApplication app;
     private readonly ISecurityDecisionProvider provider;
+    private readonly TimeProvider clock;
     public Uri Origin { get; private set; } = null!;
     public Uri PageUrl => new(Origin, PagePath);
     public EvaluationEvent[] Evaluations => evaluations.ToArray();
-    private SecurityDecisionServer(WebApplication app, ISecurityDecisionProvider provider) { this.app = app; this.provider = provider; }
+    private SecurityDecisionServer(WebApplication app, ISecurityDecisionProvider provider, TimeProvider clock) { this.app = app; this.provider = provider; this.clock = clock; }
 
-    public static async Task<SecurityDecisionServer> StartAsync(ISecurityDecisionProvider? provider = null, CancellationToken cancellationToken = default)
+    public static async Task<SecurityDecisionServer> StartAsync(ISecurityDecisionProvider? provider = null, CancellationToken cancellationToken = default, TimeProvider? timeProvider = null)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] });
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
         var app = builder.Build();
-        var server = new SecurityDecisionServer(app, provider ?? new MockSecurityDecisionProvider());
+        var server = new SecurityDecisionServer(app, provider ?? new MockSecurityDecisionProvider(), timeProvider ?? TimeProvider.System);
         app.Use(async (context, next) => {
             if (context.Request.Host.Host != "127.0.0.1") { context.Response.StatusCode = 403; return; }
             var origin = context.Request.Headers.Origin.ToString();
@@ -57,7 +58,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
         app.MapGet("/" + ProtectedPath, (HttpContext context) => {
             var session = server.Find(context);
             bool allowed = false;
-            if (session is not null) lock(session) allowed = session.Allowed && !session.Revoked && session.Expires > DateTimeOffset.UtcNow;
+            if (session is not null) lock(session) allowed = session.Allowed && !session.Revoked && session.Expires > server.clock.GetUtcNow();
             return allowed ? Results.Json(new { fixture = "protected-fixture", access = true }) : Results.Json(new { access = false }, statusCode: 403);
         });
         app.MapPost("/" + EvaluatePath, (Func<HttpContext, Task<IResult>>)server.Evaluate);
@@ -75,12 +76,12 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
     private async Task<IResult> Evaluate(HttpContext context)
     {
         var session = Find(context);
-        if (session is null || session.Revoked || session.Expires <= DateTimeOffset.UtcNow)
+        if (session is null || session.Revoked || session.Expires <= clock.GetUtcNow())
         {
-            foreach(var item in sessions.Where(p => p.Value.Expires <= DateTimeOffset.UtcNow)) sessions.TryRemove(item.Key, out _);
+            foreach(var item in sessions.Where(p => p.Value.Expires <= clock.GetUtcNow())) sessions.TryRemove(item.Key, out _);
             if (sessions.Count >= 256) return Results.StatusCode(503);
             var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-            session = new Session(); sessions[id] = session;
+            session = new Session(clock.GetUtcNow()); sessions[id] = session;
             context.Response.Cookies.Append(CookieName, id, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/" });
         }
         long revision;
@@ -92,7 +93,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
             var decision = await provider.EvaluateAsync(timeout.Token).WaitAsync(timeout.Token);
             lock(session)
             {
-                if (decision is null || !decision.IsValidAllow || session.Revoked || session.Revision != revision || session.Expires <= DateTimeOffset.UtcNow)
+                if (decision is null || !decision.IsValidAllow || session.Revoked || session.Revision != revision || session.Expires <= clock.GetUtcNow())
                 { Record("rejected", null); return Results.StatusCode(503); }
                 session.Allowed = true;
             }
@@ -108,7 +109,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
     }
     private void Record(string outcome, string? requestId)
     {
-        evaluations.Enqueue(new(DateTimeOffset.UtcNow, outcome, requestId));
+        evaluations.Enqueue(new(clock.GetUtcNow(), outcome, requestId));
         while (evaluations.Count > 256) evaluations.TryDequeue(out _);
     }
     public void ResetAllSessions()
