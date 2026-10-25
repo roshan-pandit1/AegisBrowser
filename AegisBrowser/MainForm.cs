@@ -20,6 +20,7 @@ public sealed class MainForm : Form
     private SearchSettings searchSettings = new();
     private readonly SearchSettingsStore? searchStore;
     private SearchSettingsForm? searchWindow;
+    private SecurityLabForm? securityLab;
     internal string SearchEngineId => searchSettings.EngineId;
     private readonly HashSet<TabPage> retiring = new();
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
@@ -42,9 +43,9 @@ public sealed class MainForm : Form
         Text = $"Aegis Browser — {profile}";
         Width = 1250;
         Height = 850;
-        MinimumSize = new Size(750, 450);
-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 10 };
-        for (var i = 0; i < 10; i++)
+        MinimumSize = new Size(950, 450);
+        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 11 };
+        for (var i = 0; i < 11; i++)
             bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
                 i == 3 ? 100 : i >= 6 ? 100 : 48));
         back = MakeButton("←", () => Current?.Back());
@@ -75,6 +76,12 @@ public sealed class MainForm : Form
                 });
             searchWindow.Show(this); searchWindow.BringToFront();
         }), 9, 0);
+        bar.Controls.Add(MakeButton("Security Lab", () =>
+        {
+            if (securityLab is null || securityLab.IsDisposed)
+                securityLab = new SecurityLabForm(url => NewTab(url, isolated: true));
+            securityLab.Show(this); securityLab.BringToFront();
+        }), 10, 0);
         address.AccessibleName = "Search or enter address";
         address.PlaceholderText = "Search " + SearchEngines.Get(searchSettings.EngineId).Name + " or enter address";
         address.KeyDown += (_, e) =>
@@ -92,12 +99,13 @@ public sealed class MainForm : Form
         Controls.Add(bottom);
         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
-        FormClosing += (_, e) =>
+        FormClosing += async (_, e) =>
         {
             if (closeComplete) return;
             e.Cancel = true;
             if (closing) return;
             closing = true;
+            if (securityLab is { IsDisposed: false }) { await securityLab.ShutdownAsync(); securityLab.Close(); }
             foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
             {
                 retiring.Add(page);
@@ -150,11 +158,13 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { }
     }
 
-    private void NewTab(string url)
+    private void NewTab(string url, bool isolated = false)
     {
         if (closing) return;
         var page = new TabPage("New tab") { Tag = "Loading…" };
-        var browser = new BrowserView(url) { Dock = DockStyle.Fill };
+        // Lab tabs have an independent in-memory context, never the normal profile cache.
+        var context = isolated ? new RequestContext(new RequestContextSettings { CachePath = "" }) : null;
+        var browser = new BrowserView(url, context) { Dock = DockStyle.Fill };
         void Report(string message) => Post(() =>
         {
             if (page.IsDisposed) return;
@@ -179,7 +189,7 @@ public sealed class MainForm : Form
                 browser.GetBrowserHost().CloseBrowser(true);
         });
         browser.LifeSpanHandler = popups;
-        page.Disposed += (_, _) => popups.ClosePopups();
+        page.Disposed += (_, _) => { popups.ClosePopups(); context?.Dispose(); };
         browser.DownloadHandler = new DenyDownloads(Report);
         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
