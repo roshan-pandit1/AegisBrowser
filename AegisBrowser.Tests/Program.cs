@@ -10,7 +10,12 @@ if (args.Length == 2 && args[0] == "--probe-lock")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--benchmark") { FilteringBenchmarks.Run(); return; }
+if (args.Length > 0 && !(args.Length == 1 && args[0] == "--core-only")) throw new ArgumentException("Unknown test argument.");
 PrivacyTests.Run();
+AddressTests.Run();
+AuditRegressionTests.Run();
+NavigationDiagnosticsTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {
@@ -40,6 +45,18 @@ foreach (var url in new[] { "", "javascript:alert(1)", "file:///C:/secret", "dat
     Check(BrowserPolicy.NormalizeAddress(url) is null, "blocked address: " + url);
 foreach (var url in new[] { "file:///C:/secret", "javascript:alert(1)", "https://user:pass@example.com", "data:text/html,test" })
     Check(!BrowserPolicy.IsWebUrl(url), "navigation policy: " + url);
+Check(BrowserPolicy.CanPromptPermission("https://example.com/a", "https://example.com/b"), "same secure origin prompt");
+Check(BrowserPolicy.CanPromptPermission("https://example.com:443/a", "https://example.com/"), "default port origin equivalence");
+Check(BrowserPolicy.CanPromptPermission("http://localhost:8765/a", "http://localhost:8765/"), "loopback prompt");
+foreach (var pair in new[] {
+    ("http://example.com", "http://example.com"),
+    ("https://example.com", "https://example.com.evil.test"),
+    ("https://example.com:444", "https://example.com"),
+    ("https://example.com", "https://other.test"),
+    ("data:text/html,test", "https://example.com"),
+    ("https://user@example.com", "https://example.com"),
+    (BrowserPolicy.DiagnosticsUrl, BrowserPolicy.DiagnosticsUrl) })
+    Check(!BrowserPolicy.CanPromptPermission(pair.Item1, pair.Item2), "permission origin rejected: " + pair.Item1);
 var root = Path.Combine(Path.GetTempPath(), "aegis-tests-" + Guid.NewGuid());
 try
 {
@@ -74,3 +91,6 @@ try
 }
 finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
 Console.WriteLine($"PASS: {count} policy and profile checks");
+
+if (args.Length == 0) await LabTests.Run();
+else Console.WriteLine("NOT RUN: HTTP lab suite (--core-only explicitly selected)");

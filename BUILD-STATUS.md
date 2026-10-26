@@ -1,3 +1,202 @@
+# Navigation diagnostics validation follow-up
+
+**BLOCKED / release unapproved.** Reviewed release/windows-rc HEAD `9fd457276d3e741ade1041ea37655115b7beea4c` plus preserved uncommitted changes. Added atomic Stop and export, shared 4 MiB-bounded asynchronous export and a late-callback disposal guard. Added synthetic-secret, byte-bound, concurrent snapshot and write-failure regression coverage; these C# tests have **not executed**.
+
+Fresh checks: 7 static gates, 5 Python tests, 7 project/props XML parses and git diff --check PASS. All requested dotnet commands could not start (SDK missing). Windows CEF suites, publish and packaged smoke verification remain blocked on this Darwin host. [Exact command output](review-deliverables/navigation-diagnostics-validation/validation.log). The real survey failure remains **D: insufficient evidence**. A consent-based reproduction procedure and administrator questions are documented [here](docs/survey-security-diagnostics.md); no live reproduction or manual acceptance occurred. No source commit is validated by these static results. No commit/push/merge/publish/release occurred.
+
+---
+
+# Survey rejection diagnostics — 2026-10-26
+
+Cause **unresolved**. The reported Security result and failure to resolve it by disabling filtering are user-reported, not independently reproduced. Added opt-in bounded local trace, sanitized JSON export and local regression fixtures; no matching rules, provider exceptions, cookie handling or security controls were changed. Current branch remains release/windows-rc at 9fd457276d3e741ade1041ea37655115b7beea4c plus preserved edits. No commit/push/release.
+
+Seven static gates and five Python audit tests pass; C# compilation/new regression tests and Windows runtime/publishing remain **BLOCKED** (no dotnet/Windows). No live provider or manual acceptance testing occurred. See [diagnostic design, evidence boundaries and Windows commands](docs/survey-security-diagnostics.md). The earlier recovery ZIP does not contain these new diagnostic changes.
+
+---
+
+# Security audit working-tree update — 2026-10-26
+
+**Not release-ready.** Current local branch is `release/windows-rc`, HEAD `9fd457276d3e741ade1041ea37655115b7beea4c`, plus preserved pre-existing edits and this uncommitted audit. It is not the saved PR #7/UI-redesign revision. No commit, push, PR-state change or release was made. Remote lookup failed with `Could not resolve host: github.com`.
+
+**Implemented, runtime unverified:** diagnostics request/response/CSP hardening; malformed-filter and IDN handling; structured fallback counters and input bounds; cancelable background filter compilation and bounded UTF-8 list import with SHA-256; expiring/revocable bounded mock-lab sessions and atomic decision versions; guarded native-close retries and navigation refusal for retiring tabs; independent shutdown cleanup; permission-message redaction and callback snapshot cleanup; explicit DPI/accessibility names; dependency audit/update configuration; payload exclusions, clean-source packaging and package/file SBOM generation; observed-descendant smoke checks. Existing TLS rejection, origin consent, native popup behavior, downloads-denied policy and all prior test assertions are retained.
+
+| Verification on this working tree | Actual result |
+| --- | --- |
+| Python source security gates | PASS: 7 static hash/XML/pattern checks |
+| Python audit/payload/inventory regression tests | PASS: 5 tests using synthetic payloads; real release inventory not generated |
+| Project XML / diagnostics script syntax | PASS: 7 XML files; node --check (no browser execution) |
+| git diff --check | PASS |
+| Required dotnet restore/build/console commands | BLOCKED before execution: `dotnet: command not found`; common SDK locations absent |
+| New/existing C# tests, NuGet vulnerability findings and benchmarks | BLOCKED: no SDK/feed execution; no test counts or timing results claimed |
+| Native Windows browser/filtering/storage/lifecycle/permission tests | BLOCKED: macOS host, no Windows CEF runtime |
+| Publish, real SBOM, portable ZIP, extraction and smoke | BLOCKED: no candidate build/PowerShell/Windows execution |
+| Manual acceptance | NOT RUN for these changes |
+
+**High-severity residual risk:** upstream CefSharp native source sets `no_sandbox = true`. Absence of an application-owned disabling switch does not prove an OS sandbox. Exact shipped native behavior remains unverified; no unsupported override was added. This browser must not claim Chrome-equivalent sandboxing or Safe Browsing. CefSharp remains consistently pinned at 154.0.340; official release metadata was reviewed, but no upgrade or complete CVE-coverage claim is made.
+
+See [remediation inventory](docs/REMEDIATION-REPORT.md), [threat model](docs/THREAT-MODEL.md), [security limitations](docs/SECURITY-LIMITATIONS.md), [test matrix](docs/TEST-MATRIX.md) and [release gates](docs/RELEASE-CHECKLIST.md). The user-reported product rendering issue remains unreproduced; no blanket allowlist or response rewrite was introduced. Saved PR #7/redesign/Python work and unrelated edits remain intact.
+
+Recovery: [snapshot instructions](review-deliverables/security-audit-2026-10-26/README.md). The temporary pre-audit baseline is unavailable; this snapshot includes pre-existing browser work and is not an audit-only patch.
+
+The historical records below refer only to their stated revisions and **are not verification of this working tree**.
+
+---
+
+# Authorized mock security lab — verified 2026-10-23
+
+[Draft PR #6](https://github.com/roshan-pandit1/AegisBrowser/pull/6), `feature/authorized-testing-lab`, is based on main `98a8835575c22268a456a64a5033b65e9d2c7840` (merged Smart Search). It remains draft and unmerged. The user explicitly confirmed mock-only scope: no real provider, credentials, live adapter or external detection-service calls. `ISecurityTestAdapter` remains an extension interface; only the mock is implemented.
+
+## Actual Windows verification
+
+[Run 39939721741](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741), [job 120367883691](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/job/120367883691), **SUCCESS** for implementation `2a8476e1fbd4b9f5e1c567f32098c7da71b13982`. Completed logs and artifact metadata were inspected. This status-only commit follows that verified implementation; its own CI result is reported in PR #6.
+
+| Check | Actual result |
+| --- | --- |
+| Windows restore/build | PASS; windows-latest, .NET 8, win-x64 Release; zero compiler warnings/errors |
+| Lab server/model | PASS: 23 checks (loopback, containment, redirects, session separation, allow/challenge/deny/unavailable enforcement, invalid/canceled decisions, redaction, bounds and lab profile paths) |
+| Existing suites | PASS: 56 privacy + 49 address/search + 50 policy/profile checks |
+| Native browser suite | PASS: 54 checks, including all four lab profiles, baseline versus Strict/Custom third-party resources, mock protected-access decisions, redirect instrumentation, TLS rejection, connection failure and lab shutdown |
+| Persistent browser storage | PASS: 8 checks in each of three fresh read processes; existing cookie/localStorage isolation and persistence retained |
+| Native shutdown | PASS: completion markers and zero exit in all four browser suite processes; assertion gate retained |
+| Chromium filtering / CORS | PASS: 20 checks |
+| Settings restart | PASS: 3 write + 4 read checks |
+| Self-contained publish | PASS; complete publish directory uploaded |
+| Published/extracted application smoke | PASS for both ordinary browser and --lab=baseline, including cache creation and normal close |
+| Portable archive | PASS: 852 file hashes verified; portable ZIP and checksum uploaded |
+
+[Portable Windows x64 test artifact](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/artifacts/12495776550), 274,245,542 bytes. Inner ZIP SHA-256: `e6cd75efc3a927b57aeabcae6729a807a76bf37eecf89a8d0bf5da69ef5862f7`. [Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/artifacts/12495581854). The self-contained build includes the ASP.NET Core framework needed by the fixtures; no additional NuGet library was introduced. See [lab instructions](docs/authorized-lab.md) and [installation](docs/INSTALL-WINDOWS.md).
+
+## Failure corrected
+
+[Initial run 39938808440](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39938808440) compiled but failed waiting for the baseline third-party fixture. Diagnostic [run 39939397693](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939397693) identified `SyntaxError: Unexpected end of input`: the fixture's JavaScript loop lacked its closing brace. The script was corrected. The original assertions and timeouts remain intact; the subsequent verified run passes.
+
+## Boundaries and remaining manual acceptance
+
+No lab GUI acceptance was performed manually by this agent or reported by the user. Previous user-reported Smart Search acceptance below does not cover the lab. Remaining: all scenario controls and profile launch UX; keyboard/accessibility and 100/150/200% scaling; rule editing; JSON save/cancel/unwritable destination; simultaneous lab/normal profiles; close during initialization/traffic; DNS behavior under the user's OS resolver/proxy; and the historical real-site/permission/DevTools/offline diagnostics gates.
+
+TLS and native connection failure were exercised in CI. The explicit reserved .invalid DNS scenario is implemented but not asserted in CI; resolver/proxy outcomes vary and are not a claimed pass. Default fixtures use loopback, not a real provider. The lab request allowlist and CSP are not an OS network sandbox. Chromium background traffic and OS DNS are not comprehensively contained. Existing CefSharp 154, certificate validation, permissions, web security and normal privacy/Smart Search behavior remain enabled; no security-bypassing switches were added.
+
+Lab profiles use a separate LabProfiles root. Server authorization is deliberately memory-only and expires when the server stops. Random fixture ports can change localStorage origins between launches; CI's persistent-storage checks use the existing dedicated browser fixtures. Reports exclude raw URLs/paths, credentials, headers, cookies and bodies; they retain bounded typed events, status codes, sanitized destinations, request IDs and timing. No actual provider certification or stable-release certification is claimed.
+
+Local `dotnet --info` fails (SDK not installed on this macOS host); Windows results come from CI. Local `git diff --check` passes. Local working changes are preserved; commits were published through the authenticated GitHub connector.
+
+---
+
+## Previous Smart Search and browser verification (historical)
+
+# PR #5 review and user-reported acceptance — 2026-10-23
+
+PR #5 is prepared for human review against `main`. Main at `023a5709ff3af0dbc3edf319e4ebe8b827d79cf0` contains PR #4's merge and the original privacy base `8a78d77`; retargeting does not require reintroducing those changes. No automatic merge is authorized or performed.
+
+## User-reported manual results
+
+The user reported the following working in manual testing. These are **user-reported PASS**, not tests performed or independently witnessed by this agent and not CI results. The report did not specify the exact binary revision, Windows version, selected providers or display scaling.
+
+| Case | User-reported result |
+| --- | --- |
+| Single-word search | PASS |
+| Direct domain navigation | PASS |
+| Search-engine switching | PASS |
+| Search settings persist after restart | PASS |
+| Per-profile search settings | PASS |
+
+These confirmations supersede the blanket “manual acceptance not run” statement for these five cases only. No failures were reported in these cases. Full release acceptance is still incomplete.
+
+## Automated verification and regression review
+
+Before this documentation update, the latest Windows CI [run 39932369988](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39932369988) passed on `71ead1580710258138eb0d3c5f1d1eaf1b9890dc`. It verified 49 address/search, 56 privacy, 50 policy/profile, 38 browser write checks, 8 storage checks in each of three read processes, 20 filtering checks and 3 write + 4 read settings checks. Restore/build/publish, TLS rejection, CORS, native shutdown, published-app smoke and 712-file portable extraction checks passed. The prior sections preserve the detailed implementation evidence. CI for this subsequent documentation commit is reported on PR #5; this document does not pre-claim its result.
+
+Review of the 12-file feature diff found no blocking regression. The resolver separates URLs from encoded queries, permits only the supported internal addresses and HTTP(S) navigation, and does no network work while typing. Engine choices are fixed HTTPS templates. Search settings use profile-local atomic replacement and preserve unreadable files; the active engine changes only after saving succeeds. MainForm continues to use Chromium Load/Back/Forward and existing lifecycle handlers. No CefSharp version, TLS validation, permission policy, privacy engine, popup handler or native disposal code is changed by this feature. The existing browser tests retain those regression gates. This is a code/CI review, not a claim of complete GUI validation.
+
+## Remaining acceptance
+
+Not confirmed by the user's report: all four real providers individually; multiword/Unicode query UX; explicit URL, localhost and IPv6 GUI behavior; Enter/Ctrl+L with web content focused; multi-tab interaction and Back/Forward UX; keyboard-only settings; 100/150/200% scaling/accessibility; simultaneous profile processes; corrupt/unwritable settings error UX; real OAuth, permission/device prompts, DevTools, offline diagnostics and the other historical release gates. Automated coverage of some of these cases does not establish a manual pass. No stable-release certification is implied.
+
+---
+
+## Earlier implementation verification (historical)
+
+# Smart address bar verification — 2026-10-23
+
+[Draft PR #5](https://github.com/roshan-pandit1/AegisBrowser/pull/5) targets `feature/privacy-filtering` from `feature/smart-address-search`, based on `8a78d77262e9bfb59ebc6191951209dda0accb5a`. GitHub reports PR #4 already merged as of this verification; this task did not merge or modify it. PR #5 remains draft with the requested base branch. CefSharp 154.0.340, .NET 8, privacy filtering and Chromium security settings are unchanged.
+
+## Actual Windows results
+
+[Windows run 39931668616](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616), [job 120341176849](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/job/120341176849), **SUCCESS** for implementation `f6204a3ade0c96a993ac7b7a028a7b1263480f2a`. Completed logs and artifact metadata were inspected. This subsequent status commit documents that tested revision.
+
+| Check | Actual result |
+| --- | --- |
+| Workflow | windows-latest; setup-dotnet installs .NET 8; global.json pins 8.0.4xx |
+| Restore / Release win-x64 application and browser harness builds | PASS; zero compiler warnings/errors |
+| Address/search resolution and settings | PASS: 49 checks |
+| Existing privacy / policy/profile suites | PASS: 56 + 50 checks |
+| Native browser write suite | PASS: 38 checks, including submitted searches, no search while typing, Unicode query decoding, engine changes, current-tab navigation/history and existing popup/renderer/shutdown cases |
+| Persistent browser storage | PASS: 8 checks in each of three fresh read processes |
+| Native shutdown | PASS: all four browser processes report CEF shutdown; zero exits; native assertion gate enabled |
+| Chromium filtering / CORS | PASS: 20 checks |
+| Settings process restart | PASS: 3 write + 4 read checks, including search selection through production settings UI |
+| TLS | PASS: untrusted certificate rejected with CertAuthorityInvalid |
+| Self-contained publish, payload and published-app smoke | PASS |
+| Portable archive | PASS: 712 file hashes verified, extracted executable startup/normal-close smoke passed |
+| Publish directory and portable ZIP uploads | PASS |
+
+[Portable Windows x64 test artifact](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/artifacts/12491409149) (262,467,120 bytes) includes the inner ZIP, checksum, installation instructions and SEARCH.md. Inner ZIP SHA-256: `895c4f9311609189bf1120ec246d34c4b6d56267c2db47a9453b3862e5c6e661`. [Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/artifacts/12492570314). See [installation](docs/INSTALL-WINDOWS.md) and [search behavior/settings](docs/search.md).
+
+## Defect corrected and limits
+
+Initial [run 39716359894](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39716359894) failed `navigate [::1]:8080`: .NET's IPAddress parser accepted the bracketed authority, which the bare-IPv6 path incorrectly wrapped again. The resolver now reserves that path for unbracketed literals, with explicit bracketed loopback and non-loopback port regressions. No timeout or assertion was relaxed. The subsequent Windows run above passes all suites.
+
+Manual GUI acceptance is **NOT RUN**. Remaining cases: all four real search providers; Enter/Ctrl+L and keyboard-only settings with web content focused; multi-tab interaction; 100/150/200% display scaling; simultaneous named profiles; unwritable/corrupt settings UX; and all previous manual release gates below. Automated searches use local HTTPS fixtures, not real-provider availability or authentication tests. No CAPTCHA, identity, TLS or anti-fraud circumvention is added. This is a test candidate, not a stable-release certification.
+
+Local `dotnet --info` fails with command not found on this macOS ARM64 environment; executable results above are from Windows CI. Local `git diff --check` passes. Local working files are retained; remote commits were published through the authenticated GitHub connector because local Git metadata is restricted.
+
+---
+
+## Previous Windows release review (historical)
+
+# Windows release review — 2026-10-22
+
+**Windows automation passes; manual release acceptance remains incomplete. PR #4 is draft and unmerged.** Architecture remains .NET 8 / WinForms / CefSharp. CefSharp is now pinned to **154.0.340** (Chromium 154.0.8037.98) in the app and both browser harnesses.
+
+## Verified Windows result
+
+[Windows run 39709234492](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492), [job 119596331252](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/job/119596331252), completed successfully for implementation `487e1419cdafd5bdf9e2d13bc3e916726bbef9e8`. Completed logs and artifact metadata were inspected. This status update changes documentation after that verified implementation.
+
+| Check | Actual result |
+| --- | --- |
+| Runner / SDK | windows-latest, Windows x64, .NET 8.0.426 |
+| Restore / Release win-x64 app and harness builds | PASS; zero warnings and errors |
+| Privacy / policy and profile checks | PASS: 56 + 50 |
+| Browser integration write process | PASS: 31 checks, including popup ownership, tab/loading shutdown, renderer recovery, native close acknowledgement, sibling survival and TLS rejection (`CertAuthorityInvalid`) |
+| Persistent cookie/localStorage reads | PASS: 8 checks in each of three fresh processes using the same saved profiles |
+| Clean process termination | PASS: CEF-shutdown marker and zero exit in all four integration processes; native assertion gate remained enabled |
+| Chromium privacy filtering / settings | PASS: 20 checks, including all modes, import/rules/exceptions/pause and enforced CORS |
+| Settings process restart | PASS: 2 write + 3 read checks |
+| Self-contained publish and app smoke | PASS |
+| Portable ZIP round trip | PASS: 711 file hashes verified; extracted application startup/normal-close smoke passed |
+| Publish directory and portable artifact uploads | PASS |
+
+[Portable Windows x64 candidate](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/artifacts/12396835295), artifact ID `12396835295`, 262,457,683 bytes. The artifact contains the application ZIP and its checksum file. **Inner portable ZIP SHA-256:** `99265af54af447c70e6bd6b32b10c0e7b653e9687fa887e4b42449e299fc8af1`. GitHub's outer artifact digest is different: `3116c15622e4aea01cb5e900a1e92d1d9178b4f344d4875eb531792de4ee1892`.
+
+[Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/artifacts/12396033393), artifact ID `12396033393`, 261,647,790 bytes. See [installation instructions](docs/INSTALL-WINDOWS.md).
+
+## Failures investigated and corrections
+
+1. [Run 39616815340](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39616815340) failed with Aura assertions and unexpected `WM_CLOSE` of the storage host. `DoClose` returns true for embedded browsers, leaving host teardown to the app. Disposing the adapter at this point queues another native close while handlers are released. `BrowserView` now releases its WinForms host after close readiness, waits for `OnBeforeClose` to finish, then permits adapter disposal. Readiness also waits for owned popups. Repeated release calls share one task. Tests explicitly prove sibling browsers and their storage remain usable.
+2. [Run 39619861386](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39619861386) reached the previously blocked TLS test, which failed with `ConnectionClosed`. The fixture's ephemeral key was unsuitable for .NET 8 Schannel. It now imports a temporary user key container without adding certificate trust. Certificate-specific rejection is still required; transport failure is not accepted.
+3. [Run 39620364932](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39620364932) completed write and read checks but retained an intermittent Aura assertion. Direct native destruction and hide-before-destroy experiments on CEF 151 also failed, including [run 39708655361](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39708655361). The assertion maps to `Window::GetToplevelWindow()` after destruction in bundled Chromium 151.0.7922.174, including CEF-managed popup closure. Those Win32 workarounds were removed. Upgrading all harnesses and the app to stable CefSharp 154.0.340 cleared the remaining native failure with the same assertion gate and expanded tests. No individual upstream fixing commit is claimed.
+4. Inspector selection now follows the request observation ID across refresh; its Windows regression passes. No timeout increases, assertion exclusions, security switches or runtime-style changes were used to obtain the passing run.
+
+## Remaining release gates
+
+All human-operated cases in [release review](docs/release-review.md) and [Windows acceptance plan](docs/windows-acceptance-v0.1.md) remain **NOT RUN**: clean Windows installation, full navigation/keyboard/stop UX, tab/window close races, real OAuth, origin permission consent and device handling, DevTools, cold offline diagnostics, sustained-traffic inspector actions, large imports, settings warning/upgrade/crash recovery, scaling and accessibility. Automated CEF coverage above is partial and is not a manual GUI acceptance pass.
+
+TLS rejection and Chromium web-security protections remain enabled; no sandbox-disabling switches, identity spoofing or security-check circumvention was added. Local execution remains unavailable on this macOS host without dotnet; all Windows results above come from CI.
+
+---
+
+## Historical privacy-only verification (superseded by current review)
+
 # Privacy filtering verification — 2026-10-21
 
 [PR #4](https://github.com/roshan-pandit1/AegisBrowser/pull/4), branch `feature/privacy-filtering`, implements the four privacy phases on the existing .NET 8 / WinForms / CefSharp 151.3.240 architecture. It is based on `main` at `ee2f01a` and does not include or overwrite the separate unfinished browser-compatibility work in PR #3 or its local working files.

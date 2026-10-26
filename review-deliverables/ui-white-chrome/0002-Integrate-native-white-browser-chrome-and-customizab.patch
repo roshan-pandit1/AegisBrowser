@@ -1,0 +1,848 @@
+From f49f05d4e9e71cbb8c9c3bc8fae60bcf37497d69 Mon Sep 17 00:00:00 2001
+From: roshan-pandit1 <roshan10pandit@gmail.com>
+Date: Sun, 25 Oct 2026 12:26:28 +0530
+Subject: [PATCH 2/2] Integrate native white browser chrome and customizable
+ homepage
+
+---
+ AegisBrowser.BrowserTests/Program.cs         |  14 +-
+ AegisBrowser.FilteringTests/Program.cs       |  19 +++
+ AegisBrowser.FilteringTests/ReleaseChecks.cs |  11 +-
+ AegisBrowser/AegisBrowser.csproj             |   1 +
+ AegisBrowser/ChromeTheme.cs                  |  59 +++++++
+ AegisBrowser/HomeView.cs                     |  47 ++++++
+ AegisBrowser/MainForm.cs                     | 160 +++++++++++++++----
+ AegisBrowser/PrivacyForm.cs                  |   4 +-
+ AegisBrowser/README.md                       |  14 +-
+ AegisBrowser/SearchSettingsForm.cs           |   2 +
+ AegisBrowser/SecurityLabForm.cs              |   2 +
+ AegisBrowser/SiteLibraryForm.cs              |  52 ++++++
+ BUILD-STATUS.md                              |  50 ++++++
+ docs/INSTALL-WINDOWS.md                      |   2 +-
+ docs/security-lab-mock-allow.md              |   4 +-
+ docs/ui-redesign.md                          |  43 +++++
+ scripts/package-portable.ps1                 |   1 +
+ tests/acceptance/windows-smoke.ps1           |   2 +-
+ 18 files changed, 439 insertions(+), 48 deletions(-)
+ create mode 100644 AegisBrowser/ChromeTheme.cs
+ create mode 100644 AegisBrowser/HomeView.cs
+ create mode 100644 AegisBrowser/SiteLibraryForm.cs
+ create mode 100644 docs/ui-redesign.md
+
+diff --git a/AegisBrowser.BrowserTests/Program.cs b/AegisBrowser.BrowserTests/Program.cs
+index c399011..0a696c8 100644
+--- a/AegisBrowser.BrowserTests/Program.cs
++++ b/AegisBrowser.BrowserTests/Program.cs
+@@ -292,6 +292,15 @@ internal static class Program
+         Button Button(string label) => toolbar.Controls.OfType<Button>().Single(b => b.Text == label);
+         ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+         await Wait(() => tabs.TabCount == 1, "initial tab"); await Ready(Current());
++        var home = tabs.SelectedTab!.Controls.OfType<HomeView>().Single();
++        Check(home.Visible, "native branded homepage is visible");
++        IEnumerable<Control> Descendants(Control root) => root.Controls.Cast<Control>().SelectMany(c => new[] { c }.Concat(Descendants(c)));
++        var homeQuery = Descendants(home).OfType<TextBox>().Single(); homeQuery.Text = "home query";
++        Check(Current().Address == "about:blank", "homepage typing does not issue searches");
++        Descendants(home).OfType<Button>().Single(b => b.Text == "Search").PerformClick();
++        await Wait(() => Current().Address == SearchEngines.Get(form.SearchEngineId).Search("home query") && !Current().IsLoading, "homepage search navigation");
++        Check(!home.Visible && tabs.TabCount == 1, "homepage submits through existing tab navigation");
++        await LoadReady(Current(), BrowserPolicy.DiagnosticsUrl);
+         Check(await Js(Current(), "document.querySelector('#result').textContent.includes('userAgent')") == "True", "embedded diagnostics renders in CEF");
+         var navigating = Current();
+         await LoadReady(navigating, Origin + "one");
+@@ -314,7 +323,7 @@ internal static class Program
+         Button("←").PerformClick(); await Wait(() => navigating.Address == previousUrl && !navigating.IsLoading, "back from search");
+         Button("→").PerformClick(); await Wait(() => navigating.Address.StartsWith("https://duckduckgo.com/") && !navigating.IsLoading, "forward to search");
+         Check(tabs.TabCount == 1, "search preserves tab count and history");
+-        Button("Search").PerformClick();
++        form.InvokeChromeAction("Search");
+         var searchForm = form.OwnedForms.OfType<SearchSettingsForm>().Single();
+         var picker = searchForm.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<ComboBox>().Single();
+         picker.SelectedItem = SearchEngines.Get("google"); searchForm.SaveSelection(); searchForm.Close();
+@@ -329,6 +338,7 @@ internal static class Program
+         Check(tabs.TabCount == 1, "rapid tab creation and disposal during loading");
+         Button("+").PerformClick(); await Ready(Current());
+         var damaged = Current();
++        await LoadReady(damaged, BrowserPolicy.DiagnosticsUrl);
+         await Cef.UIThreadTaskFactory.StartNew(() => damaged.GetBrowserHost().ExecuteDevToolsMethod(0, "Page.crash", new Dictionary<string, object>()));
+         await Wait(() => status.Text?.Contains("Renderer stopped") == true, "renderer termination diagnostic");
+         Check(true, "renderer crash reports recoverable per-tab diagnostic");
+@@ -366,7 +376,7 @@ internal static class Program
+         await Wait(() => tabs.TabCount == 1, "initial lab host tab");
+         var normal = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+         await Ready(normal);
+-        form.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<Button>().Single(b => b.Text == "Security Lab").PerformClick();
++        form.InvokeChromeAction("Security Lab");
+         var lab = form.OwnedForms.OfType<SecurityLabForm>().Single();
+         Check(lab.TestStatus == "Not Run", "Security Lab initial status");
+         await lab.RunTestAsync();
+diff --git a/AegisBrowser.FilteringTests/Program.cs b/AegisBrowser.FilteringTests/Program.cs
+index ec47447..6a75af4 100644
+--- a/AegisBrowser.FilteringTests/Program.cs
++++ b/AegisBrowser.FilteringTests/Program.cs
+@@ -100,6 +100,22 @@ internal static partial class Program
+         web.Load(server.ThirdOrigin + "/landing");
+         await Wait(() => Task.FromResult(server.Hits("/landing") > 0), "main-frame destination");
+         Check(server.Hits("/landing") > 0, "main-frame navigation is not content-blocked");
++        // A real main-document link/redirect must render HTML, even when its URL matches a blocking rule.
++        foreach (var paused in new[] { false, true }) {
++            session.Apply(config with { Mode = PrivacyMode.Standard, UserRules = "/product", FilterList = "||localhost^$third-party,image" });
++            session.Paused = paused;
++            web.Load(server.Origin + "/shop");
++            await Wait(async () => {
++                var r = await web.EvaluateScriptAsync("document.getElementById('product-link') !== null"); return r.Success && r.Result is true;
++            }, "shop homepage");
++            await web.EvaluateScriptAsync("document.getElementById('product-link').click()");
++            await Wait(async () => {
++                var r = await web.EvaluateScriptAsync("location.pathname === '/product' && document.getElementById('product-title')?.textContent === 'Fixture product' && document.contentType === 'text/html' && getComputedStyle(document.getElementById('product-title')).color === 'rgb(20, 60, 120)'");
++                return r.Success && r.Result is true;
++            }, "rendered product document after link and redirect");
++            Check(true, paused ? "product HTML renders while filtering paused" : "product HTML renders with filtering enabled");
++        }
++        session.Paused = false;
+         // Check native settings controls can be constructed/opened on the Windows UI thread.
+         using var settings = new PrivacyForm(session, server.Origin);
+         settings.Show(host); await Task.Delay(200);
+@@ -149,6 +165,9 @@ internal sealed class FixtureServer : IDisposable
+             var header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n";
+             string body;
+             if (path == "/redirect") { header = "HTTP/1.1 302 Found\r\nLocation: /blocked.png\r\n"; body = ""; }
++            else if (path == "/shop") body = "<!doctype html><a id='product-link' href='/product-redirect'>Product</a>";
++            else if (path == "/product-redirect") { header = "HTTP/1.1 302 Found\r\nLocation: /product\r\n"; body = ""; }
++            else if (path == "/product") body = "<!doctype html><style>#product-title{color:rgb(20,60,120)}</style><h1 id='product-title'>Fixture product</h1><img src='" + ThirdOrigin + "/third.png'>";
+             else if (path == "/page") body = $$"""
+                 <!doctype html><iframe src="/frame"></iframe><script>
+                 function img(url) { return new Promise(resolve => { const i = new Image(); i.onload = i.onerror = resolve; i.src = url; document.body.append(i); }); }
+diff --git a/AegisBrowser.FilteringTests/ReleaseChecks.cs b/AegisBrowser.FilteringTests/ReleaseChecks.cs
+index 55d8e37..edb1763 100644
+--- a/AegisBrowser.FilteringTests/ReleaseChecks.cs
++++ b/AegisBrowser.FilteringTests/ReleaseChecks.cs
+@@ -34,7 +34,7 @@ internal static partial class Program
+         var tabs = All(form).OfType<TabControl>().Single();
+         await Wait(() => Task.FromResult(tabs.TabCount == 1), "startup tab");
+         await Ready(tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single());
+-        All(form).OfType<Button>().Single(c => c.Text == "Privacy").PerformClick();
++        form.InvokeChromeAction("Privacy");
+         var settings = form.OwnedForms.OfType<PrivacyForm>().Single();
+         var mode = Named<ComboBox>(settings, "PrivacyMode"); var rules = Named<TextBox>(settings, "UserRules");
+         var pause = All(settings).OfType<CheckBox>().Single(c => c.Text.StartsWith("Pause filtering"));
+@@ -51,8 +51,15 @@ internal static partial class Program
+                 && Named<TextBox>(settings, "SiteExceptions").Text == "example.com", "settings survive actual browser process restart");
+             Check(!pause.Checked && Named<DataGridView>(settings, "Requests").Rows.Count <= 1, "restart clears pause and previous request history");
+         }
++        await Wait(() => Task.FromResult(form.PrivacyIndicatorText == (pause.Checked ? "Filtering paused" : "Filtering · Strict")), "chrome reflects actual privacy configuration");
++        Check(true, "privacy indicator reflects service and pause state");
++        var wasPaused = pause.Checked;
++        form.InvokeChromeAction("Toggle filtering");
++        await Wait(() => Task.FromResult(pause.Checked != wasPaused), "privacy settings follow chrome toggle");
++        Check(form.PrivacyIndicatorText == (pause.Checked ? "Filtering paused" : "Filtering · Strict"), "chrome pause toggle and settings stay synchronized");
++        form.InvokeChromeAction("Toggle filtering");
+         settings.Close();
+-        All(form).OfType<Button>().Single(c => c.Text == "Search").PerformClick();
++        form.InvokeChromeAction("Search");
+         var search = form.OwnedForms.OfType<SearchSettingsForm>().Single();
+         if (write)
+         {
+diff --git a/AegisBrowser/AegisBrowser.csproj b/AegisBrowser/AegisBrowser.csproj
+index e1e4cb8..5a61b5e 100644
+--- a/AegisBrowser/AegisBrowser.csproj
++++ b/AegisBrowser/AegisBrowser.csproj
+@@ -3,6 +3,7 @@
+     <OutputType>WinExe</OutputType>
+     <TargetFramework>net8.0-windows</TargetFramework>
+     <UseWindowsForms>true</UseWindowsForms>
++    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+     <Nullable>enable</Nullable>
+     <ImplicitUsings>enable</ImplicitUsings>
+diff --git a/AegisBrowser/ChromeTheme.cs b/AegisBrowser/ChromeTheme.cs
+new file mode 100644
+index 0000000..4e6d5a0
+--- /dev/null
++++ b/AegisBrowser/ChromeTheme.cs
+@@ -0,0 +1,59 @@
++using System.Drawing.Drawing2D;
++
++namespace AegisBrowser;
++
++internal static class ChromeTheme
++{
++    internal static readonly Color Navy = Color.FromArgb(28, 43, 65);
++    internal static readonly Color Blue = Color.FromArgb(42, 102, 206);
++    internal static readonly Color Pale = Color.FromArgb(240, 246, 255);
++    internal static readonly Color Red = Color.FromArgb(203, 55, 67);
++    internal static readonly Color Border = Color.FromArgb(218, 226, 237);
++    internal static void Apply(Control root)
++    {
++        root.BackColor = Color.White; root.ForeColor = Navy;
++        foreach (Control control in root.Controls) {
++            Apply(control);
++            if (control is Button b) {
++                b.FlatStyle = FlatStyle.Flat; b.FlatAppearance.BorderColor = Border;
++                b.FlatAppearance.MouseOverBackColor = Pale; b.FlatAppearance.MouseDownBackColor = Color.FromArgb(220, 234, 255);
++                b.ForeColor = Blue; b.UseVisualStyleBackColor = false;
++                b.Padding = new Padding(4); b.MinimumSize = new Size(32, 32);
++            }
++            if (control is TextBox t) t.BorderStyle = BorderStyle.FixedSingle;
++        }
++    }
++}
++
++internal sealed class ShieldMark : Control
++{
++    internal ShieldMark() { DoubleBuffered = true; AccessibleName = "AegisBrowser shield"; TabStop = false; }
++    protected override void OnPaint(PaintEventArgs e)
++    {
++        base.OnPaint(e); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
++        float w = ClientSize.Width, h = ClientSize.Height;
++        using var blue = new SolidBrush(ChromeTheme.Blue); using var red = new SolidBrush(ChromeTheme.Red);
++        e.Graphics.FillPolygon(blue, new PointF[] {new(w*.5f,h*.08f),new(w*.88f,h*.23f),new(w*.82f,h*.65f),new(w*.5f,h*.94f),new(w*.18f,h*.65f),new(w*.12f,h*.23f)});
++        e.Graphics.FillPolygon(red, new PointF[] {new(w*.5f,h*.2f),new(w*.75f,h*.3f),new(w*.7f,h*.59f),new(w*.5f,h*.79f)});
++        using var pen = new Pen(Color.White, Math.Max(2, w*.045f));
++        e.Graphics.DrawLines(pen, new PointF[] {new(w*.3f,h*.51f),new(w*.45f,h*.65f),new(w*.7f,h*.36f)});
++    }
++}
++
++internal sealed class SearchFieldPanel : Panel
++{
++    internal SearchFieldPanel() { DoubleBuffered = true; Padding = new Padding(12); }
++    protected override void OnPaint(PaintEventArgs e)
++    {
++        base.OnPaint(e); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
++        var d = Math.Min(20f * DeviceDpi / 96f, Math.Min(Width, Height) - 2f);
++        if (d <= 0) return;
++        using var path = new GraphicsPath();
++        path.AddArc(1, 1, d, d, 180, 90); path.AddArc(Width - d - 2, 1, d, d, 270, 90);
++        path.AddArc(Width - d - 2, Height - d - 2, d, d, 0, 90); path.AddArc(1, Height - d - 2, d, d, 90, 90); path.CloseFigure();
++        using var pen = new Pen(ContainsFocus ? ChromeTheme.Blue : ChromeTheme.Border, ContainsFocus ? 2 : 1);
++        e.Graphics.DrawPath(pen, path);
++    }
++    protected override void OnEnter(EventArgs e) { base.OnEnter(e); Invalidate(); }
++    protected override void OnLeave(EventArgs e) { base.OnLeave(e); Invalidate(); }
++}
+diff --git a/AegisBrowser/HomeView.cs b/AegisBrowser/HomeView.cs
+new file mode 100644
+index 0000000..7ef532f
+--- /dev/null
++++ b/AegisBrowser/HomeView.cs
+@@ -0,0 +1,47 @@
++using AegisBrowser.Core;
++
++namespace AegisBrowser;
++
++// Native chrome: no remote assets, privileged JS bridge, suggestions or prefetch.
++internal sealed class HomeView : UserControl
++{
++    private readonly Font wordmarkFont = new("Segoe UI", 28, FontStyle.Bold);
++    private readonly TextBox query = new() { Dock = DockStyle.Fill, PlaceholderText = "Search or enter address", AccessibleName = "Homepage search or address" };
++    private readonly FlowLayoutPanel tiles = new() { AutoSize = true, Dock = DockStyle.Top, WrapContents = true };
++    private readonly Label privacy = new() { AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 16, 0, 0) };
++    private readonly Action<string> navigate;
++    private readonly Action add;
++    internal HomeView(Action<string> navigate, Action add)
++    {
++        this.navigate = navigate; this.add = add;
++        Dock = DockStyle.Fill; AutoScroll = true; Padding = new Padding(24, 40, 24, 24);
++        var outer = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3 };
++        outer.ColumnStyles.Add(new(SizeType.Percent, 15)); outer.ColumnStyles.Add(new(SizeType.Percent, 70)); outer.ColumnStyles.Add(new(SizeType.Percent, 15));
++        var body = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
++        body.ColumnStyles.Add(new(SizeType.Percent, 100));
++        body.Controls.Add(new ShieldMark { Size = new(72, 80), Anchor = AnchorStyles.None });
++        body.Controls.Add(new Label { Text = "AegisBrowser", Font = wordmarkFont, AutoSize = true, Anchor = AnchorStyles.None, Margin = new Padding(0, 12, 0, 4) });
++        body.Controls.Add(new Label { Text = "Private • Secure • Fast", AutoSize = true, Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 0, 28) });
++        var search = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Padding = new Padding(8) };
++        search.ColumnStyles.Add(new(SizeType.Percent, 100)); search.ColumnStyles.Add(new(SizeType.Absolute, 84));
++        var go = new Button { Text = "Search", Dock = DockStyle.Fill, AccessibleName = "Submit homepage search" };
++        go.Click += (_, _) => navigate(query.Text);
++        query.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; navigate(query.Text); } };
++        var field = new SearchFieldPanel { Dock = DockStyle.Fill, Height = 52, MinimumSize = new Size(120, 52) };
++        field.Controls.Add(query); search.Controls.Add(field); search.Controls.Add(go); body.Controls.Add(search);
++        body.Controls.Add(tiles); body.Controls.Add(privacy);
++        outer.Controls.Add(body, 1, 0); Controls.Add(outer); ChromeTheme.Apply(this); query.BorderStyle = BorderStyle.None;
++    }
++    internal void RefreshSites(SavedSite[] sites)
++    {
++        foreach (Control c in tiles.Controls.Cast<Control>().ToArray()) c.Dispose();
++        foreach (var site in sites) {
++            var button = new Button { Text = site.Title, Width = 136, Height = 52, AutoEllipsis = true, AccessibleName = "Open shortcut " + site.Title };
++            button.Click += (_, _) => navigate(site.Url); tiles.Controls.Add(button);
++        }
++        var addButton = new Button { Text = "+ Add shortcut", Width = 136, Height = 52 };
++        addButton.Click += (_, _) => add(); tiles.Controls.Add(addButton); ChromeTheme.Apply(tiles);
++    }
++    protected override void Dispose(bool disposing) { if (disposing) wordmarkFont.Dispose(); base.Dispose(disposing); }
++    internal void SetPrivacy(string text) => privacy.Text = text;
++}
+diff --git a/AegisBrowser/MainForm.cs b/AegisBrowser/MainForm.cs
+index 2c34405..b06592e 100644
+--- a/AegisBrowser/MainForm.cs
++++ b/AegisBrowser/MainForm.cs
+@@ -12,6 +12,15 @@ public sealed class MainForm : Form
+     private readonly Button back;
+     private readonly Button forward;
+     private readonly Button reload;
++    private readonly Button privacyIndicator = new() { Dock = DockStyle.Fill, AccessibleName = "Privacy filtering settings", AutoEllipsis = true };
++    private readonly System.Windows.Forms.Timer chromeTimer = new() { Interval = 750 };
++    private readonly ToolTip tips = new();
++    private readonly ContextMenuStrip menu = new();
++    private readonly Dictionary<string, Action> actions = new();
++    private readonly SiteLibraryStore? siteStore;
++    private SiteLibrary sites = SiteLibrary.Empty;
++    internal string PrivacyIndicatorText => privacyIndicator.Text;
++    internal void InvokeChromeAction(string name) => actions[name]();
+     private bool closing;
+     private bool closeComplete;
+     private readonly PrivacySession privacy;
+@@ -31,6 +40,9 @@ public sealed class MainForm : Form
+         string? privacyWarning = null;
+         if (profilePath is not null)
+         {
++            siteStore = new(profilePath);
++            try { sites = siteStore.Load(); }
++            catch (IOException ex) { Shown += (_, _) => MessageBox.Show(this, ex.Message, "Saved sites warning"); }
+             searchStore = new(profilePath);
+             try { searchSettings = searchStore.Load(); }
+             catch (IOException ex) { Shown += (_, _) => MessageBox.Show(this, ex.Message, "Search settings warning"); }
+@@ -40,48 +52,74 @@ public sealed class MainForm : Form
+         }
+         privacy = new(configuration);
+         if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
+-        Text = $"Aegis Browser — {profile}";
++        Text = $"AegisBrowser — {profile}";
++        AutoScaleMode = AutoScaleMode.Dpi; Font = new Font("Segoe UI", 10);
+         Width = 1250;
+         Height = 850;
+         MinimumSize = new Size(950, 450);
+-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 11 };
+-        for (var i = 0; i < 11; i++)
+-            bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
+-                i == 3 ? 100 : i >= 6 ? 100 : 48));
+-        back = MakeButton("←", () => Current?.Back());
+-        forward = MakeButton("→", () => Current?.Forward());
++        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 56, ColumnCount = 9, Padding = new Padding(8) };
++        float[] widths = [44, 44, 72, 0, 44, 150, 44, 44, 52];
++        for (var i = 0; i < widths.Length; i++) bar.ColumnStyles.Add(new(i == 3 ? SizeType.Percent : SizeType.Absolute, i == 3 ? 100 : widths[i]));
++        back = MakeButton("←", () => Current?.Back()); forward = MakeButton("→", () => Current?.Forward());
+         reload = MakeButton("Reload", () => { if (Current?.IsLoading == true) Current.Stop(); else Current?.Reload(); });
+-        bar.Controls.Add(back, 0, 0);
+-        bar.Controls.Add(forward, 1, 0);
+-        bar.Controls.Add(reload, 2, 0);
+-        bar.Controls.Add(address, 3, 0);
+-        bar.Controls.Add(MakeButton("+", () => NewTab(BrowserPolicy.DiagnosticsUrl)), 4, 0);
+-        bar.Controls.Add(MakeButton("×", CloseTab), 5, 0);
+-        bar.Controls.Add(MakeButton("Diagnostics", () => NewTab(BrowserPolicy.DiagnosticsUrl)), 6, 0);
+-        bar.Controls.Add(MakeButton("DevTools", () => Current?.ShowDevTools()), 7, 0);
+-        bar.Controls.Add(MakeButton("Privacy", () =>
+-        {
++        actions["+"] = NewHomeTab; actions["×"] = CloseTab;
++        actions["Diagnostics"] = () => NewTab(BrowserPolicy.DiagnosticsUrl);
++        actions["DevTools"] = () => Current?.ShowDevTools();
++        actions["Privacy"] = () => {
+             if (privacyWindow is null || privacyWindow.IsDisposed)
+                 privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save));
+             privacyWindow.Show(this); privacyWindow.BringToFront();
+-        }), 8, 0);
+-        bar.Controls.Add(MakeButton("Search", () =>
+-        {
++        };
++        actions["Search"] = () => {
+             if (searchWindow is null || searchWindow.IsDisposed)
+-                searchWindow = new SearchSettingsForm(searchSettings, settings =>
+-                {
+-                    searchStore?.Save(settings); // Publish only after persistence succeeds.
+-                    searchSettings = settings;
++                searchWindow = new SearchSettingsForm(searchSettings, settings => {
++                    searchStore?.Save(settings); searchSettings = settings;
+                     address.PlaceholderText = "Search " + SearchEngines.Get(settings.EngineId).Name + " or enter address";
+                 });
+             searchWindow.Show(this); searchWindow.BringToFront();
+-        }), 9, 0);
+-        bar.Controls.Add(MakeButton("Security Lab", () =>
+-        {
+-            if (securityLab is null || securityLab.IsDisposed)
+-                securityLab = new SecurityLabForm(url => NewTab(url, isolated: true));
++        };
++        actions["Security Lab"] = () => {
++            if (securityLab is null || securityLab.IsDisposed) securityLab = new SecurityLabForm(url => NewTab(url, isolated: true));
+             securityLab.Show(this); securityLab.BringToFront();
+-        }), 10, 0);
++        };
++        actions["Bookmarks"] = () => OpenLibrary(false);
++        actions["Shortcuts"] = () => OpenLibrary(true);
++        foreach (var name in new[] { "Privacy", "Search", "Bookmarks", "Shortcuts", "Security Lab", "Diagnostics", "DevTools" })
++            menu.Items.Add(name, null, (_, _) => actions[name]());
++        actions["Toggle filtering"] = () => { privacy.Paused = !privacy.Paused; RefreshPrivacy(); };
++        menu.Items.Add("Pause / resume filtering", null, (_, _) => actions["Toggle filtering"]());
++        menu.Items.Add("Profile: " + profile).Enabled = false;
++        privacyIndicator.Click += (_, _) => actions["Privacy"]();
++        bar.Controls.Add(back, 0, 0); bar.Controls.Add(forward, 1, 0); bar.Controls.Add(reload, 2, 0); bar.Controls.Add(address, 3, 0);
++        var bookmark = MakeButton("☆", BookmarkCurrent); tips.SetToolTip(bookmark, "Bookmark this page"); bookmark.AccessibleName = "Bookmark this page";
++        bar.Controls.Add(bookmark, 4, 0); bar.Controls.Add(privacyIndicator, 5, 0);
++        bar.Controls.Add(MakeButton("+", NewHomeTab), 6, 0); bar.Controls.Add(MakeButton("×", CloseTab), 7, 0);
++        var more = MakeButton("☰", () => menu.Show(bar, new Point(Math.Max(0, bar.Width - menu.PreferredSize.Width), bar.Height))); more.AccessibleName = "Browser menu"; tips.SetToolTip(more, "Settings, Security Lab and browser tools"); bar.Controls.Add(more, 8, 0);
++        foreach (var button in bar.Controls.OfType<Button>())
++            if (string.IsNullOrEmpty(tips.GetToolTip(button))) tips.SetToolTip(button, button.AccessibleName);
++        tips.SetToolTip(back, "Back (Alt+Left)"); tips.SetToolTip(forward, "Forward (Alt+Right)");
++        var side = new FlowLayoutPanel { Dock = DockStyle.Left, Width = 64, FlowDirection = FlowDirection.TopDown, Padding = new Padding(6), WrapContents = false };
++        side.Controls.Add(new ShieldMark { Size = new(44, 44) });
++        foreach (var item in new[] { ("⌂", "Home / New Tab", (Action)NewHomeTab), ("☆", "Bookmarks", actions["Bookmarks"]), ("⚙", "Settings", (Action)(() => menu.Show(bar, new Point(Math.Max(0, bar.Width - menu.PreferredSize.Width), bar.Height)))) }) {
++            var b = MakeButton(item.Item1, item.Item3); b.Dock = DockStyle.None; b.Size = new(44, 44); b.AccessibleName = item.Item2; tips.SetToolTip(b, item.Item2); side.Controls.Add(b);
++        }
++        tabs.DrawMode = TabDrawMode.OwnerDrawFixed; tabs.SizeMode = TabSizeMode.Fixed; tabs.ItemSize = new Size(190, 36); tabs.ShowToolTips = true;
++        tabs.DrawItem += (_, e) => {
++            var page = tabs.TabPages[e.Index]; var area = tabs.GetTabRect(e.Index);
++            using var brush = new SolidBrush(e.Index == tabs.SelectedIndex ? ChromeTheme.Pale : Color.White);
++            e.Graphics.FillRectangle(brush, area);
++            if ((e.State & DrawItemState.Focus) != 0) ControlPaint.DrawFocusRectangle(e.Graphics, area);
++            TextRenderer.DrawText(e.Graphics, page.Text, Font, new Rectangle(area.X + 10, area.Y + 6, area.Width - 38, area.Height - 10), ChromeTheme.Navy, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
++            TextRenderer.DrawText(e.Graphics, "×", Font, new Rectangle(area.Right - 26, area.Y + 6, 22, area.Height - 10), ChromeTheme.Blue);
++        };
++        tabs.MouseDown += (_, e) => {
++            if (e.Button != MouseButtons.Left) return;
++            for (var i = 0; i < tabs.TabCount; i++) {
++                var r = tabs.GetTabRect(i);
++                if (new Rectangle(r.Right - 28, r.Top, 28, r.Height).Contains(e.Location)) { tabs.SelectedIndex = i; CloseTab(); break; }
++            }
++        };
++        chromeTimer.Tick += (_, _) => RefreshPrivacy(); chromeTimer.Start();
+         address.AccessibleName = "Search or enter address";
+         address.PlaceholderText = "Search " + SearchEngines.Get(searchSettings.EngineId).Name + " or enter address";
+         address.KeyDown += (_, e) =>
+@@ -95,10 +133,12 @@ public sealed class MainForm : Form
+         bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: ask by origin |"));
+         bottom.Items.Add(status);
+         Controls.Add(tabs);
++        Controls.Add(side);
+         Controls.Add(bar);
+         Controls.Add(bottom);
+         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
+-        Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
++        Shown += (_, _) => NewHomeTab();
++        ChromeTheme.Apply(this); RefreshPrivacy();
+         FormClosing += async (_, e) =>
+         {
+             if (closeComplete) return;
+@@ -123,6 +163,53 @@ public sealed class MainForm : Form
+         };
+     }
+ 
++    private void NewHomeTab()
++    {
++        NewTab("about:blank");
++        if (closing || tabs.SelectedTab is not { } page) return;
++        var home = new HomeView(input => { tabs.SelectedTab = page; SubmitAddress(input); }, AddShortcut);
++        home.RefreshSites(sites.Shortcuts); page.Controls.Add(home); home.BringToFront(); page.Text = "New tab"; RefreshPrivacy();
++    }
++    private void SaveSites(SiteLibrary value)
++    {
++        SiteLibraryStore.Validate(value); siteStore?.Save(value); sites = value;
++        foreach (TabPage page in tabs.TabPages) foreach (var home in page.Controls.OfType<HomeView>()) home.RefreshSites(sites.Shortcuts);
++    }
++    private void AddShortcut()
++    {
++        if (SiteEditor.Edit(this, null, searchSettings.EngineId) is not { } site) return;
++        try { SaveSites(sites with { Shortcuts = sites.Shortcuts.Append(site).ToArray() }); }
++        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { MessageBox.Show(this, ex.Message, "Could not save shortcut"); }
++    }
++    private void OpenLibrary(bool shortcuts)
++    {
++        using var window = new SiteLibraryForm(shortcuts ? "Shortcuts" : "Bookmarks", shortcuts ? sites.Shortcuts : sites.Bookmarks, searchSettings.EngineId,
++            value => SaveSites(shortcuts ? sites with { Shortcuts = value } : sites with { Bookmarks = value }), url => SubmitAddress(url));
++        window.ShowDialog(this);
++    }
++    private void BookmarkCurrent()
++    {
++        if (Current is not { } browser || !BrowserPolicy.IsWebUrl(browser.Address) || browser.Address == BrowserPolicy.DiagnosticsUrl) {
++            status.Text = "Open a web page before bookmarking it."; return;
++        }
++        if (SiteEditor.Edit(this, new(tabs.SelectedTab!.ToolTipText.Length > 0 ? tabs.SelectedTab.ToolTipText : browser.Address, browser.Address), searchSettings.EngineId) is not { } site) return;
++        try { SaveSites(sites with { Bookmarks = sites.Bookmarks.Append(site).ToArray() }); }
++        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { MessageBox.Show(this, ex.Message, "Could not save bookmark"); }
++    }
++    private void RefreshPrivacy()
++    {
++        var stats = privacy.Snapshot();
++        var text = privacy.Paused ? "Filtering paused" : "Filtering · " + privacy.Configuration.Mode;
++        privacyIndicator.Text = text; privacyIndicator.ForeColor = privacy.Paused ? ChromeTheme.Red : ChromeTheme.Blue;
++        tips.SetToolTip(privacyIndicator, $"{text} | {stats.Blocked} blocked decisions | {stats.Allowed} allowed decisions");
++        foreach (TabPage page in tabs.TabPages) foreach (var home in page.Controls.OfType<HomeView>()) home.SetPrivacy(text);
++    }
++    protected override void Dispose(bool disposing)
++    {
++        if (disposing) { chromeTimer.Stop(); chromeTimer.Dispose(); tips.Dispose(); menu.Dispose(); }
++        base.Dispose(disposing);
++    }
++
+     internal bool SubmitAddress(string input)
+     {
+         var result = AddressInputResolver.Resolve(input, searchSettings.EngineId);
+@@ -132,13 +219,14 @@ public sealed class MainForm : Form
+             status.Text = "Address rejected. Use HTTP(S), aegis:diagnostics or about:blank; credentials and other schemes are not supported.";
+             return false;
+         }
++        foreach (var home in tabs.SelectedTab?.Controls.OfType<HomeView>() ?? Enumerable.Empty<HomeView>()) home.Hide();
+         Current?.Load(result.Url!);
+         return true;
+     }
+ 
+     private static Button MakeButton(string text, Action action)
+     {
+-        var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = text };
++        var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = text switch { "+" => "New tab (Ctrl+T)", "×" => "Close tab (Ctrl+W)", "←" => "Back (Alt+Left)", "→" => "Forward (Alt+Right)", _ => text } };
+         button.Click += (_, _) => action();
+         return button;
+     }
+@@ -181,7 +269,7 @@ public sealed class MainForm : Form
+             tabs.TabPages.Remove(page);
+             page.Dispose();
+             if (closing && retiring.Count == 0) { closeComplete = true; Close(); }
+-            else if (!closing && tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
++            else if (!closing && tabs.TabCount == 0) NewHomeTab();
+         }));
+         browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
+         {
+@@ -220,6 +308,10 @@ public sealed class MainForm : Form
+     private void UpdateNavigation()
+     {
+         var browser = Current;
++        foreach (var home in tabs.SelectedTab?.Controls.OfType<HomeView>() ?? Enumerable.Empty<HomeView>()) {
++            home.Visible = browser?.Address == "about:blank";
++            if (home.Visible) home.BringToFront();
++        }
+         // Loading events must not overwrite an address the user is typing.
+         if (!address.Focused) address.Text = browser?.Address ?? "";
+         status.Text = tabs.SelectedTab?.Tag as string ?? "Ready";
+@@ -246,7 +338,7 @@ public sealed class MainForm : Form
+         switch (keys)
+         {
+             case Keys.Control | Keys.L: address.Focus(); address.SelectAll(); break;
+-            case Keys.Control | Keys.T: NewTab(BrowserPolicy.DiagnosticsUrl); break;
++            case Keys.Control | Keys.T: NewHomeTab(); break;
+             case Keys.Control | Keys.W: CloseTab(); break;
+             case Keys.F12: Current?.ShowDevTools(); break;
+             case Keys.F5: Current?.Reload(); break;
+diff --git a/AegisBrowser/PrivacyForm.cs b/AegisBrowser/PrivacyForm.cs
+index d53e7fc..4320637 100644
+--- a/AegisBrowser/PrivacyForm.cs
++++ b/AegisBrowser/PrivacyForm.cs
+@@ -21,6 +21,8 @@ internal sealed class PrivacyForm : Form
+         mode.Name = "PrivacyMode"; blocks.Name = "BlockedDomains"; allows.Name = "AllowedDomains";
+         sites.Name = "SiteExceptions"; rules.Name = "UserRules"; list.Name = "TrackingList"; network.Name = "Requests";
+         this.apply = apply ?? (configuration => session.Apply(configuration));
++        Font = new Font("Segoe UI", 10); AutoScaleMode = AutoScaleMode.Dpi;
++        Shown += (_, _) => ChromeTheme.Apply(this);
+         Text = "Aegis Privacy — profile settings and network inspector";
+         Width = 1100; Height = 760; MinimumSize = new(800, 550);
+         var pages = new TabControl { Dock = DockStyle.Fill };
+@@ -63,7 +65,7 @@ internal sealed class PrivacyForm : Form
+             Text = "Last 500 decisions across this profile's tabs. Origins only; paths, queries, headers and bodies are not recorded. Counts are decisions, not completed downloads. Host edits require Apply settings." });
+         var rejected = new TabPage("Unsupported list rules"); unsupported.ReadOnly = true; rejected.Controls.Add(unsupported);
+         pages.TabPages.AddRange([settings, lists, requests, rejected]); Controls.Add(pages);
+-        timer.Tick += (_, _) => RefreshInspector(); timer.Start();
++        timer.Tick += (_, _) => { pause.Checked = session.Paused; RefreshInspector(); }; timer.Start();
+         FormClosed += (_, _) => timer.Dispose();
+         RefreshInspector();
+     }
+diff --git a/AegisBrowser/README.md b/AegisBrowser/README.md
+index f930afe..11528b4 100644
+--- a/AegisBrowser/README.md
++++ b/AegisBrowser/README.md
+@@ -30,8 +30,8 @@ Profiles isolate stored browsing state, not OS users, IP addresses or hardware c
+ 
+ ## Controls and policy
+ 
+-- Ctrl+L focuses the address bar. Press Enter to navigate or search; typing alone makes no search requests. Bare domains default to HTTPS; localhost and loopback IPs default to HTTP. The **Search** toolbar button selects DuckDuckGo, Google, Bing or Brave Search per profile. See [address bar and search settings](../docs/search.md). Embedded URL credentials and unsupported schemes are rejected.
+-- Ctrl+T / Ctrl+W open and close tabs; Ctrl+Tab cycles tabs. The last closed tab is replaced by diagnostics.
++- Ctrl+L focuses the address bar. Press Enter to navigate or search; typing alone makes no search requests. Bare domains default to HTTPS; localhost and loopback IPs default to HTTP. The **Search** menu action selects DuckDuckGo, Google, Bing or Brave Search per profile. See [address bar and search settings](../docs/search.md). Embedded URL credentials and unsupported schemes are rejected.
++- Ctrl+T / Ctrl+W open and close tabs; Ctrl+Tab cycles tabs. The last closed tab is replaced by the native homepage.
+ - Alt+Left / Alt+Right navigate; F5 reloads; Escape stops. F12 or the DevTools button opens Chromium tools.
+ - User-initiated HTTP(S) and blank popups use native Chromium windows, preserving opener relationships, redirects, POST data and postMessage for OAuth. Automatic popups and unsupported targets are blocked. Native popup windows close when their owner tab closes. Chromium still enforces same-origin policy and COOP; identity providers that prohibit embedded browsers remain unsupported.
+ - Location, notifications, camera and microphone may use Chromium's native origin-labelled consent UI when the requesting origin matches the top-level origin and is HTTPS or loopback. The app never grants a request automatically. Chromium owns consent, dismissal/navigation cancellation and any profile-scoped permission persistence. Cross-origin frames, insecure non-loopback origins, diagnostics, unknown permission types, screen capture and device pan/tilt/zoom are denied. To fully reset a disposable profile's grants and stored data, close it and remove its profile directory; no custom permission database is maintained.
+@@ -41,7 +41,7 @@ The application preserves CefSharp/CEF defaults for Chromium security mechanisms
+ 
+ ## Local diagnostics
+ 
+-The startup page, Diagnostics button and `aegis:diagnostics` address show an embedded resource served by an HTTPS scheme handler for `aegis-diagnostics.invalid`. No local HTTP server or internet page is involved. Reload works normally. Its CSP denies network connections, frames, images, forms and external scripts. The report uses textContent and observes native browser values without changing them: user agent, languages, platform, hardware concurrency, memory when exposed, screen, viewport, timezone, touch and WebGL capabilities. Unsupported APIs display an unavailable marker. It performs no uploads, persistent report storage or permission requests. Other browsing tabs can still make network requests.
++The menu’s Diagnostics action and `aegis:diagnostics` address show an embedded resource served by an HTTPS scheme handler for `aegis-diagnostics.invalid`. No local HTTP server or internet page is involved. Reload works normally. Its CSP denies network connections, frames, images, forms and external scripts. The report uses textContent and observes native browser values without changing them: user agent, languages, platform, hardware concurrency, memory when exposed, screen, viewport, timezone, touch and WebGL capabilities. Unsupported APIs display an unavailable marker. It performs no uploads, persistent report storage or permission requests. Other browsing tabs can still make network requests.
+ 
+ ## Verification
+ 
+@@ -76,7 +76,7 @@ The test-only WinForms executable uses the production handlers and in-memory HTT
+ 
+ ## Privacy filtering
+ 
+-The **Privacy** toolbar button opens Standard/Strict/Custom settings, editable domain and ABP-style network rules, per-site exceptions, a temporary pause, and a local request inspector. Settings persist separately in each profile's `privacy.json`. The inspector records only origins in memory and displays matching rules and allowed/blocked decision counts.
++The privacy indicator or **Privacy** menu action opens Standard/Strict/Custom settings, editable domain and ABP-style network rules, per-site exceptions, a temporary pause, and a local request inspector. Settings persist separately in each profile's `privacy.json`. The inspector records only origins in memory and displays matching rules and allowed/blocked decision counts.
+ 
+ The bundled tracking list is intentionally small. Import standard UTF-8 privacy lists to extend it; unsupported syntax is reported. This is a documented network-syntax subset, not a full EasyList/uBlock implementation. Strict mode can break third-party dependencies and embedded authentication; explicit exceptions restore compatibility without changing Chromium security settings.
+ 
+@@ -88,4 +88,8 @@ See [Windows installation instructions](../docs/INSTALL-WINDOWS.md) and [release
+ 
+ ## Security Lab: Mock Allow
+ 
+-The **Security Lab** toolbar entry runs a local Allow simulation and opens its fixture in an isolated temporary tab. See [milestone instructions and manual acceptance](../docs/security-lab-mock-allow.md). Reports contain sanitized assertions and public request IDs; no session secrets are exported.
++The **Security Lab** menu entry runs a local Allow simulation and opens its fixture in an isolated temporary tab. See [milestone instructions and manual acceptance](../docs/security-lab-mock-allow.md). Reports contain sanitized assertions and public request IDs; no session secrets are exported.
++
++## White chrome redesign
++
++The native homepage offers submitted-only search and editable profile-local shortcuts. The star bookmarks the active HTTP(S) page; the sidebar opens Home, Bookmarks and the settings menu. Manage shortcuts and bookmarks from the menu. No browsing history is collected or displayed. The profile name is read-only; launch a separate named profile with the existing command-line option. See [UI design, verification and limitations](../docs/ui-redesign.md).
+diff --git a/AegisBrowser/SearchSettingsForm.cs b/AegisBrowser/SearchSettingsForm.cs
+index 950a2c3..6dffda5 100644
+--- a/AegisBrowser/SearchSettingsForm.cs
++++ b/AegisBrowser/SearchSettingsForm.cs
+@@ -11,6 +11,8 @@ internal sealed class SearchSettingsForm : Form
+     internal SearchSettingsForm(SearchSettings settings, Action<SearchSettings> save)
+     {
+         this.save = save;
++        Font = new Font("Segoe UI", 10); AutoScaleMode = AutoScaleMode.Dpi;
++        Shown += (_, _) => ChromeTheme.Apply(this);
+         Text = "Search Settings"; AutoScaleMode = AutoScaleMode.Dpi;
+         ClientSize = new Size(480, 230); MinimumSize = new Size(400, 250);
+         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 5 };
+diff --git a/AegisBrowser/SecurityLabForm.cs b/AegisBrowser/SecurityLabForm.cs
+index 3db5a94..84cd766 100644
+--- a/AegisBrowser/SecurityLabForm.cs
++++ b/AegisBrowser/SecurityLabForm.cs
+@@ -22,6 +22,7 @@ internal sealed class SecurityLabForm(Action<string> openPage, Func<Cancellation
+     protected override void OnLoad(EventArgs e)
+     {
+         base.OnLoad(e);
++        Font = new Font("Segoe UI", 10);
+         Text = "Security Lab — Local simulation"; AutoScaleMode = AutoScaleMode.Dpi;
+         ClientSize = new Size(640, 330); MinimumSize = new Size(500, 300);
+         var layout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(16) };
+@@ -30,6 +31,7 @@ internal sealed class SecurityLabForm(Action<string> openPage, Func<Cancellation
+         layout.Controls.Add(status); layout.Controls.Add(decision); layout.Controls.Add(requestId);
+         var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = true };
+         buttons.Controls.AddRange([run, reset, open, export]); layout.Controls.Add(buttons); Controls.Add(layout);
++        ChromeTheme.Apply(this);
+         run.Click += async (_, _) => await RunTestAsync();
+         reset.Click += (_, _) => ResetSession();
+         open.Click += async (_, _) => await OpenTestPageAsync();
+diff --git a/AegisBrowser/SiteLibraryForm.cs b/AegisBrowser/SiteLibraryForm.cs
+new file mode 100644
+index 0000000..2f8af33
+--- /dev/null
++++ b/AegisBrowser/SiteLibraryForm.cs
+@@ -0,0 +1,52 @@
++using AegisBrowser.Core;
++
++namespace AegisBrowser;
++
++internal sealed class SiteLibraryForm : Form
++{
++    internal SiteLibraryForm(string title, SavedSite[] sites, string engine, Action<SavedSite[]> save, Action<string> open)
++    {
++        Text = title; AutoScaleMode = AutoScaleMode.Dpi; Font = new Font("Segoe UI", 10);
++        ClientSize = new(640, 420); MinimumSize = new(440, 300);
++        var list = new ListBox { Dock = DockStyle.Fill, DisplayMember = nameof(SavedSite.Title), AccessibleName = title };
++        void Fill(SavedSite[] value) { list.Items.Clear(); list.Items.AddRange(value); }
++        Fill(sites);
++        var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 52, Padding = new Padding(8) };
++        void Button(string text, Action action) {
++            var b = new Button { Text = text, AutoSize = true };
++            b.Click += (_, _) => { try { action(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { MessageBox.Show(this, ex.Message, "Saved sites", MessageBoxButtons.OK, MessageBoxIcon.Warning); } };
++            actions.Controls.Add(b);
++        }
++        void Commit(SavedSite[] value) { save(value); Fill(value); }
++        Button("Open", () => { if (list.SelectedItem is SavedSite site) { open(site.Url); Close(); } });
++        Button("Add", () => { if (SiteEditor.Edit(this, null, engine) is { } site) Commit(list.Items.Cast<SavedSite>().Append(site).ToArray()); });
++        Button("Edit", () => { if (list.SelectedItem is SavedSite old && SiteEditor.Edit(this, old, engine) is { } site) Commit(list.Items.Cast<SavedSite>().Select(x => x == old ? site : x).ToArray()); });
++        Button("Remove", () => { if (list.SelectedItem is SavedSite site) Commit(list.Items.Cast<SavedSite>().Where(x => x != site).ToArray()); });
++        list.DoubleClick += (_, _) => { if (list.SelectedItem is SavedSite site) { open(site.Url); Close(); } };
++        Controls.Add(list); Controls.Add(actions); ChromeTheme.Apply(this);
++    }
++}
++
++internal static class SiteEditor
++{
++    internal static SavedSite? Edit(IWin32Window owner, SavedSite? initial, string engine)
++    {
++        using var dialog = new Form { Text = initial is null ? "Add saved site" : "Edit saved site", AutoScaleMode = AutoScaleMode.Dpi,
++            Font = new Font("Segoe UI", 10), ClientSize = new(480, 250), MinimumSize = new(400, 280), StartPosition = FormStartPosition.CenterParent };
++        var body = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 1, RowCount = 5 };
++        var title = new TextBox { Text = initial?.Title ?? "", Dock = DockStyle.Fill, MaxLength = 120, AccessibleName = "Site title" };
++        var url = new TextBox { Text = initial?.Url ?? "", Dock = DockStyle.Fill, MaxLength = 4096, AccessibleName = "Site address or search" };
++        var save = new Button { Text = "Save", AutoSize = true }; SavedSite? result = null;
++        save.Click += (_, _) => {
++            var resolved = AddressInputResolver.Resolve(url.Text, engine);
++            if (resolved.Url is null || !BrowserPolicy.IsWebUrl(resolved.Url) || string.IsNullOrWhiteSpace(title.Text)) {
++                MessageBox.Show(dialog, "Enter a title and an HTTP(S) address or search query."); return;
++            }
++            result = new(title.Text.Trim(), resolved.Url); dialog.DialogResult = DialogResult.OK;
++        };
++        body.Controls.Add(new Label { Text = "Title", AutoSize = true }); body.Controls.Add(title);
++        body.Controls.Add(new Label { Text = "Address or search", AutoSize = true }); body.Controls.Add(url); body.Controls.Add(save);
++        dialog.Controls.Add(body); dialog.AcceptButton = save; ChromeTheme.Apply(dialog);
++        return dialog.ShowDialog(owner) == DialogResult.OK ? result : null;
++    }
++}
+diff --git a/BUILD-STATUS.md b/BUILD-STATUS.md
+index 4ea890d..c6857a9 100644
+--- a/BUILD-STATUS.md
++++ b/BUILD-STATUS.md
+@@ -1,3 +1,53 @@
++# Native white-chrome redesign — 2026-10-25
++
++Branch: feature/ui-white-chrome, based on feature/security-lab-mock-allow at 75fbf6a59b4565fc38f16bf63a73938cb68edb4e. Work is isolated in /private/tmp/aegis-ui; the original dirty workspace and PR #7 remain untouched. No PR was merged or marked ready.
++
++## Implemented
++
++Native white/navy/blue chrome with restrained red/blue shield branding; owner-drawn selected tabs with close targets and focus indication; navigation/address/bookmark/privacy controls; compact menu and Home/Bookmarks/Settings sidebar; native branded homepage with submit-only search and editable shortcuts; per-profile atomic saved-site persistence; shared styling for search/privacy/library/lab forms; actual privacy mode/pause/count indication and synchronized pause controls. History is intentionally omitted, not represented by a fake button. Profile name is informational; switching remains the existing CLI workflow.
++
++The homepage uses native WinForms controls over the existing about:blank browser tab. It introduces no privileged JS bridge, remote assets or fingerprint modifications. The existing Chromium navigation, popup ownership, TLS denial and host-disposal paths remain intact. The Security Lab service, mock-only authorization and sanitization code are unchanged. See docs/ui-redesign.md for behavior and trade-offs.
++
++## Actual verification
++
++- .NET SDK 8.0.426 installed in an isolated temporary directory on macOS ARM64.
++- Portable Core/SecurityLab/Tests Release build: **0 warnings, 0 errors**.
++- Executed console runner: **56 privacy + 49 address/search + 11 saved-site checks PASS**. The Security Lab suite then failed at loopback binding with SocketException (13), Permission denied. Later policy/profile checks did not execute. This is not a full-suite pass.
++- App, BrowserTests and FilteringTests cross-compiled for **Release / net8.0-windows / win-x64**, each with **0 warnings, 0 errors** after fixes.
++- Initial UI compilation found three ambiguous Graphics drawing overloads; explicit PointF arrays corrected them. A later nullable-tooltip warning was corrected with a null-safe empty check. Final builds pass; no warnings/assertions were suppressed.
++- Self-contained win-x64 publish succeeded at /private/tmp/aegis-ui/artifacts/win-x64. The 846-file publish directory contains the app, CefSharp subprocess, libcef, coreclr/hostfxr, SecurityLab/Kestrel and ICU/resource payloads.
++- git diff --check passed. Native Windows tests, startup/shutdown smoke, scaling/visual checks and Windows portable ZIP script have **NOT RUN** for this redesign. No new CI/artifact URL is claimed.
++
++The existing dependency versions were retained. Because direct dotnet network access is restricted, the unchanged official packages were fetched with HTTPS curl from api.nuget.org into /private/tmp/aegis-nuget-feed. NuGet restored from that local cache; no repository package source override or certificate bypass was added. Vulnerability-feed auditing was unavailable in the offline restore and is not claimed verified.
++
++Actual command patterns (SDK executable /private/tmp/aegis-dotnet/dotnet; DOTNET_CLI_HOME=/private/tmp/aegis-dotnet-home):
++
++```sh
++dotnet restore AegisBrowser.Tests --source /private/tmp/aegis-empty-feed -p:NuGetAudit=false -m:1 -nr:false
++dotnet build AegisBrowser.Tests -c Release --no-restore -m:1 -nr:false -p:UseSharedCompilation=false
++dotnet AegisBrowser.Tests/bin/Release/net8.0/AegisBrowser.Tests.dll
++# Executed for each of AegisBrowser/AegisBrowser.csproj, AegisBrowser.BrowserTests, AegisBrowser.FilteringTests:
++dotnet restore PROJECT -r win-x64 -p:SelfContained=true -p:EnableWindowsTargeting=true --source /private/tmp/aegis-nuget-feed -p:NuGetAudit=false -m:1 -nr:false
++dotnet build PROJECT -c Release -r win-x64 -p:SelfContained=true -p:EnableWindowsTargeting=true --no-restore -m:1 -nr:false -p:UseSharedCompilation=false
++dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -m:1 -nr:false -o artifacts/win-x64
++```
++
++The app restore/build also succeeded without EnableWindowsTargeting on the command line because its project already enables it. Single-node publish completed; the initial multi-node publish stalled in this restricted environment and was canceled. The normal Windows workflow retains its existing commands and security checks.
++
++## Added coverage and outstanding regression
++
++Saved-site tests cover persistence/reopening, deletion, profile isolation, unsafe URLs and corrupt-file preservation. Native tests now cover homepage submission/no-search-while-typing and real privacy-indicator/pause synchronization. Existing navigation/diagnostic and menu tests were adapted to the new entry points. Native product-page coverage clicks a link, follows a redirect and asserts an actual styled DOM element plus text/html both with filtering active and paused. These Windows additions compiled but have not executed here.
++
++**The reported consumer-site source-like rendering is not reproduced or fixed.** No public URL or active filter configuration has been supplied. Handler inspection found cancellation but no response-body/MIME rewriting. No production filtering policy, blanket exception or security workaround was introduced. The synthetic regression cannot substitute for the affected site's reproduction.
++
++## Remaining delivery gates
++
++A push dry run to feature/ui-white-chrome failed: Could not resolve host: github.com. Authenticated GitHub CLI access could not be validated in this environment. Publish the prepared branch from a working terminal and inspect its exact-SHA Windows workflow, fixing any failures before UI acceptance. The existing workflow runs the new tests and packages the complete publish directory; docs/ui-redesign.md is included as UI-DESIGN.md. No release was published.
++
++Manual GUI acceptance has not been performed. Remaining: keyboard/focus/hover/disabled states, 100/150/200% scaling, narrow/maximized windows, bookmarks/shortcuts modal editing, homepage Back behavior, profile restart, all existing native security/lifecycle suites, and the specific consumer URL once available. Earlier CI results below do not verify this redesign.
++
++---
++
+ # End-to-end interaction audit — not yet complete
+ 
+ The published feature branch remains `07da0a7b4f563bf56bc19c6f22a602c7ec8b6211`, based on main `98a8835575c22268a456a64a5033b65e9d2c7840`. Local feature HEAD matched the remote before edits. The original dirty release/windows-rc workspace remains untouched. Existing patches were not reapplied. Open GitHub items returned by the issues endpoint were PRs #1, #2, #3, #6 and #7, not separately filed issues. Their existence does not establish a new defect or authorize merging; broader lab PR #6 remains outside this mock-Allow scope.
+diff --git a/docs/INSTALL-WINDOWS.md b/docs/INSTALL-WINDOWS.md
+index c55bff9..3f95871 100644
+--- a/docs/INSTALL-WINDOWS.md
++++ b/docs/INSTALL-WINDOWS.md
+@@ -16,7 +16,7 @@ For a separate persistent profile:
+ .\AegisBrowser\AegisBrowser.exe --profile=Research
+ ```
+ 
+-The first tab displays local diagnostics. Use the address bar to navigate; Privacy opens filtering settings and the request inspector. Standard enables the starter/imported list, Strict blocks third-party subresources, and Custom applies user rules with optional tracking-list support. Apply edits and reload affected pages. Explicit site/resource exceptions or temporary pause can restore third-party content. See PRIVACY.md for syntax and limitations.
++The first tab displays the native AegisBrowser homepage. Diagnostics remain available in the browser menu. Use the address bar to navigate; Privacy opens filtering settings and the request inspector. Standard enables the starter/imported list, Strict blocks third-party subresources, and Custom applies user rules with optional tracking-list support. Apply edits and reload affected pages. Explicit site/resource exceptions or temporary pause can restore third-party content. See PRIVACY.md for syntax and limitations.
+ 
+ ## Data, updates and removal
+ 
+diff --git a/docs/security-lab-mock-allow.md b/docs/security-lab-mock-allow.md
+index 0de9805..7efd5f0 100644
+--- a/docs/security-lab-mock-allow.md
++++ b/docs/security-lab-mock-allow.md
+@@ -4,7 +4,7 @@ This is a local simulation, using the `AegisMock` provider. No real detection pr
+ 
+ ## Use the Windows build
+ 
+-Extract the complete portable ZIP, follow INSTALL-WINDOWS.md, launch `AegisBrowser.exe`, and select **Security Lab** on the toolbar. The window shows **Scenario: Security Decisions**, **Mock response: Allow** and **Not Run**.
++Extract the complete portable ZIP, follow INSTALL-WINDOWS.md, launch `AegisBrowser.exe`, and select **Security Lab** from the browser menu. The window shows **Scenario: Security Decisions**, **Mock response: Allow** and **Not Run**.
+ 
+ - **Run Test** asynchronously starts/reuses the server, resets old grants, and creates a new in-memory HTTP cookie container. Status becomes Running, then Passed only when all nine assertions succeed. Failure, cancellation, timeout or an unexpected response produces Failed. The decision and generated request ID are shown.
+ - **Open Test Page** opens the local fixture using the browser's normal tab and navigation code, with a new independent in-memory CefSharp request context. Its synthetic session is separate from the WinForms runner and normal profile storage. Use the page's buttons to evaluate Allow, request protected content and reset that page's session.
+@@ -50,7 +50,7 @@ Manual UI verification is **NOT RUN** until a user runs this portable build and
+ 
+ Record the tested commit, Windows version and display scaling with each result. All cases below remain **NOT RUN**:
+ 
+-- [ ] Open Security Lab from the toolbar; reach and activate every control with the keyboard.
++- [ ] Open Security Lab from the browser menu; reach and activate every control with the keyboard.
+ - [ ] At 100%, 150% and 200% scaling, confirm labels, buttons, request IDs and focus indicators remain usable, including at minimum window size.
+ - [ ] Observe Not Run → Running → Passed. Confirm Allow and a request ID are displayed.
+ - [ ] Repeat Run Test; confirm distinct IDs and no stale result during execution.
+diff --git a/docs/ui-redesign.md b/docs/ui-redesign.md
+new file mode 100644
+index 0000000..eaecdfa
+--- /dev/null
++++ b/docs/ui-redesign.md
+@@ -0,0 +1,43 @@
++# AegisBrowser native UI redesign
++
++Branch: feature/ui-white-chrome, based on Security Lab commit 75fbf6a59b4565fc38f16bf63a73938cb68edb4e. This is a real WinForms implementation, not an HTML mockup. CefSharp remains 154.0.340 and the target is .NET 8 Windows x64.
++
++## Screens and behavior
++
++White surfaces, pale-blue selected tabs, navy text, blue actions, a restrained red/blue vector shield and Segoe UI typography are shared by the browser, homepage, saved-site editor, privacy/search settings and Security Lab. The shield is drawn locally with GDI+; no fonts, favicons or images are downloaded. Standard native borders and controls are retained where custom decoration would impair reliability/accessibility. The homepage search has a rounded, focus-highlighted border. PerMonitorV2 DPI mode is explicit; actual visual scaling still needs Windows verification.
++
++- The tab strip has selected/focus states, ellipsized titles, full-title tooltips and per-tab close hit targets. Ctrl+W remains the keyboard close action. The toolbar also retains new/close-tab actions.
++- Back, Forward and Reload/Stop retain Chromium navigation. The wide address field uses the existing AddressInputResolver and selected engine. The star opens a real bookmark editor. The privacy indicator opens the existing settings/inspector. The compact menu exposes Search, Privacy, Bookmarks, Shortcuts, Security Lab, Diagnostics, DevTools and pause/resume.
++- The sidebar has Home/New Tab, Bookmarks and Settings. There is no fake History button: history is not implemented. Profile name is shown read-only; process/profile switching remains the existing --profile=NAME launch mechanism.
++- The native homepage is hosted over an ordinary about:blank browser within the same tab. Search or shortcut submission uses the existing resolver and current-tab navigation; no privileged JavaScript binding or scheme bypass is added. Back to that tab's about:blank page restores the homepage. The last-tab replacement is now Home; diagnostics are still available from the menu and aegis:diagnostics.
++- Homepage shortcut tiles are empty until configured. Add via the homepage, edit/remove via the Shortcuts menu. Bookmark the current page with the star; edit/remove/open via Bookmarks. Editors are modal to prevent simultaneous stale editors overwriting each other's collection.
++- sites.json persists explicit shortcuts/bookmarks per profile. Only HTTP(S) URLs without embedded credentials are accepted. Collections are bounded, writes use temporary-file replacement, and invalid original files are preserved until repaired. No automatic browsing-history recording is introduced. Explicit saved URLs may contain query parameters: users should avoid saving sensitive links. They are local settings, not an encrypted vault.
++- Privacy labels use the actual PrivacySession mode/Paused state; tooltip counts come from Snapshot. The settings pause checkbox follows changes made through the menu. Labels do not claim that all traffic is safe or that a Custom configuration necessarily has blocking rules.
++
++Native timers, menus/tooltips, home controls and tab contexts follow disposal. Existing CEF host-close acknowledgement and popup/renderer shutdown logic is retained. Security Lab server-side authorization, mock-only scope and JSON sanitization are unchanged.
++
++## Product-page rendering investigation
++
++No affected public URL, reproduction steps or active list/mode have been supplied. The consumer-site failure therefore has **not been reproduced or fixed**. SafeRequests/FilteringResourceHandler were inspected: they cancel matching network requests but do not supply response bodies, response filters or rewritten MIME types. Main-frame navigation is exempt from content blocking. This does not prove that blocked resources cannot break a real site's client-side routing.
++
++A deterministic Windows regression was added: click a product link, follow a redirect, and require an actual styled H1 DOM element and text/html document while filtering is enabled, then while paused. The product URL deliberately matches a blocking rule; an unrelated third-party image is also present. This test checks the main-document/rendering boundary and does not replace reproducing the reported site. No blanket allowlists or filtering/TLS/security-policy changes were made.
++
++## Verification and build commands
++
++The repository has project-based builds rather than a solution. Use the existing Windows workflow for full execution and packaging:
++
++```powershell
++dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
++dotnet build AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 -p:SelfContained=true --no-restore
++dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64
++dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
++dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
++# Execute the workflow's native write/read, filtering and settings-restart phases.
++dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -o artifacts/win-x64
++./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64
++./scripts/package-portable.ps1
++```
++
++Actual local results are in BUILD-STATUS.md. Cross-compilation and file presence do not establish successful Windows execution or visual acceptance. Verify the new branch's full Windows CI before accepting it. Existing assertions remain; navigation tests now explicitly open Diagnostics when testing its content, and settings tests invoke the same action delegates as the new menus.
++
++Remaining Windows checks: 100/150/200% scaling, minimum-window layout, keyboard/tab close targets, modal saved-site edits and cancellation, live privacy pause/configuration states, all native regression suites, startup/shutdown, and the reported consumer URL once supplied. No UI screenshot or manual GUI pass is claimed.
+diff --git a/scripts/package-portable.ps1 b/scripts/package-portable.ps1
+index de6e37c..702ad8c 100644
+--- a/scripts/package-portable.ps1
++++ b/scripts/package-portable.ps1
+@@ -12,6 +12,7 @@ Copy-Item "$source/*" $bundle -Recurse
+ Copy-Item docs/INSTALL-WINDOWS.md (Join-Path $bundle 'INSTALL-WINDOWS.md')
+ Copy-Item docs/privacy.md (Join-Path $bundle 'PRIVACY.md')
+ Copy-Item docs/search.md (Join-Path $bundle 'SEARCH.md')
++Copy-Item docs/ui-redesign.md (Join-Path $bundle 'UI-DESIGN.md')
+ Copy-Item docs/security-lab-mock-allow.md (Join-Path $bundle 'SECURITY-LAB-MOCK-ALLOW.md')
+ Copy-Item BUILD-STATUS.md (Join-Path $bundle 'BUILD-STATUS.md')
+ $revision = git rev-parse HEAD
+diff --git a/tests/acceptance/windows-smoke.ps1 b/tests/acceptance/windows-smoke.ps1
+index c3e9dfd..eecaab5 100644
+--- a/tests/acceptance/windows-smoke.ps1
++++ b/tests/acceptance/windows-smoke.ps1
+@@ -13,7 +13,7 @@ try {
+         Start-Sleep -Milliseconds 250
+         $process.Refresh()
+         if ($process.HasExited) { throw "Browser exited during startup: $($process.ExitCode)" }
+-        if ($process.MainWindowHandle -ne 0 -and $process.MainWindowTitle -eq "Aegis Browser — $profile") {
++        if ($process.MainWindowHandle -ne 0 -and $process.MainWindowTitle -eq "AegisBrowser — $profile") {
+             $ready = $true
+             break
+         }
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,414 @@
+From 07da0a7b4f563bf56bc19c6f22a602c7ec8b6211 Mon Sep 17 00:00:00 2001
+From: roshan-pandit1 <roshan10pandit@gmail.com>
+Date: Sat, 24 Oct 2026 21:41:35 +0530
+Subject: [PATCH] Cancel lab evaluations on shutdown and test UI recovery
+
+---
+ AegisBrowser.BrowserTests/Program.cs          | 69 ++++++++++++++++++-
+ .../SecurityDecisionServer.cs                 | 21 +++++-
+ AegisBrowser.Tests/SecurityDecisionTests.cs   | 66 ++++++++++++++++++
+ AegisBrowser/README.md                        |  2 +-
+ AegisBrowser/SecurityLabForm.cs               | 23 +++++--
+ BUILD-STATUS.md                               | 58 ++++++++++++++++
+ docs/security-lab-mock-allow.md               |  4 +-
+ 7 files changed, 230 insertions(+), 13 deletions(-)
+
+diff --git a/AegisBrowser.BrowserTests/Program.cs b/AegisBrowser.BrowserTests/Program.cs
+index 60e7300..490fd82 100644
+--- a/AegisBrowser.BrowserTests/Program.cs
++++ b/AegisBrowser.BrowserTests/Program.cs
+@@ -1,5 +1,6 @@
+ using AegisBrowser;
+ using AegisBrowser.Core;
++using AegisBrowser.SecurityLab;
+ using CefSharp;
+ using CefSharp.WinForms;
+ using System.Net;
+@@ -52,7 +53,7 @@ internal static class Program
+             {
+                 try
+                 {
+-                    if (args[0] == "write") { await TabsAndRenderer(); await MockAllowLab(); }
++                    if (args[0] == "write") { await TabsAndRenderer(); await MockAllowLab(); await LabLifecycle(); }
+                     await Storage(host, root, args[0]);
+                     if (args[0] == "write") await RejectUntrustedTls(host);
+                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
+@@ -395,6 +396,72 @@ internal static class Program
+         Check(lab.IsDisposed, "lab server window closes with browser owner");
+     }
+ 
++    private static async Task LabLifecycle()
++    {
++        var attempts = 0;
++        using (var lab = new SecurityLabForm(_ => { }, token => ++attempts == 1
++            ? Task.FromException<SecurityDecisionServer>(new IOException("synthetic-startup-failure"))
++            : SecurityDecisionServer.StartAsync(cancellationToken: token)))
++        {
++            lab.Show();
++            await lab.RunTestAsync();
++            Check(lab.TestStatus == "Failed" && lab.Report?.Passed == false, "startup error fails the UI workflow");
++            await lab.RunTestAsync();
++            Check(lab.TestStatus == "Passed" && attempts == 2, "startup failure can be retried");
++            var id = lab.Report!.RequestId;
++            await lab.RunTestAsync();
++            Check(lab.Report?.Passed == true && lab.Report.RequestId != id, "repeated UI run has a fresh request ID");
++            var directory = Path.Combine(Path.GetTempPath(), "aegis-report-test-" + Guid.NewGuid().ToString("N"));
++            Directory.CreateDirectory(directory);
++            try {
++                var path = Path.Combine(directory, "report.json");
++                Check(await lab.SaveReportAsync(path) && await File.ReadAllTextAsync(path) == lab.Report!.ToJson(), "UI exports its exact sanitized report");
++                Check(!await lab.SaveReportAsync(directory) && lab.Report!.Passed, "save failure retains report for retry");
++            }
++            finally { Directory.Delete(directory, true); }
++            lab.Close();
++            await Wait(() => lab.IsDisposed, "retry lab closes");
++        }
++        var starting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
++        using (var lab = new SecurityLabForm(_ => { }, async token => {
++            starting.TrySetResult();
++            await Task.Delay(Timeout.Infinite, token);
++            throw new InvalidOperationException("Canceled startup must not complete");
++        }))
++        {
++            lab.Show();
++            var run = lab.RunTestAsync();
++            await starting.Task;
++            Check(lab.TestStatus == "Running", "UI reports running during startup");
++            lab.Close();
++            await run;
++            await Wait(() => lab.IsDisposed, "lab closes during startup");
++            Check(lab.Report?.Passed != true, "canceled startup cannot report pass");
++        }
++        var provider = new WaitingLabProvider();
++        using (var lab = new SecurityLabForm(_ => { }, token => SecurityDecisionServer.StartAsync(provider, token)))
++        {
++            lab.Show();
++            var run = lab.RunTestAsync();
++            await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
++            Check(lab.TestStatus == "Running", "UI remains responsive during evaluation");
++            lab.Close();
++            await run;
++            await Wait(() => lab.IsDisposed, "lab closes during evaluation");
++            Check(lab.Report?.Passed != true, "closing active lab cannot retain successful result");
++        }
++    }
++    private sealed class WaitingLabProvider : ISecurityDecisionProvider
++    {
++        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
++        public async Task<SecurityDecision> EvaluateAsync(CancellationToken token)
++        {
++            Started.TrySetResult();
++            await Task.Delay(Timeout.Infinite, token);
++            throw new InvalidOperationException("Canceled evaluation must not complete");
++        }
++    }
++
+     private sealed class Completion : ICompletionCallback
+     {
+         public TaskCompletionSource<bool> Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+diff --git a/AegisBrowser.SecurityLab/SecurityDecisionServer.cs b/AegisBrowser.SecurityLab/SecurityDecisionServer.cs
+index eaed4a5..69bce2d 100644
+--- a/AegisBrowser.SecurityLab/SecurityDecisionServer.cs
++++ b/AegisBrowser.SecurityLab/SecurityDecisionServer.cs
+@@ -21,6 +21,9 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+     private readonly WebApplication app;
+     private readonly ISecurityDecisionProvider provider;
+     private readonly TimeProvider clock;
++    private readonly CancellationTokenSource shutdown = new();
++    private readonly object disposeGate = new();
++    private Task? disposal;
+     public Uri Origin { get; private set; } = null!;
+     public Uri PageUrl => new(Origin, PagePath);
+     public EvaluationEvent[] Evaluations => evaluations.ToArray();
+@@ -34,6 +37,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+         var app = builder.Build();
+         var server = new SecurityDecisionServer(app, provider ?? new MockSecurityDecisionProvider(), timeProvider ?? TimeProvider.System);
+         app.Use(async (context, next) => {
++            if (server.shutdown.IsCancellationRequested) { context.Response.StatusCode = 503; return; }
+             if (context.Request.Host.Host != "127.0.0.1") { context.Response.StatusCode = 403; return; }
+             var origin = context.Request.Headers.Origin.ToString();
+             if (origin.Length > 0 && origin != server.Origin?.GetLeftPart(UriPartial.Authority)) { context.Response.StatusCode = 403; return; }
+@@ -88,11 +92,13 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+         lock(session) { session.Allowed = false; revision = ++session.Revision; }
+         try
+         {
+-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
++            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, shutdown.Token);
+             timeout.CancelAfter(TimeSpan.FromSeconds(5));
+             var decision = await provider.EvaluateAsync(timeout.Token).WaitAsync(timeout.Token);
+             lock(session)
+             {
++                // A synchronously completed provider task can race cancellation.
++                timeout.Token.ThrowIfCancellationRequested();
+                 if (decision is null || !decision.IsValidAllow || session.Revoked || session.Revision != revision || session.Expires <= clock.GetUtcNow())
+                 { Record("rejected", null); return Results.StatusCode(503); }
+                 session.Allowed = true;
+@@ -116,5 +122,16 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+     {
+         foreach(var item in sessions) if (sessions.TryRemove(item.Key, out var session)) lock(session) { session.Revoked = true; session.Allowed = false; session.Revision++; }
+     }
+-    public async ValueTask DisposeAsync() { ResetAllSessions(); await app.StopAsync(); await app.DisposeAsync(); }
++    public ValueTask DisposeAsync()
++    {
++        lock (disposeGate) return new ValueTask(disposal ??= StopAsync());
++    }
++    private async Task StopAsync()
++    {
++        // Cancel evaluations before draining Kestrel; no pending provider may restore a grant.
++        shutdown.Cancel();
++        ResetAllSessions();
++        try { await app.StopAsync(); }
++        finally { await app.DisposeAsync(); shutdown.Dispose(); }
++    }
+ }
+diff --git a/AegisBrowser.Tests/SecurityDecisionTests.cs b/AegisBrowser.Tests/SecurityDecisionTests.cs
+index 5855441..e8abc9a 100644
+--- a/AegisBrowser.Tests/SecurityDecisionTests.cs
++++ b/AegisBrowser.Tests/SecurityDecisionTests.cs
+@@ -57,6 +57,7 @@ internal static class SecurityDecisionTests
+         var invalidReport = await new SecurityTestRunner().RunAsync(invalid);
+         Check(!invalidReport.Passed && invalid.Evaluations.Single().RequestId is null, "invalid provider response cannot authorize or leak ID");
+         count += await LifecycleChecks();
++        count += await CancellationChecks();
+         Console.WriteLine($"PASS: {count} mock Allow checks");
+     }
+     private static async Task<int> LifecycleChecks()
+@@ -129,6 +130,71 @@ internal static class SecurityDecisionTests
+         }
+         return count;
+     }
++    private static async Task<int> CancellationChecks()
++    {
++        var count = 0;
++        void Check(bool ok, string name) { if (!ok) throw new Exception("FAIL: " + name); count++; }
++        foreach (var shuttingDown in new[] { false, true })
++        {
++            var provider = new PendingProvider();
++            await using var server = await SecurityDecisionServer.StartAsync(provider);
++            using var client = new HttpClient(new HttpClientHandler { UseProxy = false }) {
++                BaseAddress = server.Origin, Timeout = TimeSpan.FromSeconds(10)
++            };
++            using var seed = await client.PostAsync(SecurityDecisionServer.EvaluatePath, null);
++            Check(seed.StatusCode == HttpStatusCode.OK, "cancellation fixture seeded");
++            provider.Hold = true;
++            using var cancel = new CancellationTokenSource();
++            var pending = client.PostAsync(SecurityDecisionServer.EvaluatePath, null, cancel.Token);
++            await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
++            try
++            {
++                var stopped = shuttingDown ? server.DisposeAsync().AsTask() : Task.CompletedTask;
++                if (!shuttingDown) cancel.Cancel();
++                await provider.Canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
++                var deadline = DateTime.UtcNow.AddSeconds(5);
++                while (!server.Evaluations.Any(e => e.Outcome == "unavailable") && DateTime.UtcNow < deadline)
++                    await Task.Delay(10);
++                Check(server.Evaluations.Any(e => e.Outcome == "unavailable"), "active evaluation fails closed on cancellation");
++                provider.Release.TrySetResult();
++                try {
++                    using var response = await pending;
++                    Check(shuttingDown && response.StatusCode == HttpStatusCode.ServiceUnavailable,
++                        "shutdown cannot return a successful decision");
++                }
++                catch (OperationCanceledException) { Check(cancel.IsCancellationRequested, "client cancellation observed"); }
++                catch (HttpRequestException) when (shuttingDown) { Check(true, "shutdown closed pending transport"); }
++                await stopped.WaitAsync(TimeSpan.FromSeconds(5));
++                if (!shuttingDown) {
++                    using var protectedResult = await client.GetAsync(SecurityDecisionServer.ProtectedPath);
++                    Check(protectedResult.StatusCode == HttpStatusCode.Forbidden, "late provider result cannot restore canceled grant");
++                }
++                else {
++                    await server.DisposeAsync();
++                    Check(true, "shutdown is repeatable after active evaluation");
++                }
++            }
++            finally { provider.Release.TrySetResult(); }
++        }
++        return count;
++    }
++    private sealed class PendingProvider : ISecurityDecisionProvider
++    {
++        internal bool Hold;
++        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
++        internal TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
++        internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
++        public async Task<SecurityDecision> EvaluateAsync(CancellationToken token)
++        {
++            if (Hold) {
++                using var registration = token.Register(() => Canceled.TrySetResult());
++                Started.TrySetResult();
++                // Deliberately finish late: the server must enforce cancellation independently.
++                await Release.Task;
++            }
++            return await new MockSecurityDecisionProvider().EvaluateAsync(CancellationToken.None);
++        }
++    }
+     private sealed class ManualClock : TimeProvider
+     {
+         private long ticks = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).Ticks;
+diff --git a/AegisBrowser/README.md b/AegisBrowser/README.md
+index bba8220..f930afe 100644
+--- a/AegisBrowser/README.md
++++ b/AegisBrowser/README.md
+@@ -56,7 +56,7 @@ On a Windows machine, also verify:
+ 5. Disconnect networking and reload diagnostics; check the DevTools network panel for no outbound diagnostics requests.
+ 6. Run the published executable on a clean Windows x64 machine with the VC++ runtime, and verify subprocess startup and DevTools.
+ 
+-Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. Windows CI is the source of executable verification. See BUILD-STATUS.md for exact tested revisions and results; local compilation is unavailable.
++Windows CI is the authoritative environment for WinForms, CefSharp, TLS, shutdown and packaging checks. The portable console projects can also compile on macOS/Linux with .NET 8, but their Kestrel tests require permission to bind loopback sockets. Restricted environments may block sockets or NuGet access; these are unverified checks, not passes. See BUILD-STATUS.md for actual commands, tested revisions and results.
+ 
+ Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/154.0.340), [CefSharp project](https://github.com/cefsharp/CefSharp).
+ 
+diff --git a/AegisBrowser/SecurityLabForm.cs b/AegisBrowser/SecurityLabForm.cs
+index 6959cc2..3db5a94 100644
+--- a/AegisBrowser/SecurityLabForm.cs
++++ b/AegisBrowser/SecurityLabForm.cs
+@@ -2,7 +2,7 @@ using AegisBrowser.SecurityLab;
+ 
+ namespace AegisBrowser;
+ 
+-internal sealed class SecurityLabForm(Action<string> openPage) : Form
++internal sealed class SecurityLabForm(Action<string> openPage, Func<CancellationToken, Task<SecurityDecisionServer>>? startServer = null) : Form
+ {
+     private readonly Label status = new() { Text = "Not Run", AutoSize = true, AccessibleName = "Test status" };
+     private readonly Label decision = new() { Text = "Decision: —", AutoSize = true };
+@@ -34,14 +34,19 @@ internal sealed class SecurityLabForm(Action<string> openPage) : Form
+         reset.Click += (_, _) => ResetSession();
+         open.Click += async (_, _) => await OpenTestPageAsync();
+         export.Click += async (_, _) => {
+-            if (Report is not { } report) return;
++            if (Report is null) return;
+             using var dialog = new SaveFileDialog { Filter = "JSON report|*.json", FileName = "aegis-mock-allow.json" };
+-            if (dialog.ShowDialog(this) == DialogResult.OK)
+-                try { await File.WriteAllTextAsync(dialog.FileName, report.ToJson()); }
+-                catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { MessageBox.Show(this, "Could not save report."); }
++            if (dialog.ShowDialog(this) == DialogResult.OK && !await SaveReportAsync(dialog.FileName) && !closing)
++                MessageBox.Show(this, "Could not save report.", "Security Lab", MessageBoxButtons.OK, MessageBoxIcon.Error);
+         };
+     }
+-    private Task<SecurityDecisionServer> Server() => server ??= SecurityDecisionServer.StartAsync(cancellationToken: stop.Token);
++    internal async Task<bool> SaveReportAsync(string path)
++    {
++        if (Report is not { } report) return false;
++        try { await File.WriteAllTextAsync(path, report.ToJson()); return true; }
++        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
++    }
++    private Task<SecurityDecisionServer> Server() => server ??= startServer is null ? SecurityDecisionServer.StartAsync(cancellationToken: stop.Token) : startServer(stop.Token);
+     internal Task RunTestAsync() => busy || closing ? Task.CompletedTask : active = ExecuteAsync(true);
+     internal Task OpenTestPageAsync() => busy || closing ? Task.CompletedTask : active = ExecuteAsync(false);
+     private async Task ExecuteAsync(bool test)
+@@ -53,8 +58,9 @@ internal sealed class SecurityLabForm(Action<string> openPage) : Form
+             var instance = await Server();
+             if (test)
+             {
+-                Report = await new SecurityTestRunner().RunAsync(instance, stop.Token);
++                var result = await new SecurityTestRunner().RunAsync(instance, stop.Token);
+                 if (!closing) {
++                    Report = result;
+                     status.Text = Report.Passed ? "Passed" : "Failed";
+                     decision.Text = "Decision: " + (Report.Decision ?? "unavailable");
+                     requestId.Text = "Request ID: " + (Report.RequestId ?? "unavailable");
+@@ -63,10 +69,13 @@ internal sealed class SecurityLabForm(Action<string> openPage) : Form
+             else if (!closing) openPage(instance.PageUrl.AbsoluteUri);
+         }
+         catch {
++            // A failed startup is retryable; never reuse a cached faulted task.
++            if (server is { IsFaulted: true } or { IsCanceled: true }) server = null;
+             if (!closing) {
+                 var now = DateTimeOffset.UtcNow;
+                 Report = new("Security Decisions", "AegisMock", null, null, now, now, [new("Server available", false)], false, "ServerUnavailable");
+                 status.Text = "Failed";
++                decision.Text = "Decision: unavailable"; requestId.Text = "Request ID: unavailable";
+             }
+         }
+         finally { busy = false; if (!closing) { run.Enabled = reset.Enabled = open.Enabled = true; export.Enabled = Report is not null; } }
+diff --git a/BUILD-STATUS.md b/BUILD-STATUS.md
+index 4d3afce..435dab5 100644
+--- a/BUILD-STATUS.md
++++ b/BUILD-STATUS.md
+@@ -1,3 +1,61 @@
++# End-to-end integration follow-up — verification incomplete
++
++This follow-up continues PR #7 from `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. GitHub API and remote checks reconfirmed that head and draft status before editing. The previously prepared CI documentation was already present locally and was preserved rather than applied twice. Unrelated changes in the original release/windows-rc workspace remain untouched.
++
++## Implemented in this follow-up
++
++- Server shutdown now cancels pending provider work before draining Kestrel, rejects incoming work during shutdown, checks cancellation before committing an authorization, and shares one disposal task across repeated callers.
++- The UI discards a failed startup task so Run Test can retry, clears stale decision/ID labels on errors, and does not publish a completed report after closure begins.
++- Report writing uses a testable production method; save failures retain the report for retry and do not display a dialog after the window begins closing.
++- Existing console and Windows browser runners gained active-cancellation/late-provider, active-shutdown, repeated-disposal, startup-retry, repeated-run, report-write/failure, and close-during-startup/evaluation checks. Existing security assertions and timeouts were not weakened.
++
++Initialization, address/search handling, profile/settings persistence, native tab/popup closure, TLS denial, privacy handler integration and packaging scripts were reviewed. No unrelated browser rewrite, provider integration, security-disabling switch or dependency upgrade was introduced. CefSharp remains 154.0.340; the application target remains net8.0-windows / win-x64.
++
++## Actual local checks
++
++An isolated .NET SDK 8.0.426 (macOS ARM64) was installed under /private/tmp. Dependency-free console restore succeeded using an empty local package source. Release compilation of Core, SecurityLab and Tests succeeded with **0 warnings and 0 errors** using single-node MSBuild and shared compilation disabled. Multi-node restore did not complete in the restricted environment; single-node restore resolved that execution problem.
++
++Execution printed **PASS: 56 privacy checks** and **PASS: 49 address and search checks**. The Security Lab suite then failed to start Kestrel with `System.Net.Sockets.SocketException (13): Permission denied` while binding loopback. The remainder of that runner, including policy/profile checks, was not reached. These environmental restrictions were not worked around by relaxing tests or widening the server binding.
++
++Windows application restore was attempted with `-r win-x64 -p:SelfContained=true` and failed with **NU1301**, unable to load `https://api.nuget.org/v3/index.json`. Consequently, the changed WinForms/native harness has not compiled or executed locally. No new Windows publish, native smoke test or portable artifact is claimed. A push dry run failed with `Could not resolve host: github.com`; read-only GitHub API requests still worked.
++
++## Required next verification
++
++Push the follow-up commit only to feature/security-lab-mock-allow, then run the existing Windows workflow and inspect its complete logs. It already invokes both amended test runners before publish and ZIP verification. Any compiler errors, failing assertions or native lifecycle failures must be fixed and the workflow rerun on the final code revision. The successful run/artifact recorded below belongs to **796acfb only** and does not verify this follow-up.
++
++Manual acceptance is the final phase and is not a blocker to these automated checks. No manual UI test is claimed. The existing checklist in docs/security-lab-mock-allow.md remains pending: normal startup/navigation/search; keyboard and scaling; denial/Allow/reset; repeated runs/status; report export and failure recovery; close during active work; and compatibility with ordinary browsing/profiles/privacy. **Do not mark this follow-up complete or release-ready until Windows verification passes.** PR #7 remains draft and must not be merged automatically.
++
++---
++
++# PR #7 recovery verification — 2026-10-24
++
++The user successfully pushed review commit `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. The remote branch SHA was independently checked with `git ls-remote`; PR #7 remains draft and unmerged at that exact head. The original dirty release/windows-rc workspace was preserved. The isolated review checkout already contained the patch; it was not applied twice. Parent SHA, four-file scope, reverse-patch applicability and `git diff --check` were verified.
++
++## Windows CI on the recovered commit
++
++[Run 40109058867](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867), [job 120916744523](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/job/120916744523), completed **SUCCESS** for `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. The GitHub API reports every job step successful:
++
++- .NET 8 setup, Windows x64 restore and Release build.
++- Existing console suites, including the new expiration-boundary, overlapping-evaluation and reset-during-evaluation coverage.
++- Native storage, OAuth, tabs and renderer tests, with the existing shutdown/assertion gates.
++- Chromium filtering/CORS and settings process-restart checks.
++- Self-contained win-x64 publish, payload validation and published-application smoke.
++- Portable ZIP generation/verification and both artifact uploads.
++
++[Portable artifact 12566046409](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/artifacts/12566046409): 274,252,045 bytes, listed as unexpired. [Complete publish directory 12565678692](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/artifacts/12565678692): 273,416,606 bytes, listed as unexpired.
++
++Evidence limitation: detailed job-log retrieval returned HTTP 403. Run conclusion, individual step conclusions and artifact metadata were verified, but assertion counts, compiler-warning totals, inner ZIP checksum and payload file counts were not independently re-read from this run's logs. No artifact download/extraction was performed locally. Local dotnet remains unavailable (`command not found`); no local test pass is claimed.
++
++This documentation update follows the verified commit and is initially local only. It does not claim CI verification of a later documentation commit. Earlier sections below are historical, including statements that the coverage had not yet been pushed or run.
++
++## Remaining acceptance
++
++All Security Lab manual UI checks remain **NOT RUN**: toolbar/keyboard access, 100/150/200% scaling, status and request-ID display, repeated runs, JSON export/cancel/save failures, protected page denial/Allow/reset, closure during startup/active work, and normal browsing/privacy/profile compatibility. Follow [the checklist](docs/security-lab-mock-allow.md). Existing automation does not substitute for these human-operated checks. Active-request cancellation and shutdown-during-evaluation coverage gaps described below remain open; this successful run does not add those assertions.
++
++Recommendation: the recovered portable artifact is ready for manual testing. Keep PR #7 draft pending manual acceptance, remaining focused lifecycle verification and full log review. No automatic merge or ready-for-review transition was performed. Chromium security protections and existing tests were not weakened.
++
++---
++
+ # PR #7 focused review — 2026-10-24
+ 
+ Remote state was fetched again: PR #7 remains open, draft, unmerged and conflict-free at `4a0124cbbaf10faf28ff746a7e5d952feb07668e`, based on main `98a8835575c22268a456a64a5033b65e9d2c7840`. No reviews, inline comments or issue comments were returned. Branch-protection settings could not be read (HTTP 401), so required-check configuration is not independently confirmed.
+diff --git a/docs/security-lab-mock-allow.md b/docs/security-lab-mock-allow.md
+index 4fca775..71b9ba0 100644
+--- a/docs/security-lab-mock-allow.md
++++ b/docs/security-lab-mock-allow.md
+@@ -8,7 +8,7 @@ Extract the complete portable ZIP, follow INSTALL-WINDOWS.md, launch `AegisBrows
+ 
+ - **Run Test** asynchronously starts/reuses the server, resets old grants, and creates a new in-memory HTTP cookie container. Status becomes Running, then Passed only when all nine assertions succeed. Failure, cancellation, timeout or an unexpected response produces Failed. The decision and generated request ID are shown.
+ - **Open Test Page** opens the local fixture using the browser's normal tab and navigation code, with a new independent in-memory CefSharp request context. Its synthetic session is separate from the WinForms runner and normal profile storage. Use the page's buttons to evaluate Allow, request protected content and reset that page's session.
+-- **Reset Session** revokes all grants held by this lab server, including open fixture tabs, clears the prior result and returns the window to Not Run. It is disabled during a run; closing the window cancels running work and stops the server.
++- **Reset Session** revokes all grants held by this lab server, including open fixture tabs, clears the prior result and returns the window to Not Run. It is disabled during a run; closing the window cancels running work and stops the server. Server shutdown also cancels pending evaluations independently of the UI, and checks cancellation again before committing an authorization. A failed server startup can be retried with Run Test. A closed window cannot retain a successful report from an interrupted run.
+ - **Export JSON Report** saves the completed report. It contains scenario, provider, validated decision/request ID, UTC start/end timestamps, individual assertions, overall pass/fail and a fixed error code when needed. No cookies, session identifiers, credentials, URLs or arbitrary provider/exception text are included.
+ 
+ Run Test also verifies reset revocation as its final assertion, so its evaluated session is no longer authorized after completion. Passed describes the assertions performed, not an ongoing grant or a real provider approval.
+@@ -32,7 +32,7 @@ Browser lab tabs use [CefSharp's empty CachePath request context](https://cefsha
+ 
+ ## Verification
+ 
+-The existing Windows workflow runs the new `SecurityDecisionTests` as part of the dependency-free console runner and native lab UI/tab tests as part of `AegisBrowser.BrowserTests`, before publish. Endpoint checks use a real Kestrel loopback listener with an automatically assigned port, exercising actual cookie and HTTP behavior. They cover unique request IDs, forged Allow, reset/replay, unrelated sessions, server errors, invalid responses, cancellation and report redaction. Existing privacy, Smart Search, storage, TLS and shutdown regressions remain in CI.
++The existing Windows workflow runs the new `SecurityDecisionTests` as part of the dependency-free console runner and native lab UI/tab tests as part of `AegisBrowser.BrowserTests`, before publish. Endpoint checks use a real Kestrel loopback listener with an automatically assigned port, exercising actual cookie and HTTP behavior. They cover unique request IDs, forged Allow, reset/replay, unrelated sessions, server errors, invalid responses, cancellation and report redaction. The runners also include expiration boundaries, overlapping evaluations, resets during evaluation, active cancellation with a deliberately late provider, repeatable server shutdown, UI startup retry, repeated runs, report-save failures, and UI closure during startup/evaluation. Existing privacy, Smart Search, storage, TLS and shutdown regressions remain in CI. The existence of a test is not a passing result; consult BUILD-STATUS.md for the revision actually executed.
+ 
+ Local commands on Windows:
+ 
+-- 
+2.54.0 (Apple Git-157)
+

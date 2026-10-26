@@ -7,7 +7,7 @@
     <PublishTrimmed>false</PublishTrimmed><PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="CefSharp.WinForms.NETCore" Version="151.3.240" />
+    <PackageReference Include="CefSharp.WinForms.NETCore" Version="154.0.340" />
     <ProjectReference Include="../AegisBrowser/AegisBrowser.csproj" />
   </ItemGroup>
 </Project>

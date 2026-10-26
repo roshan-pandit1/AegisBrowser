@@ -1,0 +1,209 @@
+{
+  "total_count": 1,
+  "jobs": [
+    {
+      "id": 121079183196,
+      "run_id": 40163306372,
+      "workflow_name": "Windows build and release artifact",
+      "head_branch": "feature/security-lab-mock-allow",
+      "run_url": "https://api.github.com/repos/roshan-pandit1/AegisBrowser/actions/runs/40163306372",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOVQmRas8AAAAcMOG3XA",
+      "head_sha": "75fbf6a59b4565fc38f16bf63a73938cb68edb4e",
+      "url": "https://api.github.com/repos/roshan-pandit1/AegisBrowser/actions/jobs/121079183196",
+      "html_url": "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40163306372/job/121079183196",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-25T04:49:52Z",
+      "started_at": "2026-10-25T04:49:54Z",
+      "completed_at": "2026-10-25T04:52:43Z",
+      "name": "build",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-25T04:49:54Z",
+          "completed_at": "2026-10-25T04:49:55Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-25T04:49:55Z",
+          "completed_at": "2026-10-25T04:50:00Z"
+        },
+        {
+          "name": "Install .NET 8 SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-25T04:50:00Z",
+          "completed_at": "2026-10-25T04:50:03Z"
+        },
+        {
+          "name": "Record SDK and source revision",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-25T04:50:03Z",
+          "completed_at": "2026-10-25T04:50:07Z"
+        },
+        {
+          "name": "Restore Windows x64 application",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-25T04:50:07Z",
+          "completed_at": "2026-10-25T04:50:34Z"
+        },
+        {
+          "name": "Build Windows x64 Release",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-25T04:50:34Z",
+          "completed_at": "2026-10-25T04:50:49Z"
+        },
+        {
+          "name": "Restore Windows x64 automated tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-25T04:50:49Z",
+          "completed_at": "2026-10-25T04:50:51Z"
+        },
+        {
+          "name": "Run Windows x64 automated tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-25T04:50:51Z",
+          "completed_at": "2026-10-25T04:50:55Z"
+        },
+        {
+          "name": "Build browser integration tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-25T04:50:55Z",
+          "completed_at": "2026-10-25T04:50:59Z"
+        },
+        {
+          "name": "Browser storage, OAuth, tab and renderer tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-25T04:50:59Z",
+          "completed_at": "2026-10-25T04:51:16Z"
+        },
+        {
+          "name": "Build Chromium filtering tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-25T04:51:16Z",
+          "completed_at": "2026-10-25T04:51:20Z"
+        },
+        {
+          "name": "Run Chromium filtering tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-10-25T04:51:20Z",
+          "completed_at": "2026-10-25T04:51:24Z"
+        },
+        {
+          "name": "Browser privacy settings process restart",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-10-25T04:51:24Z",
+          "completed_at": "2026-10-25T04:51:28Z"
+        },
+        {
+          "name": "Publish self-contained Windows x64 build",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-10-25T04:51:28Z",
+          "completed_at": "2026-10-25T04:51:31Z"
+        },
+        {
+          "name": "Check release payload",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-10-25T04:51:31Z",
+          "completed_at": "2026-10-25T04:51:31Z"
+        },
+        {
+          "name": "Smoke test published Windows application",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 16,
+          "started_at": "2026-10-25T04:51:31Z",
+          "completed_at": "2026-10-25T04:51:38Z"
+        },
+        {
+          "name": "Upload complete publish directory",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17,
+          "started_at": "2026-10-25T04:51:38Z",
+          "completed_at": "2026-10-25T04:52:02Z"
+        },
+        {
+          "name": "Package and verify portable ZIP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18,
+          "started_at": "2026-10-25T04:52:02Z",
+          "completed_at": "2026-10-25T04:52:30Z"
+        },
+        {
+          "name": "Upload portable release candidate and checksum",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19,
+          "started_at": "2026-10-25T04:52:30Z",
+          "completed_at": "2026-10-25T04:52:40Z"
+        },
+        {
+          "name": "Post Install .NET 8 SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 37,
+          "started_at": "2026-10-25T04:52:40Z",
+          "completed_at": "2026-10-25T04:52:40Z"
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 38,
+          "started_at": "2026-10-25T04:52:40Z",
+          "completed_at": "2026-10-25T04:52:42Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 39,
+          "started_at": "2026-10-25T04:52:42Z",
+          "completed_at": "2026-10-25T04:52:42Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/roshan-pandit1/AegisBrowser/check-runs/121079183196",
+      "labels": [
+        "windows-latest"
+      ],
+      "runner_id": 1000000193,
+      "runner_name": "GitHub Actions 1000000193",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    }
+  ]
+}

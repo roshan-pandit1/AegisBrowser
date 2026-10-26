@@ -1,0 +1,263 @@
+From 796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea Mon Sep 17 00:00:00 2001
+From: roshan-pandit1 <roshan10pandit@gmail.com>
+Date: Sat, 24 Oct 2026 21:01:52 +0530
+Subject: [PATCH] Add mock Allow expiration and concurrent reset coverage
+
+---
+ .../SecurityDecisionServer.cs                 | 21 ++--
+ AegisBrowser.Tests/SecurityDecisionTests.cs   | 95 +++++++++++++++++++
+ BUILD-STATUS.md                               | 28 ++++++
+ docs/security-lab-mock-allow.md               | 18 +++-
+ 4 files changed, 147 insertions(+), 15 deletions(-)
+
+diff --git a/AegisBrowser.SecurityLab/SecurityDecisionServer.cs b/AegisBrowser.SecurityLab/SecurityDecisionServer.cs
+index 9eda3ef..eaed4a5 100644
+--- a/AegisBrowser.SecurityLab/SecurityDecisionServer.cs
++++ b/AegisBrowser.SecurityLab/SecurityDecisionServer.cs
+@@ -15,23 +15,24 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+     public const string ProtectedPath = "api/mock-security/protected";
+     public const string ResetPath = "api/mock-security/reset";
+     private const string CookieName = "aegis-mock-session";
+-    private sealed class Session { public bool Allowed; public bool Revoked; public long Revision; public DateTimeOffset Expires = DateTimeOffset.UtcNow.AddMinutes(10); }
++    private sealed class Session(DateTimeOffset now) { public bool Allowed; public bool Revoked; public long Revision; public readonly DateTimeOffset Expires = now.AddMinutes(10); }
+     private readonly ConcurrentDictionary<string, Session> sessions = new();
+     private readonly ConcurrentQueue<EvaluationEvent> evaluations = new();
+     private readonly WebApplication app;
+     private readonly ISecurityDecisionProvider provider;
++    private readonly TimeProvider clock;
+     public Uri Origin { get; private set; } = null!;
+     public Uri PageUrl => new(Origin, PagePath);
+     public EvaluationEvent[] Evaluations => evaluations.ToArray();
+-    private SecurityDecisionServer(WebApplication app, ISecurityDecisionProvider provider) { this.app = app; this.provider = provider; }
++    private SecurityDecisionServer(WebApplication app, ISecurityDecisionProvider provider, TimeProvider clock) { this.app = app; this.provider = provider; this.clock = clock; }
+ 
+-    public static async Task<SecurityDecisionServer> StartAsync(ISecurityDecisionProvider? provider = null, CancellationToken cancellationToken = default)
++    public static async Task<SecurityDecisionServer> StartAsync(ISecurityDecisionProvider? provider = null, CancellationToken cancellationToken = default, TimeProvider? timeProvider = null)
+     {
+         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] });
+         builder.Logging.ClearProviders();
+         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+         var app = builder.Build();
+-        var server = new SecurityDecisionServer(app, provider ?? new MockSecurityDecisionProvider());
++        var server = new SecurityDecisionServer(app, provider ?? new MockSecurityDecisionProvider(), timeProvider ?? TimeProvider.System);
+         app.Use(async (context, next) => {
+             if (context.Request.Host.Host != "127.0.0.1") { context.Response.StatusCode = 403; return; }
+             var origin = context.Request.Headers.Origin.ToString();
+@@ -57,7 +58,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+         app.MapGet("/" + ProtectedPath, (HttpContext context) => {
+             var session = server.Find(context);
+             bool allowed = false;
+-            if (session is not null) lock(session) allowed = session.Allowed && !session.Revoked && session.Expires > DateTimeOffset.UtcNow;
++            if (session is not null) lock(session) allowed = session.Allowed && !session.Revoked && session.Expires > server.clock.GetUtcNow();
+             return allowed ? Results.Json(new { fixture = "protected-fixture", access = true }) : Results.Json(new { access = false }, statusCode: 403);
+         });
+         app.MapPost("/" + EvaluatePath, (Func<HttpContext, Task<IResult>>)server.Evaluate);
+@@ -75,12 +76,12 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+     private async Task<IResult> Evaluate(HttpContext context)
+     {
+         var session = Find(context);
+-        if (session is null || session.Revoked || session.Expires <= DateTimeOffset.UtcNow)
++        if (session is null || session.Revoked || session.Expires <= clock.GetUtcNow())
+         {
+-            foreach(var item in sessions.Where(p => p.Value.Expires <= DateTimeOffset.UtcNow)) sessions.TryRemove(item.Key, out _);
++            foreach(var item in sessions.Where(p => p.Value.Expires <= clock.GetUtcNow())) sessions.TryRemove(item.Key, out _);
+             if (sessions.Count >= 256) return Results.StatusCode(503);
+             var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+-            session = new Session(); sessions[id] = session;
++            session = new Session(clock.GetUtcNow()); sessions[id] = session;
+             context.Response.Cookies.Append(CookieName, id, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/" });
+         }
+         long revision;
+@@ -92,7 +93,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+             var decision = await provider.EvaluateAsync(timeout.Token).WaitAsync(timeout.Token);
+             lock(session)
+             {
+-                if (decision is null || !decision.IsValidAllow || session.Revoked || session.Revision != revision || session.Expires <= DateTimeOffset.UtcNow)
++                if (decision is null || !decision.IsValidAllow || session.Revoked || session.Revision != revision || session.Expires <= clock.GetUtcNow())
+                 { Record("rejected", null); return Results.StatusCode(503); }
+                 session.Allowed = true;
+             }
+@@ -108,7 +109,7 @@ public sealed class SecurityDecisionServer : IAsyncDisposable
+     }
+     private void Record(string outcome, string? requestId)
+     {
+-        evaluations.Enqueue(new(DateTimeOffset.UtcNow, outcome, requestId));
++        evaluations.Enqueue(new(clock.GetUtcNow(), outcome, requestId));
+         while (evaluations.Count > 256) evaluations.TryDequeue(out _);
+     }
+     public void ResetAllSessions()
+diff --git a/AegisBrowser.Tests/SecurityDecisionTests.cs b/AegisBrowser.Tests/SecurityDecisionTests.cs
+index c27eaad..5855441 100644
+--- a/AegisBrowser.Tests/SecurityDecisionTests.cs
++++ b/AegisBrowser.Tests/SecurityDecisionTests.cs
+@@ -56,8 +56,103 @@ internal static class SecurityDecisionTests
+         await using var invalid = await SecurityDecisionServer.StartAsync(new InvalidProvider());
+         var invalidReport = await new SecurityTestRunner().RunAsync(invalid);
+         Check(!invalidReport.Passed && invalid.Evaluations.Single().RequestId is null, "invalid provider response cannot authorize or leak ID");
++        count += await LifecycleChecks();
+         Console.WriteLine($"PASS: {count} mock Allow checks");
+     }
++    private static async Task<int> LifecycleChecks()
++    {
++        var count = 0;
++        void Check(bool ok, string name) { if (!ok) throw new Exception("FAIL: " + name); count++; }
++        static HttpClient Client(SecurityDecisionServer server) => new(new HttpClientHandler {
++            UseProxy = false, AllowAutoRedirect = false, CookieContainer = new CookieContainer()
++        }) { BaseAddress = server.Origin, Timeout = TimeSpan.FromSeconds(10) };
++        static async Task<int> Get(HttpClient client) {
++            using var response = await client.GetAsync(SecurityDecisionServer.ProtectedPath);
++            return (int)response.StatusCode;
++        }
++        var clock = new ManualClock();
++        await using (var expiring = await SecurityDecisionServer.StartAsync(timeProvider: clock))
++        using (var client = Client(expiring))
++        {
++            using var evaluation = await client.PostAsync(SecurityDecisionServer.EvaluatePath, null);
++            Check(evaluation.StatusCode == HttpStatusCode.OK && await Get(client) == 200, "expiration fixture authorized");
++            clock.Advance(TimeSpan.FromMinutes(10) - TimeSpan.FromTicks(1));
++            Check(await Get(client) == 200, "grant valid immediately before expiry");
++            clock.Advance(TimeSpan.FromTicks(1));
++            Check(await Get(client) == 403, "grant denied at exact expiration boundary");
++        }
++        var provider = new GatedProvider();
++        await using var server = await SecurityDecisionServer.StartAsync(provider);
++        using var session = Client(server);
++        async Task Seed() {
++            using var response = await session.PostAsync(SecurityDecisionServer.EvaluatePath, null);
++            Check(response.StatusCode == HttpStatusCode.OK && await Get(session) == 200, "concurrency fixture authorized");
++        }
++        await Seed();
++        var older = provider.HoldNext();
++        var first = session.PostAsync(SecurityDecisionServer.EvaluatePath, null);
++        await older.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
++        var newer = provider.HoldNext();
++        var second = session.PostAsync(SecurityDecisionServer.EvaluatePath, null);
++        await newer.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
++        try
++        {
++            older.Release.TrySetResult();
++            using var stale = await first;
++            Check(stale.StatusCode == HttpStatusCode.ServiceUnavailable && await Get(session) == 403,
++                "superseded evaluation cannot authorize while newer evaluation is pending");
++            newer.Release.TrySetResult();
++            using var current = await second;
++            Check(current.StatusCode == HttpStatusCode.OK && await Get(session) == 200,
++                "latest evaluation may authorize its session");
++        }
++        finally { older.Release.TrySetResult(); newer.Release.TrySetResult(); }
++        foreach (var resetAll in new[] { false, true })
++        {
++            await Seed();
++            var gate = provider.HoldNext();
++            var pending = session.PostAsync(SecurityDecisionServer.EvaluatePath, null);
++            await gate.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
++            try
++            {
++                if (resetAll) server.ResetAllSessions();
++                else {
++                    using var reset = await session.PostAsync(SecurityDecisionServer.ResetPath, null);
++                    Check(reset.StatusCode == HttpStatusCode.NoContent, "reset endpoint succeeds during evaluation");
++                }
++                gate.Release.TrySetResult();
++                using var response = await pending;
++                Check(response.StatusCode == HttpStatusCode.ServiceUnavailable && await Get(session) == 403,
++                    resetAll ? "reset all revokes in-flight evaluation" : "session reset revokes in-flight evaluation");
++            }
++            finally { gate.Release.TrySetResult(); }
++        }
++        return count;
++    }
++    private sealed class ManualClock : TimeProvider
++    {
++        private long ticks = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).Ticks;
++        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
++        public void Advance(TimeSpan duration) => Interlocked.Add(ref ticks, duration.Ticks);
++    }
++    private sealed class GatedProvider : ISecurityDecisionProvider
++    {
++        internal sealed class Gate
++        {
++            internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
++            internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
++        }
++        private readonly System.Collections.Concurrent.ConcurrentQueue<Gate> gates = new();
++        internal Gate HoldNext() { var gate = new Gate(); gates.Enqueue(gate); return gate; }
++        public async Task<SecurityDecision> EvaluateAsync(CancellationToken token)
++        {
++            if (gates.TryDequeue(out var gate)) {
++                gate.Started.TrySetResult();
++                await gate.Release.Task.WaitAsync(token);
++            }
++            return await new MockSecurityDecisionProvider().EvaluateAsync(token);
++        }
++    }
+     private sealed class SwitchableProvider : ISecurityDecisionProvider
+     {
+         public bool Fail;
+diff --git a/BUILD-STATUS.md b/BUILD-STATUS.md
+index bc9787a..4d3afce 100644
+--- a/BUILD-STATUS.md
++++ b/BUILD-STATUS.md
+@@ -1,3 +1,31 @@
++# PR #7 focused review — 2026-10-24
++
++Remote state was fetched again: PR #7 remains open, draft, unmerged and conflict-free at `4a0124cbbaf10faf28ff746a7e5d952feb07668e`, based on main `98a8835575c22268a456a64a5033b65e9d2c7840`. No reviews, inline comments or issue comments were returned. Branch-protection settings could not be read (HTTP 401), so required-check configuration is not independently confirmed.
++
++## Exact-head CI evidence
++
++[Windows run 39971483169](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169), [job 120475026009](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/job/120475026009), is **SUCCESS** on `4a0124cbbaf10faf28ff746a7e5d952feb07668e`. The API reports every step successful: restore/build, console suites, native storage/popup/tab/renderer tests, filtering/CORS, settings restart, self-contained publish, application smoke, ZIP verification and artifact uploads. The companion push run 39971474953 also succeeded on that SHA.
++
++Previously inspected logs for this head recorded 26 Mock Allow, 56 privacy, 49 address/search, 50 policy/profile, 49 native write, 8 storage checks in each of three read processes, 20 filtering/CORS and 3 write + 4 read settings checks; zero compiler warnings/errors; TLS rejection, clean CEF shutdown and 852-file portable verification. In this resumed session the run/job/artifact metadata was reconfirmed, but re-downloading detailed logs returned HTTP 403. These results apply to the named remote head, **not to the subsequent local coverage changes**.
++
++[Portable artifact 12509990722](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/artifacts/12509990722) is listed as unexpired, 274,249,884 bytes. [Publish directory artifact 12509043351](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39971483169/artifacts/12509043351) is also unexpired. Artifact contents were not downloaded again in this session.
++
++## Focused review and pending coverage
++
++The 15-file PR diff retains the existing privacy, Smart Search, profiles and native lifecycle architecture. Program.cs and SecurityHandlers.cs are unchanged by this PR. The server binds IPv4 loopback on an OS-selected port, rejects foreign Host/Origin values, uses cryptographically random HttpOnly session cookies and checks server-side authorization for protected responses. Reset marks sessions revoked and increments their revision; overlapping evaluations can only authorize the current revision. Reports accept only validated request IDs and fixed error labels. No real integration or Chromium security-setting changes were introduced.
++
++No new reproducible production defect was established. Additional coverage is prepared for the exact ten-minute expiration boundary, overlapping evaluations, and reset/reset-all during a pending evaluation. An optional TimeProvider defaults to TimeProvider.System so expiration can be tested without sleeping or changing production lifetimes. Tests use the existing console runner and real ephemeral-port Kestrel fixtures. No existing assertion or timeout was weakened.
++
++**The additional coverage is NOT RUN.** Local `dotnet --info` fails because the SDK is absent on this macOS host. Windows/native execution is unavailable locally. A new Windows CI run on the final pushed commit is required before these changes can be accepted. Active-request cancellation, server shutdown during evaluation, and startup/active-work UI closure still require focused verification; the existing pre-canceled runner and completed-work owner-close tests do not prove those cases.
++
++## Manual acceptance and recommendation
++
++All Security Lab manual UI cases remain **NOT RUN**. Follow the explicit checklist in [milestone instructions](docs/security-lab-mock-allow.md): keyboard access; 100/150/200% scaling; status/decision/IDs; repeated runs; JSON export/cancel/save failures; page denial/Allow/access/reset; close during startup/execution; Smart Search, privacy modes, tabs and profile separation. Prior user-reported Smart Search results do not establish Security Lab acceptance.
++
++Keep PR #7 draft. The existing verified artifact is available for manual testing, but completion of this review is blocked pending publication and Windows verification of the new coverage, remaining lifecycle checks, and user acceptance. Do not mark ready or merge automatically.
++
++---
++
+ # Security Lab milestone 1 — Mock Allow verification (2026-10-23)
+ 
+ [Draft PR #7](https://github.com/roshan-pandit1/AegisBrowser/pull/7), branch `feature/security-lab-mock-allow`, starts from main `98a8835575c22268a456a64a5033b65e9d2c7840`. It is independent of the broader draft PR #6. It remains draft and unmerged.
+diff --git a/docs/security-lab-mock-allow.md b/docs/security-lab-mock-allow.md
+index 2569a8b..4fca775 100644
+--- a/docs/security-lab-mock-allow.md
++++ b/docs/security-lab-mock-allow.md
+@@ -48,10 +48,18 @@ The portable build includes the ASP.NET Core runtime required by the fixture ser
+ 
+ Manual UI verification is **NOT RUN** until a user runs this portable build and reports it. Check:
+ 
+-1. Toolbar entry and keyboard accessibility; 100/150/200% scaling and minimum window size.
+-2. Not Run → Running → Passed, displayed decision/ID, repeated runs with new IDs, and report export/save-error UX.
+-3. Open Test Page, denial before evaluation, Allow response, protected fixture after evaluation, and Reset Session revocation in the open tab.
+-4. Close the lab/owner during startup or a running test; verify responsive UI and normal process termination.
+-5. Normal Smart Search, existing profile data, privacy modes and navigation remain functional with lab tabs open.
++Record the tested commit, Windows version and display scaling with each result. All cases below remain **NOT RUN**:
++
++- [ ] Open Security Lab from the toolbar; reach and activate every control with the keyboard.
++- [ ] At 100%, 150% and 200% scaling, confirm labels, buttons, request IDs and focus indicators remain usable, including at minimum window size.
++- [ ] Observe Not Run → Running → Passed. Confirm Allow and a request ID are displayed.
++- [ ] Repeat Run Test; confirm distinct IDs and no stale result during execution.
++- [ ] Export JSON; compare its assertions and result to the UI, and check that cookies/session secrets are absent.
++- [ ] Cancel the save dialog; then attempt an unwritable destination. Confirm cancellation is harmless and save failure is reported without losing the result.
++- [ ] Open Test Page in a new lab tab. Request protected content before evaluating; expect 403.
++- [ ] Evaluate Allow on the page; request protected content and expect 200.
++- [ ] Reset on the page and through the lab window; protected requests must again return 403.
++- [ ] Close the lab and its browser owner during startup and active execution. Confirm responsiveness, no successful result from canceled work, and clean process termination.
++- [ ] Use Smart Search, Back/Forward, tabs, all privacy modes and normal profiles while lab tabs are open. Confirm normal profile data remains separate.
+ 
+ Do not treat automation, an Allow simulation or prior Smart Search acceptance as manual acceptance of this milestone.
+-- 
+2.54.0 (Apple Git-157)
+

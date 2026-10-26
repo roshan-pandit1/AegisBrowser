@@ -1,0 +1,37 @@
+diff --git a/BUILD-STATUS.md b/BUILD-STATUS.md
+index 4d3afce..d15b910 100644
+--- a/BUILD-STATUS.md
++++ b/BUILD-STATUS.md
+@@ -1,3 +1,32 @@
++# PR #7 recovery verification — 2026-10-24
++
++The user successfully pushed review commit `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. The remote branch SHA was independently checked with `git ls-remote`; PR #7 remains draft and unmerged at that exact head. The original dirty release/windows-rc workspace was preserved. The isolated review checkout already contained the patch; it was not applied twice. Parent SHA, four-file scope, reverse-patch applicability and `git diff --check` were verified.
++
++## Windows CI on the recovered commit
++
++[Run 40109058867](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867), [job 120916744523](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/job/120916744523), completed **SUCCESS** for `796acfb857e1b8d40b487bd2cad6d04d8ed5a5ea`. The GitHub API reports every job step successful:
++
++- .NET 8 setup, Windows x64 restore and Release build.
++- Existing console suites, including the new expiration-boundary, overlapping-evaluation and reset-during-evaluation coverage.
++- Native storage, OAuth, tabs and renderer tests, with the existing shutdown/assertion gates.
++- Chromium filtering/CORS and settings process-restart checks.
++- Self-contained win-x64 publish, payload validation and published-application smoke.
++- Portable ZIP generation/verification and both artifact uploads.
++
++[Portable artifact 12566046409](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/artifacts/12566046409): 274,252,045 bytes, listed as unexpired. [Complete publish directory 12565678692](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/40109058867/artifacts/12565678692): 273,416,606 bytes, listed as unexpired.
++
++Evidence limitation: detailed job-log retrieval returned HTTP 403. Run conclusion, individual step conclusions and artifact metadata were verified, but assertion counts, compiler-warning totals, inner ZIP checksum and payload file counts were not independently re-read from this run's logs. No artifact download/extraction was performed locally. Local dotnet remains unavailable (`command not found`); no local test pass is claimed.
++
++This documentation update follows the verified commit and is initially local only. It does not claim CI verification of a later documentation commit. Earlier sections below are historical, including statements that the coverage had not yet been pushed or run.
++
++## Remaining acceptance
++
++All Security Lab manual UI checks remain **NOT RUN**: toolbar/keyboard access, 100/150/200% scaling, status and request-ID display, repeated runs, JSON export/cancel/save failures, protected page denial/Allow/reset, closure during startup/active work, and normal browsing/privacy/profile compatibility. Follow [the checklist](docs/security-lab-mock-allow.md). Existing automation does not substitute for these human-operated checks. Active-request cancellation and shutdown-during-evaluation coverage gaps described below remain open; this successful run does not add those assertions.
++
++Recommendation: the recovered portable artifact is ready for manual testing. Keep PR #7 draft pending manual acceptance, remaining focused lifecycle verification and full log review. No automatic merge or ready-for-review transition was performed. Chromium security protections and existing tests were not weakened.
++
++---
++
+ # PR #7 focused review — 2026-10-24
+ 
+ Remote state was fetched again: PR #7 remains open, draft, unmerged and conflict-free at `4a0124cbbaf10faf28ff746a7e5d952feb07668e`, based on main `98a8835575c22268a456a64a5033b65e9d2c7840`. No reviews, inline comments or issue comments were returned. Branch-protection settings could not be read (HTTP 401), so required-check configuration is not independently confirmed.

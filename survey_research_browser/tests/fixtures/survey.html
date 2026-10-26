@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Synthetic survey fixture</title>
+<h1>Authorized local test survey</h1><p>Synthetic responses only.</p>
+<form onsubmit="event.preventDefault();document.querySelector('#done').hidden=false;this.hidden=true">
+<label>Test note <input name="note" required></label>
+<label>Comments <textarea name="comments"></textarea></label>
+<fieldset><legend>Test option</legend><label><input type="radio" name="option" value="alpha" required>Alpha</label><label><input type="radio" name="option" value="beta">Beta</label></fieldset>
+<fieldset><legend>Test flags</legend><label><input type="checkbox" name="flags" value="one">One</label><label><input type="checkbox" name="flags" value="two">Two</label></fieldset>
+<label>Category <select name="category" required><option value="">Select</option><option value="a">A</option><option value="b">B</option></select></label>
+<label>Count <input type="number" name="count" min="1" max="10" required></label>
+<label>Date <input type="date" name="day" required></label>
+<label>Rating <input type="range" name="rating" min="1" max="5"></label>
+<button type="submit">Submit synthetic test</button></form>
+<div id="done" data-survey-complete="true" hidden>Fixture received. Synthetic test complete.</div></html>

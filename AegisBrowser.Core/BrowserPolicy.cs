@@ -19,8 +19,34 @@ public static class BrowserPolicy
         Path.Combine(root, "profile-" + ReadProfile(["--profile=" + profile]));
 
     public static bool IsWebUrl(string value) =>
-        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
+        !string.IsNullOrEmpty(value) && !value.Any(char.IsControl) && !value.Contains('\\')
+        && Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
         && !string.IsNullOrEmpty(uri.Host) && string.IsNullOrEmpty(uri.UserInfo);
+
+    // Compare parsed origins, never suffixes or display strings; ports remain significant.
+    public static string? PermissionOrigin(string value)
+    {
+        if (!IsWebUrl(value)) return null;
+        var uri = new Uri(value);
+        if (uri.Scheme != "https" && !uri.IsLoopback) return null;
+        if (uri.Host.Equals("aegis-diagnostics.invalid", StringComparison.OrdinalIgnoreCase)) return null;
+        var host = SiteClassifier.Host(value);
+        return host is null ? null : new UriBuilder(uri.Scheme, host, uri.IsDefaultPort ? -1 : uri.Port).Uri.GetLeftPart(UriPartial.Authority);
+    }
+
+    public static bool CanPromptPermission(string requestingUrl, string topLevelUrl)
+    {
+        var origin = PermissionOrigin(requestingUrl);
+        return origin is not null && origin == PermissionOrigin(topLevelUrl);
+    }
+
+    public static string DisplayOrigin(string url) =>
+        IsWebUrl(url) ? new Uri(url).GetLeftPart(UriPartial.Authority) : "unavailable origin";
+
+    public static bool CanServeDiagnostics(string url, string method, bool mainFrame, bool mainResource) =>
+        mainFrame && mainResource && method == "GET" && IsWebUrl(url)
+        && new Uri(url) is { Scheme: "https", IdnHost: "aegis-diagnostics.invalid", IsDefaultPort: true,
+            AbsolutePath: "/", Query: "" };
 
     public static string? NormalizeAddress(string input)
     {

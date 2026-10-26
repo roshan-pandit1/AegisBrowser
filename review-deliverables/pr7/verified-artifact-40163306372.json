@@ -1,0 +1,41 @@
+{
+  "sha256": "30f13afe906161ed5900654ca6b5f510754e35aa29bb643e3ef565fdbb89a10d",
+  "sidecar": "30f13afe906161ed5900654ca6b5f510754e35aa29bb643e3ef565fdbb89a10d",
+  "matches": true,
+  "crc_error": null,
+  "file_count": 852,
+  "version": "Aegis Browser v0.1.0 release candidate\r\nSource: d156032f4b874d5f14ac78bad4cfa00a2563a6a8\r\nTarget: win-x64, self-contained\r\nManual release acceptance remains required. See BUILD-STATUS.md.\r\n",
+  "required": {
+    "AegisBrowser.exe": true,
+    "CefSharp.BrowserSubprocess.exe": true,
+    "libcef.dll": true,
+    "coreclr.dll": true,
+    "hostfxr.dll": true,
+    "hostpolicy.dll": true,
+    "AegisBrowser.SecurityLab.dll": true,
+    "Microsoft.AspNetCore.Server.Kestrel.Core.dll": true
+  },
+  "unsafe_paths": [],
+  "pe_machine": {
+    "AegisBrowser.exe": "0x8664",
+    "CefSharp.BrowserSubprocess.exe": "0x8664",
+    "libcef.dll": "0x8664"
+  },
+  "suspicious_files": [],
+  "run_id": 40163306372,
+  "branch_head": "75fbf6a59b4565fc38f16bf63a73938cb68edb4e",
+  "build_checkout": "d156032f4b874d5f14ac78bad4cfa00a2563a6a8",
+  "matching_tree": "a1cc73b4ef97a7fb9c709e8275d6ef977e04f9c9",
+  "extracted_files_verified": 852,
+  "nine_assertions": {
+    "ordinary profile cannot reuse lab authorization at the same origin": "PASS in downloaded CI log",
+    "ordinary profile cannot read lab localStorage": "PASS in downloaded CI log",
+    "normal storage writes do not replace lab storage": "PASS in downloaded CI log",
+    "second lab tab cannot reuse first tab authorization": "PASS in downloaded CI log",
+    "second lab tab has independent localStorage": "PASS in downloaded CI log",
+    "closing another lab tab preserves the authorized session": "PASS in downloaded CI log",
+    "lab tab closure preserves ordinary profile storage": "PASS in downloaded CI log",
+    "ordinary search accepted while lab session is active": "PASS in downloaded CI log",
+    "ordinary search does not revoke or replace lab session": "PASS in downloaded CI log"
+  }
+}

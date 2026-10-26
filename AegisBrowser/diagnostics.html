@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Vr16WnsRDYXpmpdDKnVzCiZXqq9mxdyGweG4e2TxPiU='; style-src 'sha256-vqvBJtFIvTyLNPQhSyytLy/wqz7DM/56idLI0X6a04Q='; connect-src 'none'; img-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aegis · Local diagnostics</title>
 <style>
@@ -13,7 +13,7 @@
 <small>AEGIS BROWSER / LOCAL DIAGNOSTICS</small>
 <h1>What this browser exposes</h1>
 <p>This embedded page reads browser properties locally. It makes no network requests and stores no report. Values are observations, not an anonymity score. Profiles separate stored browsing data; they do not change your device or network identity.</p>
-<p>Camera, microphone, screen sharing, location and other permission requests are denied. Downloads are disabled.</p>
+<p>Supported secure same-origin camera, microphone, location and notification requests use Chromium consent prompts. Other permissions, screen capture and downloads are denied. This page requests no permissions.</p>
 <button id="refresh">Refresh report</button>
 <pre id="result" aria-live="polite">Collecting local observations…</pre>
 <script>

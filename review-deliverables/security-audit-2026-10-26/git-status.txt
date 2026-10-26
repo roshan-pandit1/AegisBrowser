@@ -1,0 +1,60 @@
+ M .github/workflows/windows.yml
+ M .gitignore
+ M AegisBrowser.Core/BrowserPolicy.cs
+ M AegisBrowser.Core/NetworkFilters.cs
+ M AegisBrowser.Core/PrivacySession.cs
+ M AegisBrowser.Core/SiteClassifier.cs
+ M AegisBrowser.FilteringTests/AegisBrowser.FilteringTests.csproj
+ M AegisBrowser.FilteringTests/Program.cs
+ M AegisBrowser.Tests/AegisBrowser.Tests.csproj
+ M AegisBrowser.Tests/Program.cs
+ M AegisBrowser/AegisBrowser.csproj
+ M AegisBrowser/AssemblyInfo.cs
+ M AegisBrowser/FilteringResourceHandler.cs
+ M AegisBrowser/MainForm.cs
+ M AegisBrowser/PrivacyForm.cs
+ M AegisBrowser/Program.cs
+ M AegisBrowser/README.md
+ M AegisBrowser/SecurityHandlers.cs
+ M AegisBrowser/diagnostics.html
+ M BUILD-STATUS.md
+ M README.md
+ M docs/privacy.md
+ M docs/windows-acceptance-v0.1.md
+ M tests/acceptance/index.html
+ M tests/acceptance/windows-smoke.ps1
+?? .gitattributes
+?? .github/dependabot.yml
+?? .github/workflows/dependency-audit.yml
+?? AegisBrowser.BrowserTests/
+?? AegisBrowser.Core/AddressInputResolver.cs
+?? AegisBrowser.Core/AssemblyInfo.cs
+?? AegisBrowser.Core/FilterListImport.cs
+?? AegisBrowser.Core/ResourceClassification.cs
+?? AegisBrowser.Core/SearchSettingsStore.cs
+?? AegisBrowser.FilteringTests/ReleaseChecks.cs
+?? AegisBrowser.Lab/
+?? AegisBrowser.Tests/AddressTests.cs
+?? AegisBrowser.Tests/AuditRegressionTests.cs
+?? AegisBrowser.Tests/FilteringBenchmarks.cs
+?? AegisBrowser.Tests/LabTests.cs
+?? AegisBrowser/BrowserView.cs
+?? AegisBrowser/LabDashboard.cs
+?? AegisBrowser/LabRequests.cs
+?? AegisBrowser/SearchSettingsForm.cs
+?? Directory.Build.props
+?? SECURITY.md
+?? docs/INSTALL-WINDOWS.md
+?? docs/RELEASE-CHECKLIST.md
+?? docs/REMEDIATION-REPORT.md
+?? docs/SECURITY-ARCHITECTURE.md
+?? docs/SECURITY-LIMITATIONS.md
+?? docs/TEST-MATRIX.md
+?? docs/THREAT-MODEL.md
+?? docs/authorized-lab.md
+?? docs/engineering-review.md
+?? docs/release-review.md
+?? docs/search.md
+?? review-deliverables/
+?? scripts/
+?? survey_research_browser/

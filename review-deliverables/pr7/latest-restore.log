@@ -1,0 +1,53 @@
+Build started 10/24/2026 10:10:35 PM.
+Project "/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj" on node 1 (Restore target(s)).
+_GetAllRestoreProjectPathItems:
+  Determining projects to restore...
+CSSM_ModuleLoad(): One or more parameters passed to a function were not valid.
+Restore:
+  X.509 certificate chain validation will use the fallback certificate bundle at '/private/tmp/aegis-dotnet/sdk/8.0.426/trustedroots/codesignctl.pem'.
+  X.509 certificate chain validation will use the fallback certificate bundle at '/private/tmp/aegis-dotnet/sdk/8.0.426/trustedroots/timestampctl.pem'.
+  Restoring packages for /private/tmp/aegis-pr7-git/AegisBrowser.Core/AegisBrowser.Core.csproj...
+  Restoring packages for /private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj...
+  Restoring packages for /private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj...
+  Restoring packages for /private/tmp/aegis-pr7-git/AegisBrowser/AegisBrowser.csproj...
+/private/tmp/aegis-pr7-git/AegisBrowser.Core/AegisBrowser.Core.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+/private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+/private/tmp/aegis-pr7-git/AegisBrowser/AegisBrowser.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.
+/private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+/private/tmp/aegis-pr7-git/AegisBrowser.Core/AegisBrowser.Core.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+/private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+/private/tmp/aegis-pr7-git/AegisBrowser.Core/AegisBrowser.Core.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+  Writing assets file to disk. Path: /private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/obj/project.assets.json
+  Writing assets file to disk. Path: /private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/obj/project.assets.json
+  Writing assets file to disk. Path: /private/tmp/aegis-pr7-git/AegisBrowser.Core/obj/project.assets.json
+  Writing assets file to disk. Path: /private/tmp/aegis-pr7-git/AegisBrowser/obj/project.assets.json
+  Failed to restore /private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj (in 44 ms).
+  Failed to restore /private/tmp/aegis-pr7-git/AegisBrowser/AegisBrowser.csproj (in 44 ms).
+  Failed to restore /private/tmp/aegis-pr7-git/AegisBrowser.Core/AegisBrowser.Core.csproj (in 44 ms).
+  Failed to restore /private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj (in 44 ms).
+  
+  NuGet Config files used:
+      /private/tmp/aegis-dotnet-home/.nuget/NuGet/NuGet.Config
+  
+  Feeds used:
+      https://api.nuget.org/v3/index.json
+Done Building Project "/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj" (Restore target(s)) -- FAILED.
+
+Build FAILED.
+
+"/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj" (Restore target) (1) ->
+(Restore target) -> 
+  /private/tmp/aegis-pr7-git/AegisBrowser.Core/AegisBrowser.Core.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+  /private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+  /private/tmp/aegis-pr7-git/AegisBrowser/AegisBrowser.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+  /private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.
+  /private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+  /private/tmp/aegis-pr7-git/AegisBrowser.Core/AegisBrowser.Core.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+  /private/tmp/aegis-pr7-git/AegisBrowser.SecurityLab/AegisBrowser.SecurityLab.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+  /private/tmp/aegis-pr7-git/AegisBrowser.Core/AegisBrowser.Core.csproj : error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json. [/private/tmp/aegis-pr7-git/AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj]
+
+    0 Warning(s)
+    8 Error(s)
+
+Time Elapsed 00:00:00.37

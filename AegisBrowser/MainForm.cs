@@ -12,11 +12,22 @@ public sealed class MainForm : Form
     private readonly Button back;
     private readonly Button forward;
     private readonly Button reload;
-    private bool closing;
+    private volatile bool closing;
+    private bool closeComplete;
     private readonly PrivacySession privacy;
     private readonly PrivacySettingsStore? privacyStore;
     private PrivacyForm? privacyWindow;
-    private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
+    private readonly NavigationDiagnostics navigationDiagnostics = new();
+    private NavigationDiagnosticsForm? navigationDiagnosticsWindow;
+    private readonly Dictionary<BrowserView, BrowserDiagnosticAttachment> diagnosticAttachments = new();
+    private SearchSettings searchSettings = new();
+    private readonly SearchSettingsStore? searchStore;
+    private SearchSettingsForm? searchWindow;
+    internal string SearchEngineId => searchSettings.EngineId;
+    private readonly HashSet<TabPage> retiring = new();
+    private readonly HashSet<TabPage> releasing = new();
+    private ChromiumWebBrowser? Current => tabs.SelectedTab is { } page && !retiring.Contains(page)
+        ? page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault() : null;
 
     public MainForm(string profile, string? profilePath = null)
     {
@@ -24,20 +35,24 @@ public sealed class MainForm : Form
         string? privacyWarning = null;
         if (profilePath is not null)
         {
+            searchStore = new(profilePath);
+            try { searchSettings = searchStore.Load(); }
+            catch (IOException ex) { Shown += (_, _) => MessageBox.Show(this, ex.Message, "Search settings warning"); }
             privacyStore = new(profilePath);
             try { configuration = privacyStore.Load(); }
             catch (IOException ex) { privacyWarning = ex.Message; }
         }
         privacy = new(configuration);
         if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
+        AutoScaleMode = AutoScaleMode.Dpi;
         Text = $"Aegis Browser — {profile}";
         Width = 1250;
         Height = 850;
         MinimumSize = new Size(750, 450);
-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 9 };
-        for (var i = 0; i < 9; i++)
+        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 10, AutoScroll = true };
+        for (var i = 0; i < 10; i++)
             bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
-                i == 3 ? 100 : i >= 6 ? 100 : 48));
+                i == 3 ? 100 : i >= 6 ? 85 : i == 2 ? 68 : 40));
         back = MakeButton("←", () => Current?.Back());
         forward = MakeButton("→", () => Current?.Forward());
         reload = MakeButton("Reload", () => { if (Current?.IsLoading == true) Current.Stop(); else Current?.Reload(); });
@@ -52,31 +67,94 @@ public sealed class MainForm : Form
         bar.Controls.Add(MakeButton("Privacy", () =>
         {
             if (privacyWindow is null || privacyWindow.IsDisposed)
-                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save));
+                privacyWindow = new PrivacyForm(privacy, Current?.Address,
+                    config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save),
+                    (config, token) => privacy.ApplyAsync(config, privacyStore is null ? null : privacyStore.Save, token));
             privacyWindow.Show(this); privacyWindow.BringToFront();
         }), 8, 0);
+        bar.Controls.Add(MakeButton("Search", () =>
+        {
+            if (searchWindow is null || searchWindow.IsDisposed)
+                searchWindow = new SearchSettingsForm(searchSettings, settings =>
+                {
+                    searchStore?.Save(settings); // Publish only after persistence succeeds.
+                    searchSettings = settings;
+                    address.PlaceholderText = "Search " + SearchEngines.Get(settings.EngineId).Name + " or enter address";
+                });
+            searchWindow.Show(this); searchWindow.BringToFront();
+        }), 9, 0);
+        address.AccessibleName = "Search or enter address";
+        address.PlaceholderText = "Search " + SearchEngines.Get(searchSettings.EngineId).Name + " or enter address";
         address.KeyDown += (_, e) =>
         {
             if (e.KeyCode != Keys.Enter) return;
             e.SuppressKeyPress = true;
-            var url = BrowserPolicy.NormalizeAddress(address.Text);
-            if (url is null) status.Text = "Enter an HTTP(S) address without credentials, or aegis:diagnostics.";
-            else Current?.Load(url);
+            SubmitAddress(address.Text);
         };
+        address.Leave += (_, _) => UpdateNavigation();
         var bottom = new StatusStrip();
-        bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: deny all |"));
+        bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: ask by origin |"));
         bottom.Items.Add(status);
+        var traceButton = new ToolStripButton("Local trace");
+        traceButton.Click += (_, _) =>
+        {
+            if (navigationDiagnosticsWindow is null || navigationDiagnosticsWindow.IsDisposed)
+                navigationDiagnosticsWindow = new NavigationDiagnosticsForm(navigationDiagnostics);
+            navigationDiagnosticsWindow.Show(this); navigationDiagnosticsWindow.BringToFront();
+        };
+        bottom.Items.Add(traceButton);
         Controls.Add(tabs);
         Controls.Add(bar);
         Controls.Add(bottom);
         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
-        FormClosing += (_, _) => closing = true;
+        FormClosing += (_, e) =>
+        {
+            if (closeComplete) return;
+            e.Cancel = true;
+            if (closing) return;
+            closing = true;
+            foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
+            {
+                retiring.Add(page);
+                var web = page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
+                if (web is null || web.IsDisposed) { retiring.Remove(page); continue; }
+                var lifetime = (SafePopups)web.LifeSpanHandler;
+                lifetime.ClosePopups();
+                if (lifetime.OwnerCloseReady.IsCompletedSuccessfully) PostLifetime(() => _ = RetirePageAsync(page, (BrowserView)web));
+                else if (web.IsBrowserInitialized) web.GetBrowserHost().CloseBrowser(true);
+            }
+            if (retiring.Count == 0) { closeComplete = true; BeginInvoke((Action)Close); }
+        };
+        FormClosed += (_, _) =>
+        {
+            navigationDiagnostics.Enabled = false;
+            navigationDiagnosticsWindow?.Dispose();
+            foreach (var attachment in diagnosticAttachments.Values) attachment.Dispose();
+            diagnosticAttachments.Clear();
+            foreach (var page in retiring.ToArray()) page.Dispose();
+            retiring.Clear();
+        };
+    }
+
+    internal bool SubmitAddress(string input)
+    {
+        var result = AddressInputResolver.Resolve(input, searchSettings.EngineId);
+        if (result.Kind == AddressInputKind.Empty) return false;
+        if (result.Kind == AddressInputKind.Rejected)
+        {
+            status.Text = "Address rejected. Use HTTP(S), aegis:diagnostics or about:blank; credentials and other schemes are not supported.";
+            return false;
+        }
+        if (Current is not { } current || closing) return false;
+        current.Load(result.Url!);
+        return true;
     }
 
     private static Button MakeButton(string text, Action action)
     {
-        var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = text };
+        var name = text switch { "←" => "Back", "→" => "Forward", "+" => "New tab", "×" => "Close tab", _ => text };
+        var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = name };
         button.Click += (_, _) => action();
         return button;
     }
@@ -89,16 +167,34 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { /* Handle destroyed during shutdown. */ }
     }
 
+    private void PostLifetime(Action action)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke((Action)(() => { if (!IsDisposed) action(); })); }
+        catch (InvalidOperationException) { }
+    }
+
     private void NewTab(string url)
     {
         if (closing) return;
-        var page = new TabPage("New tab");
-        var browser = new ChromiumWebBrowser(url) { Dock = DockStyle.Fill };
-        void Report(string message) => Post(() => { if (tabs.SelectedTab == page) status.Text = message; });
-        void Open(string target) => Post(() => { if (!page.IsDisposed) NewTab(target); });
-        browser.PermissionHandler = new DenyPermissions(Report);
-        browser.RequestHandler = new SafeRequests(Open, Report, privacy.Evaluate);
-        browser.LifeSpanHandler = new SafePopups(Open, Report);
+        var page = new TabPage("New tab") { Tag = "Loading…" };
+        var browser = new BrowserView(url) { Dock = DockStyle.Fill };
+        void Report(string message) => Post(() =>
+        {
+            if (page.IsDisposed) return;
+            page.Tag = message;
+            if (tabs.SelectedTab == page) status.Text = message;
+        });
+        browser.PermissionHandler = new OriginPermissions(Report);
+        browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate, diagnostics: navigationDiagnostics);
+        var popups = new SafePopups(Report, () => PostLifetime(() => _ = RetirePageAsync(page, browser)));
+        browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
+        {
+            if (retiring.Contains(page) && browser.IsBrowserInitialized)
+                browser.GetBrowserHost().CloseBrowser(true);
+        });
+        browser.LifeSpanHandler = popups;
+        page.Disposed += (_, _) => popups.ClosePopups();
         browser.DownloadHandler = new DenyDownloads(Report);
         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
@@ -110,19 +206,54 @@ public sealed class MainForm : Form
             page.Text = title.Length > 28 ? title[..28] + "…" : title;
             page.ToolTipText = title;
         });
+        browser.FrameLoadStart += (_, e) => { if (e.Frame.IsMain) Report("Loading…"); };
+        browser.FrameLoadEnd += (_, e) =>
+        {
+            if (!e.Frame.IsMain) return;
+            if (e.HttpStatusCode >= 400) Report($"HTTP {e.HttpStatusCode} from {BrowserPolicy.DisplayOrigin(e.Url)}. Reload to retry.");
+            else if (e.HttpStatusCode is >= 200 and < 400) Report("Ready");
+        };
         browser.LoadError += (_, e) =>
         {
-            if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Page failed to load: {e.ErrorCode}");
+            if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Load failed: {e.ErrorCode} at {BrowserPolicy.DisplayOrigin(e.FailedUrl)}. Reload to retry.");
         };
+        var diagnosticAttachment = new BrowserDiagnosticAttachment(browser, navigationDiagnostics);
+        diagnosticAttachments.Add(browser, diagnosticAttachment);
+        browser.Disposed += (_, _) => { diagnosticAttachment.Dispose(); diagnosticAttachments.Remove(browser); };
         page.Controls.Add(browser);
         tabs.TabPages.Add(page);
         tabs.SelectedTab = page;
     }
 
+    private async Task RetirePageAsync(TabPage page, BrowserView browser)
+    {
+        if (page.IsDisposed || !releasing.Add(page)) return;
+        try
+        {
+            await browser.ReleaseNativeHostAsync();
+            if (diagnosticAttachments.Remove(browser, out var attachment)) attachment.Dispose();
+            retiring.Remove(page);
+            tabs.TabPages.Remove(page);
+            page.Dispose();
+            if (closing && retiring.Count == 0) { closeComplete = true; Close(); }
+            else if (!closing && tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
+        }
+        catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
+        {
+            // Keep the native owner alive; report on the UI thread, including during shutdown.
+            closing = false;
+            page.Tag = "Browser close did not complete. Retry Close; the native owner has been retained.";
+            status.Text = (string)page.Tag;
+        }
+        finally { releasing.Remove(page); }
+    }
+
     private void UpdateNavigation()
     {
         var browser = Current;
-        address.Text = browser?.Address ?? "";
+        // Loading events must not overwrite an address the user is typing.
+        if (!address.Focused) address.Text = browser?.Address ?? "";
+        status.Text = tabs.SelectedTab?.Tag as string ?? "Ready";
         back.Enabled = browser?.CanGoBack == true;
         forward.Enabled = browser?.CanGoForward == true;
         reload.Text = browser?.IsLoading == true ? "Stop" : "Reload";
@@ -131,9 +262,17 @@ public sealed class MainForm : Form
     private void CloseTab()
     {
         if (tabs.SelectedTab is not { } page) return;
-        tabs.TabPages.Remove(page);
-        page.Dispose();
-        if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
+        var browser = page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
+        if (browser is null || browser.IsDisposed) return;
+        if (!retiring.Add(page))
+        {
+            if (((SafePopups)browser.LifeSpanHandler).OwnerCloseReady.IsCompletedSuccessfully)
+                _ = RetirePageAsync(page, (BrowserView)browser);
+            return;
+        }
+        ((SafePopups)browser.LifeSpanHandler).ClosePopups();
+        // Keep the TabPage parent HWND alive until CEF reports DoClose readiness; disposing during creation can destroy a window CEF still uses.
+        if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>

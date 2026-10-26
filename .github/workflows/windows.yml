@@ -15,6 +15,14 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Source security gates and gate regression tests
+        run: |
+          python scripts/security_audit.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s scripts -p test_security_audit.py -v
       - name: Record SDK and source revision
         run: |
           dotnet --info
@@ -22,24 +30,66 @@ jobs:
           git rev-parse HEAD
       - name: Restore Windows x64 application
         run: dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
+      - name: Record transitive dependency vulnerability evidence
+        run: |
+          New-Item -ItemType Directory -Force artifacts/audit | Out-Null
+          dotnet list AegisBrowser/AegisBrowser.csproj package --include-transitive --vulnerable --format json | Set-Content artifacts/audit/vulnerabilities.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Windows x64 Release
         run: dotnet build AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 -p:SelfContained=true --no-restore
       - name: Restore Windows x64 automated tests
         run: dotnet restore AegisBrowser.Tests/AegisBrowser.Tests.csproj -r win-x64
       - name: Run Windows x64 automated tests
         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
+      - name: Build browser integration tests
+        run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Browser storage, OAuth, tab and renderer tests
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-browser-tests-' + [guid]::NewGuid().ToString('N'))
+          # Reopen the same persistent profiles repeatedly to expose close races.
+          foreach ($phase in @('write', 'read', 'read', 'read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
+            if ($code -ne 0) { throw "Browser $phase phase exited with $code" }
+            if (!(($output -join "`n") -match "PASS: \d+ browser integration checks \($phase\)")) {
+              throw "Browser $phase phase did not report suite completion"
+            }
+            if (!(($output -join "`n") -match "PASS: CEF shutdown completed \($phase\)")) {
+              throw "Browser $phase phase did not complete CEF shutdown"
+            }
+          }
       - name: Build Chromium filtering tests
+        if: ${{ !cancelled() }}
         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
       - name: Run Chromium filtering tests
+        if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: |
           $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
           if ($code -ne 0) { throw "Chromium filtering tests exited with $code" }
           if (!(($output -join "`n") -match 'PASS: \d+ Chromium filtering checks')) { throw 'Chromium filtering suite did not complete' }
+      - name: Browser privacy settings process restart
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-settings-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('write', 'read')) {
+            $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
+            if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ Chromium filtering checks')) { throw "Privacy restart $phase failed or incomplete" }
+          }
       - name: Publish self-contained Windows x64 build
         run: dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -o artifacts/win-x64
+      - name: Inspect payload and generate package/file SBOM
+        run: python scripts/security_audit.py --assets AegisBrowser/obj/project.assets.json --publish artifacts/win-x64 --sbom artifacts/win-x64/aegis-sbom.cdx.json
       - name: Check release payload
         run: |
           foreach ($file in @('AegisBrowser.exe', 'CefSharp.BrowserSubprocess.exe', 'libcef.dll', 'coreclr.dll')) {
@@ -47,9 +97,26 @@ jobs:
           }
       - name: Smoke test published Windows application
         run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64
+      - name: Smoke test published authorized lab
+        run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64 -Lab
       - name: Upload complete publish directory
         uses: actions/upload-artifact@v4
         with:
           name: AegisBrowser-win-x64
           path: artifacts/win-x64/
           if-no-files-found: error
+      - name: Package and verify portable ZIP
+        run: ./scripts/package-portable.ps1
+      - name: Upload portable release candidate and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: AegisBrowser-portable-win-x64
+          path: artifacts/portable/
+          if-no-files-found: error
+      - name: Upload dependency audit evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: AegisBrowser-dependency-audit
+          path: artifacts/audit/
+          if-no-files-found: warn

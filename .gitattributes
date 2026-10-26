@@ -1,0 +1,2 @@
+# Inline CSP hashes must use the same bytes on every checkout.
+AegisBrowser/diagnostics.html text eol=lf

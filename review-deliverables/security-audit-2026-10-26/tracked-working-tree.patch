@@ -1,0 +1,1718 @@
+diff --git a/.github/workflows/windows.yml b/.github/workflows/windows.yml
+index d2d0532..e41bfe6 100644
+--- a/.github/workflows/windows.yml
++++ b/.github/workflows/windows.yml
+@@ -15,6 +15,14 @@ jobs:
+         uses: actions/setup-dotnet@v4
+         with:
+           dotnet-version: '8.0.x'
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.12'
++      - name: Source security gates and gate regression tests
++        run: |
++          python scripts/security_audit.py
++          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++          python -m unittest discover -s scripts -p test_security_audit.py -v
+       - name: Record SDK and source revision
+         run: |
+           dotnet --info
+@@ -22,24 +30,66 @@ jobs:
+           git rev-parse HEAD
+       - name: Restore Windows x64 application
+         run: dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
++      - name: Record transitive dependency vulnerability evidence
++        run: |
++          New-Item -ItemType Directory -Force artifacts/audit | Out-Null
++          dotnet list AegisBrowser/AegisBrowser.csproj package --include-transitive --vulnerable --format json | Set-Content artifacts/audit/vulnerabilities.json
++          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+       - name: Build Windows x64 Release
+         run: dotnet build AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 -p:SelfContained=true --no-restore
+       - name: Restore Windows x64 automated tests
+         run: dotnet restore AegisBrowser.Tests/AegisBrowser.Tests.csproj -r win-x64
+       - name: Run Windows x64 automated tests
+         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
++      - name: Build browser integration tests
++        run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
++      - name: Browser storage, OAuth, tab and renderer tests
++        timeout-minutes: 5
++        run: |
++          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-browser-tests-' + [guid]::NewGuid().ToString('N'))
++          # Reopen the same persistent profiles repeatedly to expose close races.
++          foreach ($phase in @('write', 'read', 'read', 'read')) {
++            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
++            $code = $LASTEXITCODE
++            $output | Write-Output
++            if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
++            if ($code -ne 0) { throw "Browser $phase phase exited with $code" }
++            if (!(($output -join "`n") -match "PASS: \d+ browser integration checks \($phase\)")) {
++              throw "Browser $phase phase did not report suite completion"
++            }
++            if (!(($output -join "`n") -match "PASS: CEF shutdown completed \($phase\)")) {
++              throw "Browser $phase phase did not complete CEF shutdown"
++            }
++          }
+       - name: Build Chromium filtering tests
++        if: ${{ !cancelled() }}
+         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
+       - name: Run Chromium filtering tests
++        if: ${{ !cancelled() }}
+         timeout-minutes: 5
+         run: |
+           $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe 2>&1
+           $code = $LASTEXITCODE
+           $output | Write-Output
++          if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
+           if ($code -ne 0) { throw "Chromium filtering tests exited with $code" }
+           if (!(($output -join "`n") -match 'PASS: \d+ Chromium filtering checks')) { throw 'Chromium filtering suite did not complete' }
++      - name: Browser privacy settings process restart
++        if: ${{ !cancelled() }}
++        timeout-minutes: 5
++        run: |
++          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-settings-' + [guid]::NewGuid().ToString('N'))
++          foreach ($phase in @('write', 'read')) {
++            $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe $phase $profileRoot 2>&1
++            $code = $LASTEXITCODE
++            $output | Write-Output
++            if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
++            if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ Chromium filtering checks')) { throw "Privacy restart $phase failed or incomplete" }
++          }
+       - name: Publish self-contained Windows x64 build
+         run: dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -o artifacts/win-x64
++      - name: Inspect payload and generate package/file SBOM
++        run: python scripts/security_audit.py --assets AegisBrowser/obj/project.assets.json --publish artifacts/win-x64 --sbom artifacts/win-x64/aegis-sbom.cdx.json
+       - name: Check release payload
+         run: |
+           foreach ($file in @('AegisBrowser.exe', 'CefSharp.BrowserSubprocess.exe', 'libcef.dll', 'coreclr.dll')) {
+@@ -47,9 +97,26 @@ jobs:
+           }
+       - name: Smoke test published Windows application
+         run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64
++      - name: Smoke test published authorized lab
++        run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64 -Lab
+       - name: Upload complete publish directory
+         uses: actions/upload-artifact@v4
+         with:
+           name: AegisBrowser-win-x64
+           path: artifacts/win-x64/
+           if-no-files-found: error
++      - name: Package and verify portable ZIP
++        run: ./scripts/package-portable.ps1
++      - name: Upload portable release candidate and checksum
++        uses: actions/upload-artifact@v4
++        with:
++          name: AegisBrowser-portable-win-x64
++          path: artifacts/portable/
++          if-no-files-found: error
++      - name: Upload dependency audit evidence
++        if: ${{ always() }}
++        uses: actions/upload-artifact@v4
++        with:
++          name: AegisBrowser-dependency-audit
++          path: artifacts/audit/
++          if-no-files-found: warn
+diff --git a/.gitignore b/.gitignore
+index aadf229..b0fd876 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -4,3 +4,6 @@ artifacts/
+ publish/
+ .vs/
+ .DS_Store
++
++# Python source-audit helper cache only.
++scripts/__pycache__/
+diff --git a/AegisBrowser.Core/BrowserPolicy.cs b/AegisBrowser.Core/BrowserPolicy.cs
+index 276fc37..ac6e27a 100644
+--- a/AegisBrowser.Core/BrowserPolicy.cs
++++ b/AegisBrowser.Core/BrowserPolicy.cs
+@@ -19,9 +19,35 @@ public static class BrowserPolicy
+         Path.Combine(root, "profile-" + ReadProfile(["--profile=" + profile]));
+ 
+     public static bool IsWebUrl(string value) =>
+-        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
++        !string.IsNullOrEmpty(value) && !value.Any(char.IsControl) && !value.Contains('\\')
++        && Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
+         && !string.IsNullOrEmpty(uri.Host) && string.IsNullOrEmpty(uri.UserInfo);
+ 
++    // Compare parsed origins, never suffixes or display strings; ports remain significant.
++    public static string? PermissionOrigin(string value)
++    {
++        if (!IsWebUrl(value)) return null;
++        var uri = new Uri(value);
++        if (uri.Scheme != "https" && !uri.IsLoopback) return null;
++        if (uri.Host.Equals("aegis-diagnostics.invalid", StringComparison.OrdinalIgnoreCase)) return null;
++        var host = SiteClassifier.Host(value);
++        return host is null ? null : new UriBuilder(uri.Scheme, host, uri.IsDefaultPort ? -1 : uri.Port).Uri.GetLeftPart(UriPartial.Authority);
++    }
++
++    public static bool CanPromptPermission(string requestingUrl, string topLevelUrl)
++    {
++        var origin = PermissionOrigin(requestingUrl);
++        return origin is not null && origin == PermissionOrigin(topLevelUrl);
++    }
++
++    public static string DisplayOrigin(string url) =>
++        IsWebUrl(url) ? new Uri(url).GetLeftPart(UriPartial.Authority) : "unavailable origin";
++
++    public static bool CanServeDiagnostics(string url, string method, bool mainFrame, bool mainResource) =>
++        mainFrame && mainResource && method == "GET" && IsWebUrl(url)
++        && new Uri(url) is { Scheme: "https", IdnHost: "aegis-diagnostics.invalid", IsDefaultPort: true,
++            AbsolutePath: "/", Query: "" };
++
+     public static string? NormalizeAddress(string input)
+     {
+         input = input.Trim();
+diff --git a/AegisBrowser.Core/NetworkFilters.cs b/AegisBrowser.Core/NetworkFilters.cs
+index e270c60..59b74cc 100644
+--- a/AegisBrowser.Core/NetworkFilters.cs
++++ b/AegisBrowser.Core/NetworkFilters.cs
+@@ -3,8 +3,10 @@ using System.Text.RegularExpressions;
+ 
+ namespace AegisBrowser.Core;
+ 
+-public sealed record NetworkRequest(string Url, string? TopUrl, string Type, bool MainFrame = false);
+-public sealed record FilterDecision(bool Blocked, bool? ThirdParty, string Rule);
++public sealed record NetworkRequest(string Url, string? TopUrl, string Type, bool MainFrame = false, bool UnknownResource = false);
++[Flags]
++public enum FilterFallback { None = 0, BudgetExceeded = 1, UnknownSite = 2, UnknownResource = 4, InvalidInput = 8 }
++public sealed record FilterDecision(bool Blocked, bool? ThirdParty, string Rule, FilterFallback Fallback = FilterFallback.None);
+ 
+ /// <summary>Supported ABP network syntax only. Unsupported options reject the entire rule.</summary>
+ public sealed class NetworkFilterList
+@@ -42,10 +44,13 @@ public sealed class NetworkFilterList
+         if (parts.Length > 2 || (parts[0].Length > 1 && parts[0].StartsWith('/') && parts[0].EndsWith('/'))) return false;
+         if (parts[0].Length == 0) { if (parts.Length == 1) return false; parts[0] = "*"; }
+         bool? thirdParty = null; bool matchCase = false;
++        var seenOptions = new HashSet<string>(StringComparer.Ordinal);
+         var domains = Array.Empty<string>(); var types = new List<string>();
+         if (parts.Length == 2)
+         foreach (var option in parts[1].Split(','))
+         {
++            var name = option.StartsWith("domain=") ? "domain" : option.TrimStart('~');
++            if (option.StartsWith("~~") || !seenOptions.Add(name)) return false;
+             if (option == "third-party") thirdParty = true;
+             else if (option == "~third-party") thirdParty = false;
+             else if (option == "match-case") matchCase = true;
+@@ -53,7 +58,10 @@ public sealed class NetworkFilterList
+             {
+                 try
+                 {
+-                    domains = option[7..].Split('|').Select(d => (d.StartsWith('~') ? "~" : "") + ValidateDomain(d.TrimStart('~'))).ToArray();
++                    domains = option[7..].Split('|').Select(d => {
++                        if (d.StartsWith("~~")) throw new ArgumentException("Invalid domain negation.");
++                        return (d.StartsWith('~') ? "~" : "") + ValidateDomain(d.StartsWith('~') ? d[1..] : d);
++                    }).ToArray();
+                 }
+                 catch (ArgumentException) { return false; }
+             }
+@@ -66,6 +74,16 @@ public sealed class NetworkFilterList
+         var suffix = pattern.EndsWith('|') ? "$" : "";
+         if (suffix.Length > 0) pattern = pattern[..^1];
+         if (pattern.Length == 0 || pattern.Contains('|')) return false;
++        if (prefix.StartsWith("^https", StringComparison.Ordinal))
++        {
++            var end = pattern.IndexOfAny(new[] { '^', '/', '?', ':' });
++            var hostPart = end < 0 ? pattern : pattern[..end];
++            if (!hostPart.Contains('*'))
++            {
++                try { pattern = ValidateDomain(hostPart) + (end < 0 ? "" : pattern[end..]); }
++                catch (ArgumentException) { return false; }
++            }
++        }
+         var expression = prefix + Regex.Escape(pattern).Replace(@"\*", ".*").Replace(@"\^", @"(?:[^a-zA-Z0-9_\-.%]|$)") + suffix;
+         try
+         {
+@@ -80,6 +98,7 @@ public sealed class NetworkFilterList
+             return true;
+         }
+         catch (ArgumentException) { return false; }
++        catch (NotSupportedException) { return false; } // NonBacktracking rejects oversized automata.
+     }
+     public static string ValidateDomain(string domain)
+     {
+@@ -87,10 +106,11 @@ public sealed class NetworkFilterList
+         if (Uri.CheckHostName(domain) == UriHostNameType.Unknown || domain.Contains(':')) throw new ArgumentException("Enter a hostname without scheme, path or port.");
+         return domain;
+     }
+-    public string? Match(NetworkRequest request, bool? thirdParty, bool allow)
++    public string? Match(NetworkRequest request, bool? thirdParty, bool allow) =>
++        Match(request, thirdParty, allow, Stopwatch.GetTimestamp());
++    internal string? Match(NetworkRequest request, bool? thirdParty, bool allow, long started)
+     {
+         var top = SiteClassifier.Host(request.TopUrl);
+-        var started = Stopwatch.GetTimestamp();
+         var host = SiteClassifier.Host(request.Url);
+         IEnumerable<Rule> Candidates()
+         {
+@@ -152,11 +172,23 @@ public sealed class RequestFilter
+     }
+     public FilterDecision Evaluate(NetworkRequest request)
+     {
+-        try { return EvaluateCore(request); }
++        if (string.IsNullOrEmpty(request.Url) || request.Url.Length > 65_536 || request.TopUrl?.Length > 65_536)
++            return new(false, null, "Request input limit exceeded: allowed", FilterFallback.InvalidInput);
++        var third = SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl);
++        var coverage = request.UnknownResource ? FilterFallback.UnknownResource : FilterFallback.None;
++        if (!request.MainFrame && third is null && SiteClassifier.Host(request.Url) is not null)
++            coverage |= FilterFallback.UnknownSite;
++        try
++        {
++            var result = EvaluateCore(request, Stopwatch.GetTimestamp());
++            return result with { Fallback = result.Fallback | coverage };
++        }
+         catch (Exception ex) when (ex is FilterBudgetExceededException or RegexMatchTimeoutException)
+-        { return new(false, SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl), "Filter evaluation budget exceeded: allowed"); }
++        { return new(false, third, "Filter evaluation budget exceeded: allowed", coverage | FilterFallback.BudgetExceeded); }
++        catch (ArgumentException)
++        { return new(false, third, "Invalid request classification: allowed", coverage | FilterFallback.InvalidInput); }
+     }
+-    private FilterDecision EvaluateCore(NetworkRequest request)
++    private FilterDecision EvaluateCore(NetworkRequest request, long started)
+     {
+         var third = SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl);
+         FilterDecision Result(bool block, string rule) => new(block, third, rule);
+@@ -167,9 +199,9 @@ public sealed class RequestFilter
+         if (top is not null && siteExceptions.FirstOrDefault(d => SiteClassifier.DomainMatches(top, d)) is { } site)
+             return Result(false, "Site exception: " + site);
+         if (allows.FirstOrDefault(d => SiteClassifier.DomainMatches(host, d)) is { } allowed) return Result(false, "Allow domain: " + allowed);
+-        if (list.Match(request, third, true) is { } exception) return Result(false, exception);
++        if (list.Match(request, third, true, started) is { } exception) return Result(false, exception);
+         if (blocks.FirstOrDefault(d => SiteClassifier.DomainMatches(host, d)) is { } blocked) return Result(true, "Block domain: " + blocked);
+-        if (list.Match(request, third, false) is { } match) return Result(true, match);
++        if (list.Match(request, third, false, started) is { } match) return Result(true, match);
+         if (mode == PrivacyMode.Strict && third == true) return Result(true, "Strict: third-party request");
+         return Result(false, third is null ? "Unknown document site: allowed" : "No matching rule");
+     }
+diff --git a/AegisBrowser.Core/PrivacySession.cs b/AegisBrowser.Core/PrivacySession.cs
+index 1887900..00687a9 100644
+--- a/AegisBrowser.Core/PrivacySession.cs
++++ b/AegisBrowser.Core/PrivacySession.cs
+@@ -1,8 +1,9 @@
+ namespace AegisBrowser.Core;
+ 
+ public sealed record RequestObservation(long Number, DateTimeOffset Time, string Site, string Destination,
+-    string Type, string Party, string Result, string Rule);
+-public sealed record InspectorSnapshot(long Allowed, long Blocked, RequestObservation[] Requests);
++    string Type, string Party, string Result, string Rule, FilterFallback Fallback = FilterFallback.None);
++public sealed record InspectorSnapshot(long Allowed, long Blocked, RequestObservation[] Requests,
++    long BudgetFallbacks = 0, long UnknownSites = 0, long UnknownResources = 0, long InvalidInputs = 0);
+ 
+ /// <summary>One profile's in-memory policy and bounded, origin-only inspection history.</summary>
+ public sealed class PrivacySession
+@@ -13,7 +14,7 @@ public sealed class PrivacySession
+     { BlockedDomains = config.BlockedDomains.ToArray(), AllowedDomains = config.AllowedDomains.ToArray(), SiteExceptions = config.SiteExceptions.ToArray() };
+     private readonly object gate = new();
+     private readonly Queue<RequestObservation> history = new();
+-    private long allowed, blocked, sequence;
++    private long allowed, blocked, sequence, budgetFallbacks, unknownSites, unknownResources, invalidInputs;
+     private bool paused;
+     public bool Paused { get => Volatile.Read(ref paused); set => Volatile.Write(ref paused, value); }
+     public PrivacyConfiguration Configuration => Copy(Volatile.Read(ref state).Configuration);
+@@ -34,22 +35,49 @@ public sealed class PrivacySession
+         persist?.Invoke(configuration); // A failed save leaves the active policy unchanged.
+         Volatile.Write(ref state, next);
+     }
++    public async Task ApplyAsync(PrivacyConfiguration configuration, Action<PrivacyConfiguration>? persist = null,
++        CancellationToken cancellationToken = default)
++    {
++        PrivacySettingsStore.Validate(configuration);
++        configuration = Copy(configuration);
++        var next = await Task.Run(() => new PolicyState(configuration, new(configuration)), cancellationToken);
++        cancellationToken.ThrowIfCancellationRequested();
++        // Resume on the caller's UI context: closing the settings form cancels before publication.
++        persist?.Invoke(configuration);
++        Volatile.Write(ref state, next);
++    }
+     public FilterDecision Evaluate(NetworkRequest request)
+     {
+-        var decision = Volatile.Read(ref state).Filter.Evaluate(request);
+-        if (Paused) decision = decision with { Blocked = false, Rule = "Temporarily paused" };
++        // Pausing must not run an expensive list scan just to discard its result.
++        var decision = Paused
++            ? new FilterDecision(false, SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl), "Temporarily paused")
++            : Volatile.Read(ref state).Filter.Evaluate(request);
+         lock (gate)
+         {
+             if (decision.Blocked) blocked++; else allowed++;
++            if (decision.Fallback.HasFlag(FilterFallback.BudgetExceeded)) budgetFallbacks++;
++            if (decision.Fallback.HasFlag(FilterFallback.UnknownSite)) unknownSites++;
++            if (decision.Fallback.HasFlag(FilterFallback.UnknownResource)) unknownResources++;
++            if (decision.Fallback.HasFlag(FilterFallback.InvalidInput)) invalidInputs++;
+             history.Enqueue(new(++sequence, DateTimeOffset.Now, Origin(request.TopUrl), Origin(request.Url), request.Type,
+                 decision.ThirdParty is true ? "Third-party" : decision.ThirdParty is false ? "First-party" : "Unknown",
+-                decision.Blocked ? "Blocked" : "Allowed", decision.Rule));
++                decision.Blocked ? "Blocked" : "Allowed", decision.Rule, decision.Fallback));
+             while (history.Count > 500) history.Dequeue();
+         }
+         return decision;
+     }
+-    private static string Origin(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var uri)
+-        && uri.Scheme is "http" or "https" ? new UriBuilder(uri.Scheme, uri.IdnHost, uri.IsDefaultPort ? -1 : uri.Port).Uri.GetLeftPart(UriPartial.Authority) : "(internal / unknown)";
+-    public InspectorSnapshot Snapshot() { lock (gate) return new(allowed, blocked, history.ToArray()); }
+-    public void ClearHistory() { lock (gate) { allowed = blocked = 0; history.Clear(); } }
++    private static string Origin(string? url)
++    {
++        var host = SiteClassifier.Host(url);
++        if (host is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri)) return "(internal / unknown)";
++        return new UriBuilder(uri.Scheme, host, uri.IsDefaultPort ? -1 : uri.Port).Uri.GetLeftPart(UriPartial.Authority);
++    }
++    public InspectorSnapshot Snapshot()
++    {
++        lock (gate) return new(allowed, blocked, history.ToArray(), budgetFallbacks, unknownSites, unknownResources, invalidInputs);
++    }
++    public void ClearHistory()
++    {
++        lock (gate) { allowed = blocked = budgetFallbacks = unknownSites = unknownResources = invalidInputs = 0; history.Clear(); }
++    }
+ }
+diff --git a/AegisBrowser.Core/SiteClassifier.cs b/AegisBrowser.Core/SiteClassifier.cs
+index a66645f..e449037 100644
+--- a/AegisBrowser.Core/SiteClassifier.cs
++++ b/AegisBrowser.Core/SiteClassifier.cs
+@@ -32,8 +32,17 @@ public sealed class SiteClassifier
+         if (IPAddress.TryParse(host.Trim('[', ']'), out var address)) return address.ToString();
+         return new IdnMapping().GetAscii(host.ToLowerInvariant()).ToLowerInvariant();
+     }
+-    public static string? Host(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var uri)
+-        && uri.Scheme is "http" or "https" ? NormalizeHost(uri.IdnHost) : null;
++    public static string? Host(string? url)
++    {
++        if (string.IsNullOrEmpty(url) || url.Length > 65_536 || url.Any(char.IsControl)) return null;
++        try
++        {
++            return Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
++                && !string.IsNullOrEmpty(uri.Host) ? NormalizeHost(uri.IdnHost) : null;
++        }
++        catch (ArgumentException) { return null; }
++        catch (UriFormatException) { return null; }
++    }
+     public static bool DomainMatches(string host, string domain) => host == domain || (!IPAddress.TryParse(host, out _) && host.EndsWith("." + domain, StringComparison.Ordinal));
+     public string Site(string host)
+     {
+diff --git a/AegisBrowser.FilteringTests/AegisBrowser.FilteringTests.csproj b/AegisBrowser.FilteringTests/AegisBrowser.FilteringTests.csproj
+index 8d4a139..b01097e 100644
+--- a/AegisBrowser.FilteringTests/AegisBrowser.FilteringTests.csproj
++++ b/AegisBrowser.FilteringTests/AegisBrowser.FilteringTests.csproj
+@@ -7,7 +7,7 @@
+     <PublishTrimmed>false</PublishTrimmed><PublishSingleFile>false</PublishSingleFile>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="CefSharp.WinForms.NETCore" Version="151.3.240" />
++    <PackageReference Include="CefSharp.WinForms.NETCore" Version="154.0.340" />
+     <ProjectReference Include="../AegisBrowser/AegisBrowser.csproj" />
+   </ItemGroup>
+ </Project>
+diff --git a/AegisBrowser.FilteringTests/Program.cs b/AegisBrowser.FilteringTests/Program.cs
+index 536744f..e3e30fe 100644
+--- a/AegisBrowser.FilteringTests/Program.cs
++++ b/AegisBrowser.FilteringTests/Program.cs
+@@ -7,34 +7,39 @@ using System.Net;
+ using System.Net.Sockets;
+ using System.Text;
+ 
+-internal static class Program
++internal static partial class Program
+ {
+     private static int checks;
+     [STAThread]
+-    private static int Main()
++    private static int Main(string[] args)
+     {
+         Application.EnableVisualStyles();
+         Application.SetCompatibleTextRenderingDefault(false);
+-        var root = Path.Combine(Path.GetTempPath(), "aegis-filtering-" + Guid.NewGuid());
++        var root = args.Length == 2 ? Path.GetFullPath(args[1]) : Path.Combine(Path.GetTempPath(), "aegis-filtering-" + Guid.NewGuid());
+         Directory.CreateDirectory(root);
+         var initialized = false; var exit = 1;
+         try
+         {
++            Cef.EnableWaitForBrowsersToClose();
+             initialized = Cef.Initialize(new CefSettings { RootCachePath = root, CachePath = Path.Combine(root, "cache"),
+                 CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef.log") });
+             if (!initialized) throw new Exception("CEF initialization failed");
++            using var context = Cef.GetGlobalRequestContext();
++            if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory())) throw new Exception("Diagnostics registration failed");
+             using var server = new FixtureServer();
+             using var host = new Form { Width = 1000, Height = 700 };
+             host.Shown += async (_, _) =>
+             {
+-                try { await Run(host, server); Console.WriteLine($"PASS: {checks} Chromium filtering checks"); exit = 0; }
++                try { if (args.Length == 2) await RestartProfile(host, root, args[0] == "write");
++                    else { await Run(host, server); await SettingsReview(host, server); }
++                    Console.WriteLine($"PASS: {checks} Chromium filtering checks"); exit = 0; }
+                 catch (Exception ex) { Console.Error.WriteLine(ex); }
+                 finally { host.Close(); }
+             };
+             Application.Run(host);
+         }
+         catch (Exception ex) { Console.Error.WriteLine(ex); }
+-        finally { if (initialized) Cef.Shutdown(); Console.WriteLine("CEF test profile: " + root); }
++        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } Console.WriteLine("CEF test profile: " + root); }
+         return exit;
+     }
+     private static void Check(bool ok, string message)
+@@ -46,8 +51,8 @@ internal static class Program
+     {
+         var config = new PrivacyConfiguration { Mode = PrivacyMode.Custom, UserRules = "/blocked.png" };
+         var session = new PrivacySession(config);
+-        using var web = new ChromiumWebBrowser("about:blank") { Dock = DockStyle.Fill };
+-        web.RequestHandler = new SafeRequests(_ => { }, Console.WriteLine, session.Evaluate,
++        using var web = new BrowserView("about:blank") { LifeSpanHandler = new SafePopups(Console.WriteLine), Dock = DockStyle.Fill };
++        web.RequestHandler = new SafeRequests(Console.WriteLine, session.Evaluate,
+             (request, decision) => Console.WriteLine($"Decision: mode={session.Configuration.Mode} top={request.TopUrl} url={request.Url} type={request.Type} main={request.MainFrame} third={decision.ThirdParty} blocked={decision.Blocked} rule={decision.Rule}"));
+         // Subscribe before handle creation so CEF installs its load event adapter.
+         web.FrameLoadEnd += (_, _) => { };
+@@ -72,6 +77,9 @@ internal static class Program
+         Check(server.Hits("/redirect") > 0, "redirect source requested");
+         Check(server.Hits("/blocked.png") == 0, "direct, redirected and iframe blocked resources never reach server");
+         Check(session.Snapshot().Requests.Any(r => r.Result == "Blocked" && r.Rule == "/blocked.png"), "inspector reports matching rule");
++        session.Apply(config with { Mode = PrivacyMode.Standard, UserRules = "", FilterList = "||localhost^$third-party,image" });
++        await Page();
++        Check(server.Hits("/third.png") == 0 && server.Hits("/first.png") > 0, "Standard list blocks matching third-party resources");
+         session.Apply(config with { Mode = PrivacyMode.Strict, UserRules = "" });
+         await Page();
+         Check(server.Hits("/third.png") == 0, "Strict blocks third-party request at network boundary");
+@@ -96,6 +104,7 @@ internal static class Program
+         using var settings = new PrivacyForm(session, server.Origin);
+         settings.Show(host); await Task.Delay(200);
+         Check(settings.Visible, "native privacy window opens"); settings.Close();
++        await CloseWeb(web);
+     }
+     private static async Task Wait(Func<Task<bool>> predicate, string name)
+     {
+@@ -147,6 +156,7 @@ internal sealed class FixtureServer : IDisposable
+                   .then(() => { window.addEventListener('load', () => document.title = '{{url.Query[1..]}}'); if (document.readyState === 'complete') document.title = '{{url.Query[1..]}}'; });
+                 </script>
+                 """;
++            else if (path == "/download") { header = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=fixture.bin\r\n"; body = "synthetic fixture"; }
+             else if (path == "/frame") body = "<img src='/blocked.png'>";
+             else body = "fixture"; // Image decode failure is fine: onerror still establishes completion.
+             var data = Encoding.UTF8.GetBytes(body);
+diff --git a/AegisBrowser.Tests/AegisBrowser.Tests.csproj b/AegisBrowser.Tests/AegisBrowser.Tests.csproj
+index c6b8c1d..a0b69f3 100644
+--- a/AegisBrowser.Tests/AegisBrowser.Tests.csproj
++++ b/AegisBrowser.Tests/AegisBrowser.Tests.csproj
+@@ -1,4 +1,4 @@
+ <Project Sdk="Microsoft.NET.Sdk">
+   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+-  <ItemGroup><ProjectReference Include="../AegisBrowser.Core/AegisBrowser.Core.csproj" /></ItemGroup>
++  <ItemGroup><ProjectReference Include="../AegisBrowser.Core/AegisBrowser.Core.csproj" /><ProjectReference Include="../AegisBrowser.Lab/AegisBrowser.Lab.csproj" /></ItemGroup>
+ </Project>
+diff --git a/AegisBrowser.Tests/Program.cs b/AegisBrowser.Tests/Program.cs
+index 0480545..e767ff2 100644
+--- a/AegisBrowser.Tests/Program.cs
++++ b/AegisBrowser.Tests/Program.cs
+@@ -10,7 +10,11 @@ if (args.Length == 2 && args[0] == "--probe-lock")
+     return;
+ }
+ 
++if (args.Length == 1 && args[0] == "--benchmark") { FilteringBenchmarks.Run(); return; }
++if (args.Length > 0 && !(args.Length == 1 && args[0] == "--core-only")) throw new ArgumentException("Unknown test argument.");
+ PrivacyTests.Run();
++AddressTests.Run();
++AuditRegressionTests.Run();
+ var count = 0;
+ void Check(bool condition, string name)
+ {
+@@ -40,6 +44,18 @@ foreach (var url in new[] { "", "javascript:alert(1)", "file:///C:/secret", "dat
+     Check(BrowserPolicy.NormalizeAddress(url) is null, "blocked address: " + url);
+ foreach (var url in new[] { "file:///C:/secret", "javascript:alert(1)", "https://user:pass@example.com", "data:text/html,test" })
+     Check(!BrowserPolicy.IsWebUrl(url), "navigation policy: " + url);
++Check(BrowserPolicy.CanPromptPermission("https://example.com/a", "https://example.com/b"), "same secure origin prompt");
++Check(BrowserPolicy.CanPromptPermission("https://example.com:443/a", "https://example.com/"), "default port origin equivalence");
++Check(BrowserPolicy.CanPromptPermission("http://localhost:8765/a", "http://localhost:8765/"), "loopback prompt");
++foreach (var pair in new[] {
++    ("http://example.com", "http://example.com"),
++    ("https://example.com", "https://example.com.evil.test"),
++    ("https://example.com:444", "https://example.com"),
++    ("https://example.com", "https://other.test"),
++    ("data:text/html,test", "https://example.com"),
++    ("https://user@example.com", "https://example.com"),
++    (BrowserPolicy.DiagnosticsUrl, BrowserPolicy.DiagnosticsUrl) })
++    Check(!BrowserPolicy.CanPromptPermission(pair.Item1, pair.Item2), "permission origin rejected: " + pair.Item1);
+ var root = Path.Combine(Path.GetTempPath(), "aegis-tests-" + Guid.NewGuid());
+ try
+ {
+@@ -74,3 +90,6 @@ try
+ }
+ finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+ Console.WriteLine($"PASS: {count} policy and profile checks");
++
++if (args.Length == 0) await LabTests.Run();
++else Console.WriteLine("NOT RUN: HTTP lab suite (--core-only explicitly selected)");
+diff --git a/AegisBrowser/AegisBrowser.csproj b/AegisBrowser/AegisBrowser.csproj
+index c363d4a..28df4ae 100644
+--- a/AegisBrowser/AegisBrowser.csproj
++++ b/AegisBrowser/AegisBrowser.csproj
+@@ -3,6 +3,7 @@
+     <OutputType>WinExe</OutputType>
+     <TargetFramework>net8.0-windows</TargetFramework>
+     <UseWindowsForms>true</UseWindowsForms>
++    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+     <Nullable>enable</Nullable>
+     <ImplicitUsings>enable</ImplicitUsings>
+@@ -12,8 +13,9 @@
+     <PublishSingleFile>false</PublishSingleFile>
+   </PropertyGroup>
+   <ItemGroup>
+-    <PackageReference Include="CefSharp.WinForms.NETCore" Version="151.3.240" />
++    <PackageReference Include="CefSharp.WinForms.NETCore" Version="154.0.340" />
+     <ProjectReference Include="../AegisBrowser.Core/AegisBrowser.Core.csproj" />
++    <ProjectReference Include="../AegisBrowser.Lab/AegisBrowser.Lab.csproj" />
+     <EmbeddedResource Include="diagnostics.html" />
+   </ItemGroup>
+ </Project>
+diff --git a/AegisBrowser/AssemblyInfo.cs b/AegisBrowser/AssemblyInfo.cs
+index 85469cc..8aac270 100644
+--- a/AegisBrowser/AssemblyInfo.cs
++++ b/AegisBrowser/AssemblyInfo.cs
+@@ -1,2 +1,4 @@
+ using System.Runtime.CompilerServices;
+ [assembly: InternalsVisibleTo("AegisBrowser.FilteringTests")]
++
++[assembly: InternalsVisibleTo("AegisBrowser.BrowserTests")]
+diff --git a/AegisBrowser/FilteringResourceHandler.cs b/AegisBrowser/FilteringResourceHandler.cs
+index 5f4d4ce..4b86808 100644
+--- a/AegisBrowser/FilteringResourceHandler.cs
++++ b/AegisBrowser/FilteringResourceHandler.cs
+@@ -7,16 +7,12 @@ namespace AegisBrowser;
+ internal sealed class FilteringResourceHandler(Func<NetworkRequest, FilterDecision> filter, string? topUrl,
+     Action<NetworkRequest, FilterDecision>? observe = null) : ResourceRequestHandler
+ {
+-    private static string Type(ResourceType type) => type.ToString() switch
+-    {
+-        "Script" => "script", "Stylesheet" => "stylesheet", "Image" or "Favicon" => "image",
+-        "FontResource" => "font", "Media" => "media", "Xhr" => "xmlhttprequest",
+-        "SubFrame" => "subdocument", "Ping" => "ping", _ => "other"
+-    };
+     protected override CefReturnValue OnBeforeResourceLoad(IWebBrowser control, IBrowser browser,
+         IFrame frame, IRequest request, IRequestCallback callback)
+     {
+-        var input = new NetworkRequest(request.Url, topUrl, Type(request.ResourceType), request.ResourceType == ResourceType.MainFrame);
++        var classification = ResourceClassification.FromCefName(request.ResourceType.ToString());
++        var input = new NetworkRequest(request.Url, topUrl, classification.Type,
++            request.ResourceType == ResourceType.MainFrame, classification.Unknown);
+         var decision = filter(input);
+         observe?.Invoke(input, decision);
+         // Synchronous decision; never retain a CEF request, frame or callback.
+diff --git a/AegisBrowser/MainForm.cs b/AegisBrowser/MainForm.cs
+index f10a8bb..c83e144 100644
+--- a/AegisBrowser/MainForm.cs
++++ b/AegisBrowser/MainForm.cs
+@@ -12,11 +12,19 @@ public sealed class MainForm : Form
+     private readonly Button back;
+     private readonly Button forward;
+     private readonly Button reload;
+-    private bool closing;
++    private volatile bool closing;
++    private bool closeComplete;
+     private readonly PrivacySession privacy;
+     private readonly PrivacySettingsStore? privacyStore;
+     private PrivacyForm? privacyWindow;
+-    private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
++    private SearchSettings searchSettings = new();
++    private readonly SearchSettingsStore? searchStore;
++    private SearchSettingsForm? searchWindow;
++    internal string SearchEngineId => searchSettings.EngineId;
++    private readonly HashSet<TabPage> retiring = new();
++    private readonly HashSet<TabPage> releasing = new();
++    private ChromiumWebBrowser? Current => tabs.SelectedTab is { } page && !retiring.Contains(page)
++        ? page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault() : null;
+ 
+     public MainForm(string profile, string? profilePath = null)
+     {
+@@ -24,20 +32,24 @@ public sealed class MainForm : Form
+         string? privacyWarning = null;
+         if (profilePath is not null)
+         {
++            searchStore = new(profilePath);
++            try { searchSettings = searchStore.Load(); }
++            catch (IOException ex) { Shown += (_, _) => MessageBox.Show(this, ex.Message, "Search settings warning"); }
+             privacyStore = new(profilePath);
+             try { configuration = privacyStore.Load(); }
+             catch (IOException ex) { privacyWarning = ex.Message; }
+         }
+         privacy = new(configuration);
+         if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
++        AutoScaleMode = AutoScaleMode.Dpi;
+         Text = $"Aegis Browser — {profile}";
+         Width = 1250;
+         Height = 850;
+         MinimumSize = new Size(750, 450);
+-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 9 };
+-        for (var i = 0; i < 9; i++)
++        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 10, AutoScroll = true };
++        for (var i = 0; i < 10; i++)
+             bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
+-                i == 3 ? 100 : i >= 6 ? 100 : 48));
++                i == 3 ? 100 : i >= 6 ? 85 : i == 2 ? 68 : 40));
+         back = MakeButton("←", () => Current?.Back());
+         forward = MakeButton("→", () => Current?.Forward());
+         reload = MakeButton("Reload", () => { if (Current?.IsLoading == true) Current.Stop(); else Current?.Reload(); });
+@@ -52,31 +64,82 @@ public sealed class MainForm : Form
+         bar.Controls.Add(MakeButton("Privacy", () =>
+         {
+             if (privacyWindow is null || privacyWindow.IsDisposed)
+-                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save));
++                privacyWindow = new PrivacyForm(privacy, Current?.Address,
++                    config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save),
++                    (config, token) => privacy.ApplyAsync(config, privacyStore is null ? null : privacyStore.Save, token));
+             privacyWindow.Show(this); privacyWindow.BringToFront();
+         }), 8, 0);
++        bar.Controls.Add(MakeButton("Search", () =>
++        {
++            if (searchWindow is null || searchWindow.IsDisposed)
++                searchWindow = new SearchSettingsForm(searchSettings, settings =>
++                {
++                    searchStore?.Save(settings); // Publish only after persistence succeeds.
++                    searchSettings = settings;
++                    address.PlaceholderText = "Search " + SearchEngines.Get(settings.EngineId).Name + " or enter address";
++                });
++            searchWindow.Show(this); searchWindow.BringToFront();
++        }), 9, 0);
++        address.AccessibleName = "Search or enter address";
++        address.PlaceholderText = "Search " + SearchEngines.Get(searchSettings.EngineId).Name + " or enter address";
+         address.KeyDown += (_, e) =>
+         {
+             if (e.KeyCode != Keys.Enter) return;
+             e.SuppressKeyPress = true;
+-            var url = BrowserPolicy.NormalizeAddress(address.Text);
+-            if (url is null) status.Text = "Enter an HTTP(S) address without credentials, or aegis:diagnostics.";
+-            else Current?.Load(url);
++            SubmitAddress(address.Text);
+         };
++        address.Leave += (_, _) => UpdateNavigation();
+         var bottom = new StatusStrip();
+-        bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: deny all |"));
++        bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: ask by origin |"));
+         bottom.Items.Add(status);
+         Controls.Add(tabs);
+         Controls.Add(bar);
+         Controls.Add(bottom);
+         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
+         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
+-        FormClosing += (_, _) => closing = true;
++        FormClosing += (_, e) =>
++        {
++            if (closeComplete) return;
++            e.Cancel = true;
++            if (closing) return;
++            closing = true;
++            foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
++            {
++                retiring.Add(page);
++                var web = page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
++                if (web is null || web.IsDisposed) { retiring.Remove(page); continue; }
++                var lifetime = (SafePopups)web.LifeSpanHandler;
++                lifetime.ClosePopups();
++                if (lifetime.OwnerCloseReady.IsCompletedSuccessfully) PostLifetime(() => _ = RetirePageAsync(page, (BrowserView)web));
++                else if (web.IsBrowserInitialized) web.GetBrowserHost().CloseBrowser(true);
++            }
++            if (retiring.Count == 0) { closeComplete = true; BeginInvoke((Action)Close); }
++        };
++        FormClosed += (_, _) =>
++        {
++            foreach (var page in retiring.ToArray()) page.Dispose();
++            retiring.Clear();
++        };
++    }
++
++    internal bool SubmitAddress(string input)
++    {
++        var result = AddressInputResolver.Resolve(input, searchSettings.EngineId);
++        if (result.Kind == AddressInputKind.Empty) return false;
++        if (result.Kind == AddressInputKind.Rejected)
++        {
++            status.Text = "Address rejected. Use HTTP(S), aegis:diagnostics or about:blank; credentials and other schemes are not supported.";
++            return false;
++        }
++        if (Current is not { } current || closing) return false;
++        current.Load(result.Url!);
++        return true;
+     }
+ 
+     private static Button MakeButton(string text, Action action)
+     {
+-        var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = text };
++        var name = text switch { "←" => "Back", "→" => "Forward", "+" => "New tab", "×" => "Close tab", _ => text };
++        var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = name };
+         button.Click += (_, _) => action();
+         return button;
+     }
+@@ -89,16 +152,34 @@ public sealed class MainForm : Form
+         catch (InvalidOperationException) { /* Handle destroyed during shutdown. */ }
+     }
+ 
++    private void PostLifetime(Action action)
++    {
++        if (IsDisposed || !IsHandleCreated) return;
++        try { BeginInvoke((Action)(() => { if (!IsDisposed) action(); })); }
++        catch (InvalidOperationException) { }
++    }
++
+     private void NewTab(string url)
+     {
+         if (closing) return;
+-        var page = new TabPage("New tab");
+-        var browser = new ChromiumWebBrowser(url) { Dock = DockStyle.Fill };
+-        void Report(string message) => Post(() => { if (tabs.SelectedTab == page) status.Text = message; });
+-        void Open(string target) => Post(() => { if (!page.IsDisposed) NewTab(target); });
+-        browser.PermissionHandler = new DenyPermissions(Report);
+-        browser.RequestHandler = new SafeRequests(Open, Report, privacy.Evaluate);
+-        browser.LifeSpanHandler = new SafePopups(Open, Report);
++        var page = new TabPage("New tab") { Tag = "Loading…" };
++        var browser = new BrowserView(url) { Dock = DockStyle.Fill };
++        void Report(string message) => Post(() =>
++        {
++            if (page.IsDisposed) return;
++            page.Tag = message;
++            if (tabs.SelectedTab == page) status.Text = message;
++        });
++        browser.PermissionHandler = new OriginPermissions(Report);
++        browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
++        var popups = new SafePopups(Report, () => PostLifetime(() => _ = RetirePageAsync(page, browser)));
++        browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
++        {
++            if (retiring.Contains(page) && browser.IsBrowserInitialized)
++                browser.GetBrowserHost().CloseBrowser(true);
++        });
++        browser.LifeSpanHandler = popups;
++        page.Disposed += (_, _) => popups.ClosePopups();
+         browser.DownloadHandler = new DenyDownloads(Report);
+         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
+         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
+@@ -110,19 +191,50 @@ public sealed class MainForm : Form
+             page.Text = title.Length > 28 ? title[..28] + "…" : title;
+             page.ToolTipText = title;
+         });
++        browser.FrameLoadStart += (_, e) => { if (e.Frame.IsMain) Report("Loading…"); };
++        browser.FrameLoadEnd += (_, e) =>
++        {
++            if (!e.Frame.IsMain) return;
++            if (e.HttpStatusCode >= 400) Report($"HTTP {e.HttpStatusCode} from {BrowserPolicy.DisplayOrigin(e.Url)}. Reload to retry.");
++            else if (e.HttpStatusCode is >= 200 and < 400) Report("Ready");
++        };
+         browser.LoadError += (_, e) =>
+         {
+-            if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Page failed to load: {e.ErrorCode}");
++            if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Load failed: {e.ErrorCode} at {BrowserPolicy.DisplayOrigin(e.FailedUrl)}. Reload to retry.");
+         };
+         page.Controls.Add(browser);
+         tabs.TabPages.Add(page);
+         tabs.SelectedTab = page;
+     }
+ 
++    private async Task RetirePageAsync(TabPage page, BrowserView browser)
++    {
++        if (page.IsDisposed || !releasing.Add(page)) return;
++        try
++        {
++            await browser.ReleaseNativeHostAsync();
++            retiring.Remove(page);
++            tabs.TabPages.Remove(page);
++            page.Dispose();
++            if (closing && retiring.Count == 0) { closeComplete = true; Close(); }
++            else if (!closing && tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
++        }
++        catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
++        {
++            // Keep the native owner alive; report on the UI thread, including during shutdown.
++            closing = false;
++            page.Tag = "Browser close did not complete. Retry Close; the native owner has been retained.";
++            status.Text = (string)page.Tag;
++        }
++        finally { releasing.Remove(page); }
++    }
++
+     private void UpdateNavigation()
+     {
+         var browser = Current;
+-        address.Text = browser?.Address ?? "";
++        // Loading events must not overwrite an address the user is typing.
++        if (!address.Focused) address.Text = browser?.Address ?? "";
++        status.Text = tabs.SelectedTab?.Tag as string ?? "Ready";
+         back.Enabled = browser?.CanGoBack == true;
+         forward.Enabled = browser?.CanGoForward == true;
+         reload.Text = browser?.IsLoading == true ? "Stop" : "Reload";
+@@ -131,9 +243,17 @@ public sealed class MainForm : Form
+     private void CloseTab()
+     {
+         if (tabs.SelectedTab is not { } page) return;
+-        tabs.TabPages.Remove(page);
+-        page.Dispose();
+-        if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
++        var browser = page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
++        if (browser is null || browser.IsDisposed) return;
++        if (!retiring.Add(page))
++        {
++            if (((SafePopups)browser.LifeSpanHandler).OwnerCloseReady.IsCompletedSuccessfully)
++                _ = RetirePageAsync(page, (BrowserView)browser);
++            return;
++        }
++        ((SafePopups)browser.LifeSpanHandler).ClosePopups();
++        // Keep the TabPage parent HWND alive until CEF reports DoClose readiness; disposing during creation can destroy a window CEF still uses.
++        if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
+     }
+ 
+     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>
+diff --git a/AegisBrowser/PrivacyForm.cs b/AegisBrowser/PrivacyForm.cs
+index 306834c..a5a3a65 100644
+--- a/AegisBrowser/PrivacyForm.cs
++++ b/AegisBrowser/PrivacyForm.cs
+@@ -14,10 +14,17 @@ internal sealed class PrivacyForm : Form
+     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1000 };
+     private readonly CheckBox thirdParty = new() { Text = "Third-party only", AutoSize = true };
+     private readonly Action<PrivacyConfiguration> apply;
++    private readonly Func<PrivacyConfiguration, CancellationToken, Task>? applyAsync;
++    private readonly CancellationTokenSource stop = new();
+ 
+-    public PrivacyForm(PrivacySession session, string? currentUrl, Action<PrivacyConfiguration>? apply = null)
++    public PrivacyForm(PrivacySession session, string? currentUrl, Action<PrivacyConfiguration>? apply = null,
++        Func<PrivacyConfiguration, CancellationToken, Task>? applyAsync = null)
+     {
+         this.session = session;
++        this.applyAsync = applyAsync ?? (apply is null ? ((configuration, token) => session.ApplyAsync(configuration, cancellationToken: token)) : null);
++        AutoScaleMode = AutoScaleMode.Dpi;
++        mode.Name = "PrivacyMode"; blocks.Name = "BlockedDomains"; allows.Name = "AllowedDomains";
++        sites.Name = "SiteExceptions"; rules.Name = "UserRules"; list.Name = "TrackingList"; network.Name = "Requests";
+         this.apply = apply ?? (configuration => session.Apply(configuration));
+         Text = "Aegis Privacy — profile settings and network inspector";
+         Width = 1100; Height = 760; MinimumSize = new(800, 550);
+@@ -62,7 +69,7 @@ internal sealed class PrivacyForm : Form
+         var rejected = new TabPage("Unsupported list rules"); unsupported.ReadOnly = true; rejected.Controls.Add(unsupported);
+         pages.TabPages.AddRange([settings, lists, requests, rejected]); Controls.Add(pages);
+         timer.Tick += (_, _) => RefreshInspector(); timer.Start();
+-        FormClosed += (_, _) => timer.Dispose();
++        FormClosed += (_, _) => { stop.Cancel(); stop.Dispose(); timer.Dispose(); };
+         RefreshInspector();
+     }
+     private static TextBox Editor() => new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Both,
+@@ -85,38 +92,67 @@ internal sealed class PrivacyForm : Form
+     {
+         if (network.CurrentRow?.DataBoundItem is RequestObservation row && SiteClassifier.Host(row.Destination) is { } host) AddLine(target, host);
+     }
+-    private void Import()
++    internal void ImportFile(string path)
++    {
++        list.Text = FilterListImport.Read(path).Text;
++    }
++    private async void Import()
+     {
+         using var dialog = new OpenFileDialog { Filter = "Text filter lists|*.txt|All files|*.*" };
+         if (dialog.ShowDialog(this) != DialogResult.OK) return;
+         try
+         {
+-            if (new FileInfo(dialog.FileName).Length > 8_000_000) throw new IOException("List exceeds 8 MB.");
+-            list.Text = File.ReadAllText(dialog.FileName, new System.Text.UTF8Encoding(false, true));
++            var path = dialog.FileName;
++            list.Enabled = false;
++            var token = stop.Token;
++            var imported = await Task.Run(() => FilterListImport.Read(path, token), token);
++            if (IsDisposed) return;
++            list.Text = imported.Text;
++            MessageBox.Show(this, "Imported locally. SHA-256: " + imported.Sha256
++                + "\nThis is a content fingerprint, not proof of publisher authenticity. Apply settings to activate.", "Filter list imported");
+         }
++        catch (OperationCanceledException) { }
+         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
+-        { MessageBox.Show(this, ex.Message, "Could not import list"); }
++        { if (!IsDisposed) MessageBox.Show(this, ex.Message, "Could not import list"); }
++        finally { if (!IsDisposed) list.Enabled = true; }
+     }
+-    private void Apply()
++    private PrivacyConfiguration ReadEdits()
+     {
+-        try
+-        {
+             string[] Domains(TextBox box) => box.Lines.Where(s => !string.IsNullOrWhiteSpace(s)).Select(NetworkFilterList.ValidateDomain).Distinct().ToArray();
+             var config = new PrivacyConfiguration { Mode = Enum.Parse<PrivacyMode>((string)mode.SelectedItem!),
+                 UseListsInCustom = customList.Checked, FilterList = list.Text, UserRules = rules.Text,
+                 BlockedDomains = Domains(blocks), AllowedDomains = Domains(allows), SiteExceptions = Domains(sites) };
+-            apply(config);
++            return config;
++    }
++    internal void ApplyEdits() => apply(ReadEdits());
++    private async void Apply()
++    {
++        try
++        {
++            var configuration = ReadEdits();
++            Enabled = false;
++            if (applyAsync is null) apply(configuration);
++            else await applyAsync(configuration, stop.Token);
++            if (IsDisposed) return;
+             RefreshInspector();
+             MessageBox.Show(this, $"Settings applied to new requests. Reload pages to retry blocked resources.\n{session.RuleCount} active rules; {session.Unsupported.Count} unsupported rules skipped.", "Privacy settings");
+         }
++        catch (OperationCanceledException) { }
+         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+-        { MessageBox.Show(this, ex.Message, "Settings were not applied"); }
++        { if (!IsDisposed) MessageBox.Show(this, ex.Message, "Settings were not applied"); }
++        finally { if (!IsDisposed) Enabled = true; }
+     }
+-    private void RefreshInspector()
++    internal void RefreshInspector()
+     {
+         var snapshot = session.Snapshot();
+-        summary.Text = $"Allowed: {snapshot.Allowed}   Blocked: {snapshot.Blocked}";
++        summary.Text = $"Allowed: {snapshot.Allowed}   Blocked: {snapshot.Blocked}   Budget fallback: {snapshot.BudgetFallbacks}   Unknown site/type: {snapshot.UnknownSites}/{snapshot.UnknownResources}   Input fallback: {snapshot.InvalidInputs}";
++        var selected = (network.CurrentRow?.DataBoundItem as RequestObservation)?.Number;
+         network.DataSource = snapshot.Requests.Reverse().Where(r => !thirdParty.Checked || r.Party == "Third-party").ToArray();
++        network.ClearSelection(); network.CurrentCell = null;
++        if (selected.HasValue)
++            foreach (DataGridViewRow row in network.Rows)
++                if (row.DataBoundItem is RequestObservation item && item.Number == selected)
++                { network.CurrentCell = row.Cells[0]; row.Selected = true; break; }
+         var report = string.Join(Environment.NewLine, session.Unsupported);
+         if (unsupported.Text != report) unsupported.Text = report;
+     }
+diff --git a/AegisBrowser/Program.cs b/AegisBrowser/Program.cs
+index c7abfb5..96f473c 100644
+--- a/AegisBrowser/Program.cs
++++ b/AegisBrowser/Program.cs
+@@ -1,4 +1,5 @@
+ using AegisBrowser.Core;
++using AegisBrowser.Lab;
+ using CefSharp;
+ using CefSharp.WinForms;
+ 
+@@ -12,13 +13,18 @@ internal static class Program
+         ApplicationConfiguration.Initialize();
+         var initialized = false;
+         ProfileLease? lease = null;
++        LabServer? lab = null;
+         try
+         {
+-            var profile = BrowserPolicy.ReadProfile(args);
++            LabProfile? labProfile = args.Length == 1 && args[0].StartsWith("--lab=", StringComparison.Ordinal)
++                ? LabProfiles.Parse(args[0][6..]) : null;
++            var profile = labProfile is null ? BrowserPolicy.ReadProfile(args) : "lab";
+             var path = BrowserPolicy.ProfilePath(Path.Combine(
+                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                 "AegisBrowser", "Profiles"), profile);
++            if (labProfile is not null) path = LabProfiles.PathFor(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), labProfile.Value);
+             lease = new ProfileLease(path);
++            if (labProfile is not null) lab = LabServer.StartAsync().GetAwaiter().GetResult();
+             var settings = new CefSettings
+             {
+                 RootCachePath = path,
+@@ -28,12 +34,13 @@ internal static class Program
+             };
+             // Do not pass application command-line arguments through to Chromium.
+             settings.CommandLineArgsDisabled = true;
++            Cef.EnableWaitForBrowsersToClose();
+             initialized = Cef.Initialize(settings);
+             if (!initialized) throw new InvalidOperationException("Chromium initialization failed.");
+             using var context = Cef.GetGlobalRequestContext();
+             if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory()))
+                 throw new InvalidOperationException("Could not register local diagnostics.");
+-            using var window = new MainForm(profile, path);
++            using Form window = lab is null ? new MainForm(profile, path) : new LabDashboard(lab, labProfile!.Value);
+             Application.Run(window);
+         }
+         catch (Exception ex)
+@@ -44,8 +51,15 @@ internal static class Program
+         }
+         finally
+         {
+-            if (initialized) Cef.Shutdown();
+-            lease?.Dispose();
++            try
++            {
++                if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); }
++            }
++            finally
++            {
++                try { if (lab is not null) lab.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
++                finally { lease?.Dispose(); }
++            }
+         }
+     }
+ }
+diff --git a/AegisBrowser/README.md b/AegisBrowser/README.md
+index da7828f..badec46 100644
+--- a/AegisBrowser/README.md
++++ b/AegisBrowser/README.md
+@@ -18,7 +18,7 @@ dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-con
+ .\artifacts\win-x64\AegisBrowser.exe --profile=Personal
+ ```
+ 
+-Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 151.3.240; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The first Windows CI run restored successfully but failed compilation; local API fixes await upload and a new CI run. The workflow does not perform GUI acceptance tests. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
++Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 154.0.340; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The workflow also runs actual CEF browser integration tests and a limited published-app window smoke test; these do not replace full manual GUI acceptance. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
+ 
+ ## Profiles
+ 
+@@ -30,11 +30,11 @@ Profiles isolate stored browsing state, not OS users, IP addresses or hardware c
+ 
+ ## Controls and policy
+ 
+-- Ctrl+L focuses the address bar; bare hosts default to HTTPS. Explicit HTTP is supported. Embedded URL credentials and unsupported top-level schemes are rejected.
++- Ctrl+L focuses the address bar. Press Enter to navigate or search; typing alone makes no search requests. Bare domains default to HTTPS; localhost and loopback IPs default to HTTP. The **Search** toolbar button selects DuckDuckGo, Google, Bing or Brave Search per profile. See [address bar and search settings](../docs/search.md). Embedded URL credentials and unsupported schemes are rejected.
+ - Ctrl+T / Ctrl+W open and close tabs; Ctrl+Tab cycles tabs. The last closed tab is replaced by diagnostics.
+ - Alt+Left / Alt+Right navigate; F5 reloads; Escape stops. F12 or the DevTools button opens Chromium tools.
+-- User-initiated HTTP(S) popup targets open in independent tabs. Automatic popups are blocked. Opener-dependent login flows and script-created blank popup windows may not work.
+-- All CEF permission prompts and media requests are denied immediately and reported in the status bar. There are no remembered grants or allow controls in this version. Camera, microphone, screen capture and location dependent sites will not work.
++- User-initiated HTTP(S) and blank popups use native Chromium windows, preserving opener relationships, redirects, POST data and postMessage for OAuth. Automatic popups and unsupported targets are blocked. Native popup windows close when their owner tab closes. Chromium still enforces same-origin policy and COOP; identity providers that prohibit embedded browsers remain unsupported.
++- Location, notifications, camera and microphone may use Chromium's native origin-labelled consent UI when the requesting origin matches the top-level origin and is HTTPS or loopback. The app never grants a request automatically. Chromium owns consent, dismissal/navigation cancellation and any profile-scoped permission persistence. Cross-origin frames, insecure non-loopback origins, diagnostics, unknown permission types, screen capture and device pan/tilt/zoom are denied. To fully reset a disposable profile's grants and stored data, close it and remove its profile directory; no custom permission database is maintained.
+ - Downloads are disabled. Invalid certificates are rejected without an override. No remote debugging port, privileged JavaScript binding, user-agent override, certificate bypass or web-security disabling switch is configured.
+ 
+ The application preserves CefSharp/CEF defaults for Chromium security mechanisms. CefSharp is an embedded engine and does not provide all security services or sandbox guarantees of Google Chrome; this app does not claim Chrome-equivalent hardening or Safe Browsing. No additional sandbox-disabling flags are added. It has no automatic engine updater.
+@@ -51,14 +51,28 @@ On a Windows machine, also verify:
+ 
+ 1. Launch two different profiles; set persistent cookies/localStorage in DevTools on the same test origin. Confirm data differs and survives a restart. A second process for the same profile must fail clearly.
+ 2. Browse two pages and use back/forward, reload/stop, close tabs during loading and close the window with multiple tabs. Exercise shortcuts while web content has focus.
+-3. Request geolocation and camera from a secure test page: both must reject. Test a notification prompt, automatic popup, user-clicked web popup and a download.
++3. Request supported permissions on a secure same-origin page: verify the native prompt names the correct origin, dismiss/deny it, then separately test explicit allow using test hardware. Cross-origin/insecure/unsupported requests must reject. Test navigation/closure while a prompt is visible. Never treat a missing-device/OS error as proof of browser policy.
+ 4. Visit a controlled invalid-certificate endpoint; navigation must fail. Confirm ordinary valid HTTPS still loads.
+ 5. Disconnect networking and reload diagnostics; check the DevTools network panel for no outbound diagnostics requests.
+ 6. Run the published executable on a clean Windows x64 machine with the VC++ runtime, and verify subprocess startup and DevTools.
+ 
+-Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. The first remote Windows CI run also failed compilation; corrections are prepared locally, but the GitHub integration rejected writes with HTTP 403. No release artifact has been produced. See BUILD-STATUS.md for the run link, compiler diagnostics and pending fixes.
++Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. Windows CI is the source of executable verification. See BUILD-STATUS.md for exact tested revisions and results; local compilation is unavailable.
+ 
+-Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/151.3.240), [CefSharp project](https://github.com/cefsharp/CefSharp).
++Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/154.0.340), [CefSharp project](https://github.com/cefsharp/CefSharp).
++
++## Browser integration suite
++
++On Windows, use a fresh root for each complete write/read pair:
++
++```powershell
++dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
++$root = Join-Path $env:TEMP ('aegis-tests-' + [guid]::NewGuid().ToString('N'))
++dotnet run --project AegisBrowser.BrowserTests -c Release --no-build -- write $root
++# Run read only if write passed; it starts a separate CEF process over the same caches.
++dotnet run --project AegisBrowser.BrowserTests -c Release --no-build -- read $root
++```
++
++The test-only WinForms executable uses the production handlers and in-memory HTTPS fixtures. It checks real cookies/localStorage across contexts, browsers and process restarts, OAuth-style redirects/opener messaging, rapid tab disposal and renderer recovery. It invokes CDP inside the test process to simulate user activation and crash a renderer; no network debugging listener or security bypass is enabled. Real-provider OAuth and interactive grant/deny UX remain manual checks.
+ 
+ ## Privacy filtering
+ 
+@@ -67,3 +81,39 @@ The **Privacy** toolbar button opens Standard/Strict/Custom settings, editable d
+ The bundled tracking list is intentionally small. Import standard UTF-8 privacy lists to extend it; unsupported syntax is reported. This is a documented network-syntax subset, not a full EasyList/uBlock implementation. Strict mode can break third-party dependencies and embedded authentication; explicit exceptions restore compatibility without changing Chromium security settings.
+ 
+ See [privacy filtering documentation](../docs/privacy.md) for syntax, precedence, persistence, limitations and Windows acceptance cases. Real Chromium filtering tests are built and run by the Windows workflow before publishing. Consult [BUILD-STATUS.md](../BUILD-STATUS.md) for verified results; a compiled binary alone does not establish GUI acceptance.
++
++## Portable release candidate
++
++See [Windows installation instructions](../docs/INSTALL-WINDOWS.md) and [release review gates](../docs/release-review.md). Windows CI packages `AegisBrowser-v0.1.0-rc1-win-x64-portable.zip` with a SHA-256 checksum, verifies every extracted file and smoke-tests the extracted executable. The app folder is portable; profile data remains in LocalAppData. A successful candidate build does not replace manual stable-release acceptance.
++
++## Authorized testing lab
++
++Launch `AegisBrowser.exe --lab=baseline|strict|custom|failure` (choose one value) for the isolated, mock-only WinForms testing dashboard. See [lab fixtures, scenarios, report policy and acceptance steps](../docs/authorized-lab.md). No real detection providers or credentials are configured.
++
++## Security audit additions (unverified Windows revision)
++
++Read the [latest status](../BUILD-STATUS.md) before using historical test counts. Current changes tighten diagnostics to top-level GET requests on its exact origin/root and add response-header CSP with inline hashes, frame denial, no CORS grant and no-store. Editing diagnostics HTML requires updating its hashes; `python scripts/security_audit.py` checks both. Native sandbox equivalence is explicitly **not** claimed; see [limitations](../docs/SECURITY-LIMITATIONS.md).
++
++Privacy diagnostics now expose budget, unknown-site/type and input fallbacks. Settings Apply compiles policies off the UI thread and cancels before publication if the settings window closes. No automatic list updater was added. Downloads remain disabled. Mock sessions expire server-side and support `POST /reset`; the currently checked-out lab remains its earlier mock-only implementation.
++
++Windows verification commands for this revision (do not treat these instructions as executed results):
++
++```powershell
++python scripts/security_audit.py
++python -m unittest discover -s scripts -p test_security_audit.py -v
++dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
++dotnet build AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 -p:SelfContained=true --no-restore
++dotnet run --project AegisBrowser.Tests -c Release
++dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
++$root = Join-Path $env:TEMP ('aegis-audit-' + [guid]::NewGuid().ToString('N'))
++# Stop immediately on any nonzero exit or native assertion; the workflow enforces this.
++./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe write $root
++./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe read $root
++dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
++./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe
++dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true --no-build --no-restore -o artifacts/win-x64
++python scripts/security_audit.py --assets AegisBrowser/obj/project.assets.json --publish artifacts/win-x64 --sbom artifacts/win-x64/aegis-sbom.cdx.json
++./scripts/package-portable.ps1
++```
++
++The workflow additionally performs repeated storage reads, privacy settings write/read, vulnerable-package inventory and observed subprocess cleanup. Release output excludes project PDBs; use a Debug build when investigating locally rather than weakening release tests. Packaging refuses a dirty/untracked source checkout and does not overwrite or clean user work. Run Lab smoke only on a disposable Windows account. No signed executable or new portable artifact was produced during this macOS audit.
+diff --git a/AegisBrowser/SecurityHandlers.cs b/AegisBrowser/SecurityHandlers.cs
+index dc21fdb..f149148 100644
+--- a/AegisBrowser/SecurityHandlers.cs
++++ b/AegisBrowser/SecurityHandlers.cs
+@@ -4,33 +4,54 @@ using CefSharp.Handler;
+ 
+ namespace AegisBrowser;
+ 
+-// No asynchronous permission grants to survive navigation or closure: all requests fail closed.
+-internal sealed class DenyPermissions(Action<string> report) : PermissionHandler
++// Chromium owns the origin-labelled consent UI and cancellation lifecycle. We never
++// manufacture a grant or persist an application-side permission decision.
++internal sealed class OriginPermissions(Action<string> report) : PermissionHandler
+ {
+     protected override bool OnShowPermissionPrompt(IWebBrowser control, IBrowser browser, ulong promptId,
+         string origin, PermissionRequestType permissions, IPermissionPromptCallback callback)
+     {
++        const PermissionRequestType supported = PermissionRequestType.Geolocation | PermissionRequestType.Notifications;
++        using var main = browser.MainFrame;
++        if (permissions != PermissionRequestType.None && (permissions & ~supported) == 0
++            && BrowserPolicy.CanPromptPermission(origin, main.Url))
++        {
++            callback.Dispose();
++            report($"Permission decision requested for {BrowserPolicy.DisplayOrigin(origin)}: {permissions}");
++            return false; // Chrome runtime displays its native, origin-scoped permission UI.
++        }
+         using (callback) callback.Continue(PermissionRequestResult.Deny);
+-        report($"Permission blocked: {permissions} ({origin})");
++        report($"Permission blocked: {permissions} ({BrowserPolicy.DisplayOrigin(origin)})");
+         return true;
+     }
+ 
+     protected override bool OnRequestMediaAccessPermission(IWebBrowser control, IBrowser browser, IFrame frame,
+         string origin, MediaAccessPermissionType permissions, IMediaAccessCallback callback)
+     {
++        const MediaAccessPermissionType supported = MediaAccessPermissionType.AudioCapture | MediaAccessPermissionType.VideoCapture;
++        using var main = browser.MainFrame;
++        if (permissions != MediaAccessPermissionType.None && (permissions & ~supported) == 0
++            && BrowserPolicy.CanPromptPermission(origin, main.Url)
++            && BrowserPolicy.CanPromptPermission(frame.Url, main.Url))
++        {
++            callback.Dispose();
++            report($"Media decision requested for {BrowserPolicy.DisplayOrigin(origin)}: {permissions}");
++            return false; // Native device consent. No blanket capture grant or screen-selection bypass.
++        }
+         using (callback) callback.Cancel();
+-        report($"Media access blocked ({origin})");
++        report($"Media access blocked ({BrowserPolicy.DisplayOrigin(origin)})");
+         return true;
+     }
+ }
+ 
+-internal sealed class SafeRequests(Action<string> openTab, Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null,
+-    Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
++internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null, Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
+ {
+     // During document replacement CEF can expose an empty MainFrame.Url to early
+     // subresource callbacks. Keep only URL strings, never native frame wrappers.
+     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> navigationSites = new();
+ 
++    internal void ForgetBrowser(int identifier) => navigationSites.TryRemove(identifier, out _);
++
+     protected override IResourceRequestHandler GetResourceRequestHandler(IWebBrowser control, IBrowser browser,
+         IFrame frame, IRequest request, bool isNavigation, bool isDownload, string requestInitiator,
+         ref bool disableDefaultHandling)
+@@ -62,8 +83,14 @@ internal sealed class SafeRequests(Action<string> openTab, Action<string> report
+     protected override bool OnOpenUrlFromTab(IWebBrowser control, IBrowser browser, IFrame frame,
+         string url, WindowOpenDisposition disposition, bool userGesture)
+     {
+-        if (userGesture && BrowserPolicy.IsWebUrl(url)) openTab(url);
+-        return true;
++        // Preserve CEF's disposition/opener handling instead of synthesizing an unrelated tab.
++        return !BrowserPolicy.IsWebUrl(url) && url != "about:blank";
++    }
++
++    protected override void OnRenderProcessTerminated(IWebBrowser control, IBrowser browser,
++        CefTerminationStatus status, int errorCode, string errorMessage)
++    {
++        report($"Renderer stopped: {status} ({errorCode}). Reload to recover; unsaved edits may be lost.");
+     }
+ 
+     protected override bool OnCertificateError(IWebBrowser control, IBrowser browser, CefErrorCode code,
+@@ -75,16 +102,78 @@ internal sealed class SafeRequests(Action<string> openTab, Action<string> report
+     }
+ }
+ 
+-internal sealed class SafePopups(Action<string> openTab, Action<string> report) : LifeSpanHandler
++internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null, bool blockAllPopups = false) : LifeSpanHandler
+ {
++    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
++    private volatile bool closing;
++    private readonly TaskCompletionSource<bool> closeReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
++    internal Task OwnerCloseReady => closeReady.Task;
++    private readonly TaskCompletionSource<bool> closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
++    internal Task OwnerClosed => closed.Task;
++
++    private bool ownerClosing; // Accessed only on the CEF UI thread.
++
++    private void CompleteOwnerClose()
++    {
++        if (ownerClosing && popups.IsEmpty && closeReady.TrySetResult(true)) ownerCloseReady?.Invoke();
++    }
++
++    protected override bool DoClose(IWebBrowser control, IBrowser browser)
++    {
++        if (browser.IsPopup) return false;
++        // Suppress CEF's WM_CLOSE to the top-level WinForms owner. Release the
++        // embedded host only after this native close callback has returned.
++        Cef.UIThreadTaskFactory.StartNew(() =>
++        {
++            ownerClosing = true;
++            CompleteOwnerClose();
++        });
++        return true;
++    }
++
++    internal int PopupCount => popups.Count;
++
++    internal void ClosePopups()
++    {
++        closing = true;
++        Cef.UIThreadTaskFactory.StartNew(() =>
++        {
++            foreach (var popup in popups.Values)
++                if (!popup.IsDisposed) popup.GetHost().CloseBrowser(true);
++        });
++    }
++
++    protected override void OnAfterCreated(IWebBrowser control, IBrowser browser)
++    {
++        if (!browser.IsPopup) return;
++        popups[browser.Identifier] = browser;
++        if (closing) browser.GetHost().CloseBrowser(true);
++    }
++
++    protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
++    {
++        if (control.RequestHandler is SafeRequests requests) requests.ForgetBrowser(browser.Identifier);
++        if (browser.IsPopup)
++        {
++            popups.TryRemove(browser.Identifier, out _);
++            // Keep the embedded owner and its shared handler alive until all
++            // native popup close callbacks have finished.
++            Cef.UIThreadTaskFactory.StartNew(CompleteOwnerClose);
++        }
++        else Cef.UIThreadTaskFactory.StartNew(() => closed.TrySetResult(true));
++    }
++
+     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,
+         string targetUrl, string targetFrameName, WindowOpenDisposition disposition, bool userGesture,
+         IPopupFeatures features, IWindowInfo windowInfo, IBrowserSettings settings,
+         ref bool noJavascriptAccess, out IWebBrowser newBrowser)
+     {
+         newBrowser = null!;
+-        if (userGesture && BrowserPolicy.IsWebUrl(targetUrl)) openTab(targetUrl);
+-        else report("Popup blocked.");
++        // Keep CEF's original browsing context: window.opener, POST data, named-window
++        // reuse and postMessage are required by OAuth. CEF still enforces COOP/SOP.
++        if (!blockAllPopups && !closing && userGesture && (string.IsNullOrEmpty(targetUrl) || targetUrl == "about:blank"
++            || BrowserPolicy.IsWebUrl(targetUrl))) return false;
++        report("Popup blocked: a user gesture and a web destination are required.");
+         return true;
+     }
+ }
+@@ -100,11 +189,29 @@ internal sealed class DenyDownloads(Action<string> report) : DownloadHandler
+ 
+ internal sealed class DiagnosticsFactory : ISchemeHandlerFactory
+ {
++    internal const string ContentPolicy = "default-src 'none'; script-src 'sha256-Vr16WnsRDYXpmpdDKnVzCiZXqq9mxdyGweG4e2TxPiU='; style-src 'sha256-vqvBJtFIvTyLNPQhSyytLy/wqz7DM/56idLI0X6a04Q='; connect-src 'none'; img-src 'none'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+     public IResourceHandler Create(IBrowser browser, IFrame frame, string schemeName, IRequest request)
+     {
+-        using var stream = typeof(DiagnosticsFactory).Assembly.GetManifestResourceStream("AegisBrowser.diagnostics.html")
+-            ?? throw new InvalidOperationException("Diagnostics resource missing.");
+-        using var reader = new StreamReader(stream);
+-        return ResourceHandler.FromString(reader.ReadToEnd(), mimeType: "text/html");
++        var permitted = BrowserPolicy.CanServeDiagnostics(request.Url, request.Method,
++            frame?.IsMain == true, request.ResourceType == ResourceType.MainFrame);
++        string body = "Diagnostics are available only as a top-level local page.";
++        if (permitted)
++        {
++            using var stream = typeof(DiagnosticsFactory).Assembly.GetManifestResourceStream("AegisBrowser.diagnostics.html")
++                ?? throw new InvalidOperationException("Diagnostics resource missing.");
++            using var reader = new StreamReader(stream);
++            body = reader.ReadToEnd();
++        }
++        var resource = new ResourceHandler(permitted ? "text/html" : "text/plain",
++            new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body)), autoDisposeStream: true, charset: "utf-8")
++        { StatusCode = permitted ? 200 : 403, StatusText = permitted ? "OK" : "Forbidden" };
++        resource.Headers.Clear(); // ResourceHandler's defaults must not grant cross-origin access.
++        resource.Headers["Content-Security-Policy"] = ContentPolicy;
++        resource.Headers["X-Frame-Options"] = "DENY";
++        resource.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
++        resource.Headers["X-Content-Type-Options"] = "nosniff";
++        resource.Headers["Cache-Control"] = "no-store";
++        resource.Headers["Referrer-Policy"] = "no-referrer";
++        return resource;
+     }
+ }
+diff --git a/AegisBrowser/diagnostics.html b/AegisBrowser/diagnostics.html
+index c663a80..639568e 100644
+--- a/AegisBrowser/diagnostics.html
++++ b/AegisBrowser/diagnostics.html
+@@ -2,7 +2,7 @@
+ <html lang="en">
+ <head>
+ <meta charset="utf-8">
+-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
++<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Vr16WnsRDYXpmpdDKnVzCiZXqq9mxdyGweG4e2TxPiU='; style-src 'sha256-vqvBJtFIvTyLNPQhSyytLy/wqz7DM/56idLI0X6a04Q='; connect-src 'none'; img-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <title>Aegis · Local diagnostics</title>
+ <style>
+@@ -13,7 +13,7 @@
+ <small>AEGIS BROWSER / LOCAL DIAGNOSTICS</small>
+ <h1>What this browser exposes</h1>
+ <p>This embedded page reads browser properties locally. It makes no network requests and stores no report. Values are observations, not an anonymity score. Profiles separate stored browsing data; they do not change your device or network identity.</p>
+-<p>Camera, microphone, screen sharing, location and other permission requests are denied. Downloads are disabled.</p>
++<p>Supported secure same-origin camera, microphone, location and notification requests use Chromium consent prompts. Other permissions, screen capture and downloads are denied. This page requests no permissions.</p>
+ <button id="refresh">Refresh report</button>
+ <pre id="result" aria-live="polite">Collecting local observations…</pre>
+ <script>
+diff --git a/BUILD-STATUS.md b/BUILD-STATUS.md
+index ae6ed54..abc1153 100644
+--- a/BUILD-STATUS.md
++++ b/BUILD-STATUS.md
+@@ -1,3 +1,186 @@
++# Security audit working-tree update — 2026-10-26
++
++**Not release-ready.** Current local branch is `release/windows-rc`, HEAD `9fd457276d3e741ade1041ea37655115b7beea4c`, plus preserved pre-existing edits and this uncommitted audit. It is not the saved PR #7/UI-redesign revision. No commit, push, PR-state change or release was made. Remote lookup failed with `Could not resolve host: github.com`.
++
++**Implemented, runtime unverified:** diagnostics request/response/CSP hardening; malformed-filter and IDN handling; structured fallback counters and input bounds; cancelable background filter compilation and bounded UTF-8 list import with SHA-256; expiring/revocable bounded mock-lab sessions and atomic decision versions; guarded native-close retries and navigation refusal for retiring tabs; independent shutdown cleanup; permission-message redaction and callback snapshot cleanup; explicit DPI/accessibility names; dependency audit/update configuration; payload exclusions, clean-source packaging and package/file SBOM generation; observed-descendant smoke checks. Existing TLS rejection, origin consent, native popup behavior, downloads-denied policy and all prior test assertions are retained.
++
++| Verification on this working tree | Actual result |
++| --- | --- |
++| Python source security gates | PASS: 7 static hash/XML/pattern checks |
++| Python audit/payload/inventory regression tests | PASS: 5 tests using synthetic payloads; real release inventory not generated |
++| Project XML / diagnostics script syntax | PASS: 7 XML files; node --check (no browser execution) |
++| git diff --check | PASS |
++| Required dotnet restore/build/console commands | BLOCKED before execution: `dotnet: command not found`; common SDK locations absent |
++| New/existing C# tests, NuGet vulnerability findings and benchmarks | BLOCKED: no SDK/feed execution; no test counts or timing results claimed |
++| Native Windows browser/filtering/storage/lifecycle/permission tests | BLOCKED: macOS host, no Windows CEF runtime |
++| Publish, real SBOM, portable ZIP, extraction and smoke | BLOCKED: no candidate build/PowerShell/Windows execution |
++| Manual acceptance | NOT RUN for these changes |
++
++**High-severity residual risk:** upstream CefSharp native source sets `no_sandbox = true`. Absence of an application-owned disabling switch does not prove an OS sandbox. Exact shipped native behavior remains unverified; no unsupported override was added. This browser must not claim Chrome-equivalent sandboxing or Safe Browsing. CefSharp remains consistently pinned at 154.0.340; official release metadata was reviewed, but no upgrade or complete CVE-coverage claim is made.
++
++See [remediation inventory](docs/REMEDIATION-REPORT.md), [threat model](docs/THREAT-MODEL.md), [security limitations](docs/SECURITY-LIMITATIONS.md), [test matrix](docs/TEST-MATRIX.md) and [release gates](docs/RELEASE-CHECKLIST.md). The user-reported product rendering issue remains unreproduced; no blanket allowlist or response rewrite was introduced. Saved PR #7/redesign/Python work and unrelated edits remain intact.
++
++Recovery: [snapshot instructions](review-deliverables/security-audit-2026-10-26/README.md). The temporary pre-audit baseline is unavailable; this snapshot includes pre-existing browser work and is not an audit-only patch.
++
++The historical records below refer only to their stated revisions and **are not verification of this working tree**.
++
++---
++
++# Authorized mock security lab — verified 2026-10-23
++
++[Draft PR #6](https://github.com/roshan-pandit1/AegisBrowser/pull/6), `feature/authorized-testing-lab`, is based on main `98a8835575c22268a456a64a5033b65e9d2c7840` (merged Smart Search). It remains draft and unmerged. The user explicitly confirmed mock-only scope: no real provider, credentials, live adapter or external detection-service calls. `ISecurityTestAdapter` remains an extension interface; only the mock is implemented.
++
++## Actual Windows verification
++
++[Run 39939721741](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741), [job 120367883691](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/job/120367883691), **SUCCESS** for implementation `2a8476e1fbd4b9f5e1c567f32098c7da71b13982`. Completed logs and artifact metadata were inspected. This status-only commit follows that verified implementation; its own CI result is reported in PR #6.
++
++| Check | Actual result |
++| --- | --- |
++| Windows restore/build | PASS; windows-latest, .NET 8, win-x64 Release; zero compiler warnings/errors |
++| Lab server/model | PASS: 23 checks (loopback, containment, redirects, session separation, allow/challenge/deny/unavailable enforcement, invalid/canceled decisions, redaction, bounds and lab profile paths) |
++| Existing suites | PASS: 56 privacy + 49 address/search + 50 policy/profile checks |
++| Native browser suite | PASS: 54 checks, including all four lab profiles, baseline versus Strict/Custom third-party resources, mock protected-access decisions, redirect instrumentation, TLS rejection, connection failure and lab shutdown |
++| Persistent browser storage | PASS: 8 checks in each of three fresh read processes; existing cookie/localStorage isolation and persistence retained |
++| Native shutdown | PASS: completion markers and zero exit in all four browser suite processes; assertion gate retained |
++| Chromium filtering / CORS | PASS: 20 checks |
++| Settings restart | PASS: 3 write + 4 read checks |
++| Self-contained publish | PASS; complete publish directory uploaded |
++| Published/extracted application smoke | PASS for both ordinary browser and --lab=baseline, including cache creation and normal close |
++| Portable archive | PASS: 852 file hashes verified; portable ZIP and checksum uploaded |
++
++[Portable Windows x64 test artifact](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/artifacts/12495776550), 274,245,542 bytes. Inner ZIP SHA-256: `e6cd75efc3a927b57aeabcae6729a807a76bf37eecf89a8d0bf5da69ef5862f7`. [Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939721741/artifacts/12495581854). The self-contained build includes the ASP.NET Core framework needed by the fixtures; no additional NuGet library was introduced. See [lab instructions](docs/authorized-lab.md) and [installation](docs/INSTALL-WINDOWS.md).
++
++## Failure corrected
++
++[Initial run 39938808440](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39938808440) compiled but failed waiting for the baseline third-party fixture. Diagnostic [run 39939397693](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39939397693) identified `SyntaxError: Unexpected end of input`: the fixture's JavaScript loop lacked its closing brace. The script was corrected. The original assertions and timeouts remain intact; the subsequent verified run passes.
++
++## Boundaries and remaining manual acceptance
++
++No lab GUI acceptance was performed manually by this agent or reported by the user. Previous user-reported Smart Search acceptance below does not cover the lab. Remaining: all scenario controls and profile launch UX; keyboard/accessibility and 100/150/200% scaling; rule editing; JSON save/cancel/unwritable destination; simultaneous lab/normal profiles; close during initialization/traffic; DNS behavior under the user's OS resolver/proxy; and the historical real-site/permission/DevTools/offline diagnostics gates.
++
++TLS and native connection failure were exercised in CI. The explicit reserved .invalid DNS scenario is implemented but not asserted in CI; resolver/proxy outcomes vary and are not a claimed pass. Default fixtures use loopback, not a real provider. The lab request allowlist and CSP are not an OS network sandbox. Chromium background traffic and OS DNS are not comprehensively contained. Existing CefSharp 154, certificate validation, permissions, web security and normal privacy/Smart Search behavior remain enabled; no security-bypassing switches were added.
++
++Lab profiles use a separate LabProfiles root. Server authorization is deliberately memory-only and expires when the server stops. Random fixture ports can change localStorage origins between launches; CI's persistent-storage checks use the existing dedicated browser fixtures. Reports exclude raw URLs/paths, credentials, headers, cookies and bodies; they retain bounded typed events, status codes, sanitized destinations, request IDs and timing. No actual provider certification or stable-release certification is claimed.
++
++Local `dotnet --info` fails (SDK not installed on this macOS host); Windows results come from CI. Local `git diff --check` passes. Local working changes are preserved; commits were published through the authenticated GitHub connector.
++
++---
++
++## Previous Smart Search and browser verification (historical)
++
++# PR #5 review and user-reported acceptance — 2026-10-23
++
++PR #5 is prepared for human review against `main`. Main at `023a5709ff3af0dbc3edf319e4ebe8b827d79cf0` contains PR #4's merge and the original privacy base `8a78d77`; retargeting does not require reintroducing those changes. No automatic merge is authorized or performed.
++
++## User-reported manual results
++
++The user reported the following working in manual testing. These are **user-reported PASS**, not tests performed or independently witnessed by this agent and not CI results. The report did not specify the exact binary revision, Windows version, selected providers or display scaling.
++
++| Case | User-reported result |
++| --- | --- |
++| Single-word search | PASS |
++| Direct domain navigation | PASS |
++| Search-engine switching | PASS |
++| Search settings persist after restart | PASS |
++| Per-profile search settings | PASS |
++
++These confirmations supersede the blanket “manual acceptance not run” statement for these five cases only. No failures were reported in these cases. Full release acceptance is still incomplete.
++
++## Automated verification and regression review
++
++Before this documentation update, the latest Windows CI [run 39932369988](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39932369988) passed on `71ead1580710258138eb0d3c5f1d1eaf1b9890dc`. It verified 49 address/search, 56 privacy, 50 policy/profile, 38 browser write checks, 8 storage checks in each of three read processes, 20 filtering checks and 3 write + 4 read settings checks. Restore/build/publish, TLS rejection, CORS, native shutdown, published-app smoke and 712-file portable extraction checks passed. The prior sections preserve the detailed implementation evidence. CI for this subsequent documentation commit is reported on PR #5; this document does not pre-claim its result.
++
++Review of the 12-file feature diff found no blocking regression. The resolver separates URLs from encoded queries, permits only the supported internal addresses and HTTP(S) navigation, and does no network work while typing. Engine choices are fixed HTTPS templates. Search settings use profile-local atomic replacement and preserve unreadable files; the active engine changes only after saving succeeds. MainForm continues to use Chromium Load/Back/Forward and existing lifecycle handlers. No CefSharp version, TLS validation, permission policy, privacy engine, popup handler or native disposal code is changed by this feature. The existing browser tests retain those regression gates. This is a code/CI review, not a claim of complete GUI validation.
++
++## Remaining acceptance
++
++Not confirmed by the user's report: all four real providers individually; multiword/Unicode query UX; explicit URL, localhost and IPv6 GUI behavior; Enter/Ctrl+L with web content focused; multi-tab interaction and Back/Forward UX; keyboard-only settings; 100/150/200% scaling/accessibility; simultaneous profile processes; corrupt/unwritable settings error UX; real OAuth, permission/device prompts, DevTools, offline diagnostics and the other historical release gates. Automated coverage of some of these cases does not establish a manual pass. No stable-release certification is implied.
++
++---
++
++## Earlier implementation verification (historical)
++
++# Smart address bar verification — 2026-10-23
++
++[Draft PR #5](https://github.com/roshan-pandit1/AegisBrowser/pull/5) targets `feature/privacy-filtering` from `feature/smart-address-search`, based on `8a78d77262e9bfb59ebc6191951209dda0accb5a`. GitHub reports PR #4 already merged as of this verification; this task did not merge or modify it. PR #5 remains draft with the requested base branch. CefSharp 154.0.340, .NET 8, privacy filtering and Chromium security settings are unchanged.
++
++## Actual Windows results
++
++[Windows run 39931668616](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616), [job 120341176849](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/job/120341176849), **SUCCESS** for implementation `f6204a3ade0c96a993ac7b7a028a7b1263480f2a`. Completed logs and artifact metadata were inspected. This subsequent status commit documents that tested revision.
++
++| Check | Actual result |
++| --- | --- |
++| Workflow | windows-latest; setup-dotnet installs .NET 8; global.json pins 8.0.4xx |
++| Restore / Release win-x64 application and browser harness builds | PASS; zero compiler warnings/errors |
++| Address/search resolution and settings | PASS: 49 checks |
++| Existing privacy / policy/profile suites | PASS: 56 + 50 checks |
++| Native browser write suite | PASS: 38 checks, including submitted searches, no search while typing, Unicode query decoding, engine changes, current-tab navigation/history and existing popup/renderer/shutdown cases |
++| Persistent browser storage | PASS: 8 checks in each of three fresh read processes |
++| Native shutdown | PASS: all four browser processes report CEF shutdown; zero exits; native assertion gate enabled |
++| Chromium filtering / CORS | PASS: 20 checks |
++| Settings process restart | PASS: 3 write + 4 read checks, including search selection through production settings UI |
++| TLS | PASS: untrusted certificate rejected with CertAuthorityInvalid |
++| Self-contained publish, payload and published-app smoke | PASS |
++| Portable archive | PASS: 712 file hashes verified, extracted executable startup/normal-close smoke passed |
++| Publish directory and portable ZIP uploads | PASS |
++
++[Portable Windows x64 test artifact](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/artifacts/12491409149) (262,467,120 bytes) includes the inner ZIP, checksum, installation instructions and SEARCH.md. Inner ZIP SHA-256: `895c4f9311609189bf1120ec246d34c4b6d56267c2db47a9453b3862e5c6e661`. [Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39931668616/artifacts/12492570314). See [installation](docs/INSTALL-WINDOWS.md) and [search behavior/settings](docs/search.md).
++
++## Defect corrected and limits
++
++Initial [run 39716359894](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39716359894) failed `navigate [::1]:8080`: .NET's IPAddress parser accepted the bracketed authority, which the bare-IPv6 path incorrectly wrapped again. The resolver now reserves that path for unbracketed literals, with explicit bracketed loopback and non-loopback port regressions. No timeout or assertion was relaxed. The subsequent Windows run above passes all suites.
++
++Manual GUI acceptance is **NOT RUN**. Remaining cases: all four real search providers; Enter/Ctrl+L and keyboard-only settings with web content focused; multi-tab interaction; 100/150/200% display scaling; simultaneous named profiles; unwritable/corrupt settings UX; and all previous manual release gates below. Automated searches use local HTTPS fixtures, not real-provider availability or authentication tests. No CAPTCHA, identity, TLS or anti-fraud circumvention is added. This is a test candidate, not a stable-release certification.
++
++Local `dotnet --info` fails with command not found on this macOS ARM64 environment; executable results above are from Windows CI. Local `git diff --check` passes. Local working files are retained; remote commits were published through the authenticated GitHub connector because local Git metadata is restricted.
++
++---
++
++## Previous Windows release review (historical)
++
++# Windows release review — 2026-10-22
++
++**Windows automation passes; manual release acceptance remains incomplete. PR #4 is draft and unmerged.** Architecture remains .NET 8 / WinForms / CefSharp. CefSharp is now pinned to **154.0.340** (Chromium 154.0.8037.98) in the app and both browser harnesses.
++
++## Verified Windows result
++
++[Windows run 39709234492](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492), [job 119596331252](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/job/119596331252), completed successfully for implementation `487e1419cdafd5bdf9e2d13bc3e916726bbef9e8`. Completed logs and artifact metadata were inspected. This status update changes documentation after that verified implementation.
++
++| Check | Actual result |
++| --- | --- |
++| Runner / SDK | windows-latest, Windows x64, .NET 8.0.426 |
++| Restore / Release win-x64 app and harness builds | PASS; zero warnings and errors |
++| Privacy / policy and profile checks | PASS: 56 + 50 |
++| Browser integration write process | PASS: 31 checks, including popup ownership, tab/loading shutdown, renderer recovery, native close acknowledgement, sibling survival and TLS rejection (`CertAuthorityInvalid`) |
++| Persistent cookie/localStorage reads | PASS: 8 checks in each of three fresh processes using the same saved profiles |
++| Clean process termination | PASS: CEF-shutdown marker and zero exit in all four integration processes; native assertion gate remained enabled |
++| Chromium privacy filtering / settings | PASS: 20 checks, including all modes, import/rules/exceptions/pause and enforced CORS |
++| Settings process restart | PASS: 2 write + 3 read checks |
++| Self-contained publish and app smoke | PASS |
++| Portable ZIP round trip | PASS: 711 file hashes verified; extracted application startup/normal-close smoke passed |
++| Publish directory and portable artifact uploads | PASS |
++
++[Portable Windows x64 candidate](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/artifacts/12396835295), artifact ID `12396835295`, 262,457,683 bytes. The artifact contains the application ZIP and its checksum file. **Inner portable ZIP SHA-256:** `99265af54af447c70e6bd6b32b10c0e7b653e9687fa887e4b42449e299fc8af1`. GitHub's outer artifact digest is different: `3116c15622e4aea01cb5e900a1e92d1d9178b4f344d4875eb531792de4ee1892`.
++
++[Complete publish directory](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39709234492/artifacts/12396033393), artifact ID `12396033393`, 261,647,790 bytes. See [installation instructions](docs/INSTALL-WINDOWS.md).
++
++## Failures investigated and corrections
++
++1. [Run 39616815340](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39616815340) failed with Aura assertions and unexpected `WM_CLOSE` of the storage host. `DoClose` returns true for embedded browsers, leaving host teardown to the app. Disposing the adapter at this point queues another native close while handlers are released. `BrowserView` now releases its WinForms host after close readiness, waits for `OnBeforeClose` to finish, then permits adapter disposal. Readiness also waits for owned popups. Repeated release calls share one task. Tests explicitly prove sibling browsers and their storage remain usable.
++2. [Run 39619861386](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39619861386) reached the previously blocked TLS test, which failed with `ConnectionClosed`. The fixture's ephemeral key was unsuitable for .NET 8 Schannel. It now imports a temporary user key container without adding certificate trust. Certificate-specific rejection is still required; transport failure is not accepted.
++3. [Run 39620364932](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39620364932) completed write and read checks but retained an intermittent Aura assertion. Direct native destruction and hide-before-destroy experiments on CEF 151 also failed, including [run 39708655361](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/39708655361). The assertion maps to `Window::GetToplevelWindow()` after destruction in bundled Chromium 151.0.7922.174, including CEF-managed popup closure. Those Win32 workarounds were removed. Upgrading all harnesses and the app to stable CefSharp 154.0.340 cleared the remaining native failure with the same assertion gate and expanded tests. No individual upstream fixing commit is claimed.
++4. Inspector selection now follows the request observation ID across refresh; its Windows regression passes. No timeout increases, assertion exclusions, security switches or runtime-style changes were used to obtain the passing run.
++
++## Remaining release gates
++
++All human-operated cases in [release review](docs/release-review.md) and [Windows acceptance plan](docs/windows-acceptance-v0.1.md) remain **NOT RUN**: clean Windows installation, full navigation/keyboard/stop UX, tab/window close races, real OAuth, origin permission consent and device handling, DevTools, cold offline diagnostics, sustained-traffic inspector actions, large imports, settings warning/upgrade/crash recovery, scaling and accessibility. Automated CEF coverage above is partial and is not a manual GUI acceptance pass.
++
++TLS rejection and Chromium web-security protections remain enabled; no sandbox-disabling switches, identity spoofing or security-check circumvention was added. Local execution remains unavailable on this macOS host without dotnet; all Windows results above come from CI.
++
++---
++
++## Historical privacy-only verification (superseded by current review)
++
+ # Privacy filtering verification — 2026-10-21
+ 
+ [PR #4](https://github.com/roshan-pandit1/AegisBrowser/pull/4), branch `feature/privacy-filtering`, implements the four privacy phases on the existing .NET 8 / WinForms / CefSharp 151.3.240 architecture. It is based on `main` at `ee2f01a` and does not include or overwrite the separate unfinished browser-compatibility work in PR #3 or its local working files.
+diff --git a/README.md b/README.md
+index 34f79a5..76b8b5d 100644
+--- a/README.md
++++ b/README.md
+@@ -10,3 +10,20 @@ dotnet build AegisBrowser/AegisBrowser.csproj -c Release --no-restore
+ dotnet run --project AegisBrowser.Tests -c Release
+ dotnet run --project AegisBrowser -c Release -- --profile=Personal
+ ```
++
++## Security audit and release status
++
++This checkout contains uncommitted audit improvements; it is **not a verified release candidate**. See [current evidence](BUILD-STATUS.md), [security policy](SECURITY.md), [architecture](docs/SECURITY-ARCHITECTURE.md), [limitations](docs/SECURITY-LIMITATIONS.md) and [acceptance matrix](docs/TEST-MATRIX.md). Historical artifacts do not validate new source changes.
++
++Additional source checks (Python 3.12+) and portable .NET tests:
++
++```sh
++python scripts/security_audit.py
++python -m unittest discover -s scripts -p test_security_audit.py -v
++dotnet run --project AegisBrowser.Tests -c Release -- --core-only
++dotnet run --project AegisBrowser.Tests -c Release -- --benchmark
++```
++
++`--core-only` deliberately omits the loopback HTTP lab suite; the default console command and Windows workflow still run it. No benchmark timings are currently verified. Restore audits direct/transitive dependencies; high/critical advisories or missing audit data fail instead of being silently suppressed.
++
++For exact Windows browser/filtering/publish commands, use [build instructions](AegisBrowser/README.md) and the existing [Windows workflow](.github/workflows/windows.yml). Portable packaging requires a clean reviewed checkout, Python 3.12+, PowerShell 7 and Windows. It includes a package/file SBOM, checks payload exclusions, verifies ZIP extraction and runs published/extracted smoke checks. See [release checklist](docs/RELEASE-CHECKLIST.md). Nothing is pushed, signed or published automatically by local audit work.
+diff --git a/docs/privacy.md b/docs/privacy.md
+index 70edd9a..9db2dc5 100644
+--- a/docs/privacy.md
++++ b/docs/privacy.md
+@@ -51,14 +51,22 @@ These cases require an actual Windows desktop. CI startup smoke does not establi
+ 
+ Settings are stored in `privacy.json` next to the profile's Chromium cache. Writes use a flushed temporary file followed by replacement in the same directory. A failed save leaves the active policy unchanged. Malformed settings trigger a visible warning, activate defaults and prevent overwriting the original file until it is repaired/renamed and the browser restarted. Settings are per profile; pause and network history are not persisted. Atomic replacement protects normal interrupted writes, but is not a backup against disk failure.
+ 
+-Hostname-only list rules use an index. Generic patterns use .NET's non-backtracking regex engine with a 50 ms per-pattern timeout and a 25 ms scan budget (checked between rules). If a budget is exhausted, the request is allowed and the inspector states this; availability takes precedence over blocking in this exceptional case. Large generic-pattern lists may therefore provide incomplete coverage. Policy compilation occurs only when applying settings, not in CEF callbacks; large imports can briefly occupy the settings UI.
++Hostname-only list rules use an index. Generic patterns use .NET's non-backtracking regex engine with a 50 ms per-pattern timeout and a shared 25 ms exception/block scan budget (checked between rules). If a budget is exhausted, the request is allowed and the inspector states this; availability takes precedence over blocking in this exceptional case. Large generic-pattern lists may therefore provide incomplete coverage. Policy compilation occurs during startup/loading settings and when applying edits, not in CEF callbacks. UI Apply now prepares an immutable policy off-thread, checks cancellation before publication and preserves the previous policy on failed persistence. Large startup loads, text editing and file I/O still have costs; no measured latency improvement is claimed.
+ 
+ Third-party classification is relative to the top-level page. The supported `domain=` restriction likewise uses the top-level hostname; this differs from engines that scope it to a nested frame's document. Unknown top-level contexts fail open for third-party-only rules. This interception is not a system-wide firewall: service-worker/cache paths, WebSockets, WebRTC and other Chromium background traffic may not have a usable browser/frame context or pass through these callbacks. The inspector is a resource-decision inspector, not a complete packet capture.
+ 
+-Strict mode can break embedded sign-in, payment widgets, video, fonts and CDN dependencies. Add a narrowly scoped resource-domain exception, or temporarily pause for the site and reload. No automatic authentication/security-check detection or bypass is implemented. Top-level navigation, redirects and POST semantics are not rewritten by this engine. Existing popup limitations on `main` remain; the independent popup/OAuth compatibility work is in PR #3.
++Strict mode can break embedded sign-in, payment widgets, video, fonts and CDN dependencies. Add a narrowly scoped resource-domain exception, or temporarily pause for the site and reload. No automatic authentication/security-check detection or bypass is implemented. Top-level navigation, redirects and POST semantics are not rewritten by this engine. The current release review incorporates main's native popup/OAuth compatibility changes. Real-provider acceptance remains required.
+ 
+ ## Automated verification
+ 
+ Run the existing console tests with `dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64`. On Windows, build and run `AegisBrowser.FilteringTests` with `dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true`, then run its generated executable. This harness uses the production request handler with a loopback HTTP fixture; it tests server-side arrival of allowed requests and absence of blocked direct/redirect/iframe requests, Strict mode, exceptions, pause/resume and top-level navigation. It also opens the native Privacy form, but does not automate editing every control.
+ 
+ The workflow runs on `windows-latest`, installs .NET 8, requires the harness's completion marker and exit code, and only then publishes and uploads the complete self-contained win-x64 directory. See BUILD-STATUS.md for actual results and remaining manual tests.
++
++## Audit coverage diagnostics
++
++The inspector now includes structured fallback flags and counts for budget exhaustion, unknown top-level site, unknown CEF resource type and oversized/invalid classification input. Unknown resource types continue as `other` for rule compatibility. Flags can overlap and can accompany a rule-based block; they are coverage observations, not a count of all packets or proof that unobserved traffic was inspected. Clear resets them; pause skips list evaluation and remains explicit. Native coverage verification is pending.
++
++Malformed double-negation, duplicate/conflicting option groups and unsupported regex-engine complexity are rejected as unsupported rules. Anchored IDN URL patterns use canonical hostnames. URL inputs above 65,536 characters fail open with an explicit input-limit reason and are not retained in the origin history. A single regex can still run up to its timeout beyond the cooperative scan deadline. See [security limitations](SECURITY-LIMITATIONS.md) and [test matrix](TEST-MATRIX.md).
++
++Local UTF-8 import now enforces the 8 MB bound while reading, supports a UTF-8 BOM, rejects invalid bytes and displays the content SHA-256 before Apply. Reading runs off the UI thread. The digest identifies bytes; without a trusted expected digest/signature it does not authenticate a publisher. No network updater or automatic replacement is enabled.
+diff --git a/docs/windows-acceptance-v0.1.md b/docs/windows-acceptance-v0.1.md
+index 18231d2..abfa543 100644
+--- a/docs/windows-acceptance-v0.1.md
++++ b/docs/windows-acceptance-v0.1.md
+@@ -1,3 +1,5 @@
++> Current working-tree audit: see [TEST-MATRIX.md](TEST-MATRIX.md) and [REMEDIATION-REPORT.md](REMEDIATION-REPORT.md). Historical results below do not validate the uncommitted 2026-10-26 changes. No new manual PASS is claimed.
++
+ # Aegis Browser v0.1 — Windows GUI acceptance
+ 
+ Status: manual cases below are **NOT RUN**. CI automation is evidence only for its explicitly listed checks. Record tester, date, Windows version, artifact/run URL, commit SHA, result (PASS/FAIL/BLOCKED), exact observed behavior and screenshot/log references for every case. Never infer GUI success from compilation, a visible top-level window, or the policy unit tests.
+@@ -36,16 +38,16 @@ Visit `http://localhost:8765/index.html` in both profiles. Confirm the fixture r
+ | N04 | Visit a controlled HTTPS endpoint with an expired/untrusted certificate, without modifying machine trust. | Navigation rejected, certificate error status, no bypass option. Confirm valid HTTPS still works. Network failure alone is not certificate-denial evidence. |
+ | T01 | Ctrl+T, plus button, load different fixture pages; Ctrl+Tab; switch tabs while one loads. | Independent contents/history; address/title reflect selected tab; inactive-tab events do not replace active address. |
+ | T02 | Ctrl+W and close button; close last tab; rapidly open/close during loading. | Only selected tab closes, last tab replaced by diagnostics, no disposed-control exception/crash. |
+-| T03 | Click fixture user popup link; click delayed automatic-popup button and wait >6 seconds without further interaction. | User HTTP link opens a tab; delayed popup adds no window/tab. Opener-dependent/blank popups are intentionally unsupported. |
++| T03 | Click fixture user popup link; click delayed automatic-popup button and wait >6 seconds without further interaction. | User HTTP link opens a native popup window with its original opener; delayed popup adds no window/tab. Also test user-initiated about:blank followed by a redirect and a callback using postMessage; closing the owner tab must close its popup. |
+ | P01 | Keep profile A open and launch `--profile=ACCEPTANCE-A`. | Duplicate instance rejects clearly, original still works. Different profile B opens concurrently. |
+ | P02 | In profile A fixture set marker A; open same URL in another A tab. In B read before saving, then save B. Read A again. | Same-profile tabs share marker A; B initially lacks A cookie/storage; after B save, A remains A and B is B. Record cookie and localStorage separately. |
+ | P03 | Close both normally, restart each and visit exact same fixture origin/port. | Persistent cookie (`Max-Age=86400`) and localStorage retain each profile's separate marker. This does not test session-cookie persistence. |
+ | P04 | Force-close only a disposable browser instance via Task Manager; reopen that profile. | OS lease releases after process exit; restart succeeds even with a lock filename present. Crash persistence of the last unflushed write is not guaranteed. |
+-| Q01 | Click Geolocation on fixture in A, then B. | Error code 1 (permission denied); no coordinates. Browser status indicates denial. Unsupported/insecure-origin errors are BLOCKED, not proof of denial. |
+-| Q02 | Click Camera and Microphone separately with devices available; repeat in a new tab and after restart. | Request rejects (typically NotAllowedError), no capture indicators/active tracks; browser status reports media denial. NotFoundError/OS-only denial is inconclusive. |
++| Q01 | Click Geolocation on fixture in A, then B. | Native consent prompt identifies the exact requesting origin. Deny/dismiss gives error code 1 and no coordinates; separately test explicit allow on a disposable profile. Cross-origin/insecure requests must reject without a grant. Unsupported/insecure-origin errors are BLOCKED, not proof of denial. |
++| Q02 | Click Camera and Microphone separately with devices available; repeat in a new tab and after restart. | Native prompt identifies the origin; deny/dismiss rejects without active tracks. Separately allow on a disposable test profile and verify only requested devices activate. Cross-origin/insecure requests must reject. NotFoundError/OS-only denial is inconclusive. |
+ | Q03 | Click Screen capture directly (user activation required). | Rejects without granting/capturing a screen. Unexpected picker is FAIL; cancel it. |
+-| Q04 | Click Notifications; repeat after navigation and in the other profile. | Result `denied`, no notification permission grant or persisted allow state. Unsupported API is BLOCKED. |
+-| Q05 | Trigger media/location, immediately close tab or navigate, then open a fresh fixture tab. | No crash, delayed grant, unexpected prompt or capture. Permissions remain denied across tabs/profiles/restarts. |
++| Q04 | Click Notifications; repeat after navigation and in the other profile. | Native prompt identifies the origin. Deny/dismiss does not grant; separately test explicit allow, persistence within the profile and separation from the other profile. Unsupported API is BLOCKED. |
++| Q05 | Trigger media/location, immediately close tab or navigate, then open a fresh fixture tab. | No crash, delayed grant, unexpected prompt or capture. No stale grant occurs; any previously explicit Chromium grant remains scoped to its origin/profile. Cross-origin/unsupported requests remain denied. |
+ | D01 | Click DevTools button and F12 while native web content has focus. Inspect DOM and console, close tools, repeat in another tab. | Tools attach to intended tab and close without closing browser; no remote debugging port configured. |
+ | F01 | Open diagnostics via startup, button and `aegis:diagnostics`; Refresh report and browser reload. | Local report renders with native UA/languages/screen/timezone/WebGL observations; resize then refresh updates viewport. No values are spoofed. Missing APIs show unavailable markers. |
+ | F02 | Close other tabs; open diagnostics DevTools Network, disable cache and clear log. Disconnect network, reload diagnostics and refresh report, then launch a fresh process offline. | Report renders offline. Local HTTPS handler document may appear in Network; there must be no external subresource/fetch/WebSocket requests from this page. This does not assert zero Chromium background traffic. |
+@@ -54,7 +56,7 @@ Visit `http://localhost:8765/index.html` in both profiles. Confirm the fixture r
+ 
+ ## Automated evidence and limits
+ 
+-`dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64` covers address policy, argument rejection, profile paths, file persistence and both same-process and cross-process lease rejection. It does **not** exercise browser cookies or CEF permission callbacks.
++`dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64` covers address policy, argument rejection, profile paths, file persistence and both same-process and cross-process lease rejection. It does **not** exercise CEF itself. The additional AegisBrowser.BrowserTests Windows suite exercises actual CEF storage, popup messaging, tab lifecycle and renderer recovery; interactive permission decisions still require these manual cases.
+ 
+ `pwsh -File tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64` launches the actual published app on Windows with a unique profile, checks the expected top-level window and cache directory, then requests normal close and checks exit code. CI runs it after publish/payload checks. It does **not** inspect page pixels/DOM or prove Chromium permissions, tab behavior or rendered diagnostics. Failures must be investigated; do not add security-disabling switches to make the smoke test pass. A runner without a usable desktop can block GUI smoke testing and does not invalidate a manual workstation test.
+ 
+diff --git a/tests/acceptance/index.html b/tests/acceptance/index.html
+index ef772ec..3d37240 100644
+--- a/tests/acceptance/index.html
++++ b/tests/acceptance/index.html
+@@ -12,8 +12,8 @@ const out = value => document.querySelector('#result').textContent = value;
+ const read = () => out(JSON.stringify({cookie:document.cookie,localStorage:localStorage.getItem('aegis-marker'),secureContext:isSecureContext},null,2));
+ document.querySelector('#save').onclick = () => {const v=document.querySelector('#marker').value;document.cookie='aegis-marker='+encodeURIComponent(v)+'; Max-Age=86400; SameSite=Strict; Path=/';localStorage.setItem('aegis-marker',v);read();};
+ document.querySelector('#read').onclick=read;
+-document.querySelector('#geo').onclick=()=>navigator.geolocation.getCurrentPosition(()=>out('FAIL: location granted'),e=>out('Geolocation error '+e.code+': '+e.message));
+-const media = async constraints => {try {const s=await navigator.mediaDevices.getUserMedia(constraints);s.getTracks().forEach(t=>t.stop());out('FAIL: media granted');} catch(e){out(e.name+': '+e.message);}};
++document.querySelector('#geo').onclick=()=>navigator.geolocation.getCurrentPosition(()=>out('Location granted: PASS only if you explicitly allowed this origin; otherwise FAIL'),e=>out('Geolocation error '+e.code+': '+e.message));
++const media = async constraints => {try {const s=await navigator.mediaDevices.getUserMedia(constraints);s.getTracks().forEach(t=>t.stop());out('Media granted and tracks stopped: PASS only after explicit consent; otherwise FAIL');} catch(e){out(e.name+': '+e.message);}};
+ document.querySelector('#camera').onclick=()=>media({video:true});
+ document.querySelector('#mic').onclick=()=>media({audio:true});
+ document.querySelector('#screen').onclick=async()=>{try{const s=await navigator.mediaDevices.getDisplayMedia({video:true});s.getTracks().forEach(t=>t.stop());out('FAIL: display capture granted');}catch(e){out(e.name+': '+e.message);}};
+diff --git a/tests/acceptance/windows-smoke.ps1 b/tests/acceptance/windows-smoke.ps1
+index c3e9dfd..96a3f42 100644
+--- a/tests/acceptance/windows-smoke.ps1
++++ b/tests/acceptance/windows-smoke.ps1
+@@ -1,19 +1,26 @@
+-param([string]$PublishDirectory = "artifacts/win-x64")
++param([string]$PublishDirectory = "artifacts/win-x64", [switch]$Lab)
+ $ErrorActionPreference = 'Stop'
+ if (!$IsWindows) { throw 'This test requires PowerShell 7 on Windows.' }
+ $exe = Join-Path (Resolve-Path $PublishDirectory) 'AegisBrowser.exe'
+ $profile = 'smoke-' + [guid]::NewGuid().ToString('N')
+ $profilePath = Join-Path $env:LOCALAPPDATA "AegisBrowser/Profiles/profile-$profile"
++$launchArgument = "--profile=$profile"
++$expectedTitle = "Aegis Browser — $profile"
++if ($Lab) {
++    $launchArgument = '--lab=baseline'
++    $profilePath = Join-Path $env:LOCALAPPDATA 'AegisBrowser/LabProfiles/Baseline'
++    $expectedTitle = 'Aegis authorized testing lab — Baseline'
++}
+ $process = $null
+ try {
+-    $process = Start-Process -FilePath $exe -ArgumentList "--profile=$profile" -PassThru
++    $process = Start-Process -FilePath $exe -ArgumentList $launchArgument -PassThru
+     $deadline = [DateTime]::UtcNow.AddSeconds(45)
+     $ready = $false
+     do {
+         Start-Sleep -Milliseconds 250
+         $process.Refresh()
+         if ($process.HasExited) { throw "Browser exited during startup: $($process.ExitCode)" }
+-        if ($process.MainWindowHandle -ne 0 -and $process.MainWindowTitle -eq "Aegis Browser — $profile") {
++        if ($process.MainWindowHandle -ne 0 -and $process.MainWindowTitle -eq $expectedTitle) {
+             $ready = $true
+             break
+         }
+@@ -24,10 +31,28 @@ try {
+     $process.Refresh()
+     if ($process.HasExited) { throw 'Browser exited immediately after showing its window.' }
+     if (!(Test-Path (Join-Path $profilePath 'Cache'))) { throw 'Persistent Chromium cache directory was not created.' }
++    # Capture this application's descendants only; do not inspect command lines or other profiles.
++    $snapshot = @(Get-CimInstance Win32_Process)
++    $owned = [Collections.Generic.HashSet[int]]::new()
++    [void]$owned.Add($process.Id)
++    do {
++        $added = $false
++        foreach ($child in $snapshot) {
++            if ($owned.Contains([int]$child.ParentProcessId) -and $owned.Add([int]$child.ProcessId)) { $added = $true }
++        }
++    } while ($added)
++    $descendants = @($snapshot | Where-Object { $_.ProcessId -ne $process.Id -and $owned.Contains([int]$_.ProcessId) })
+     if (!$process.CloseMainWindow()) { throw 'Could not request a normal window close.' }
+     if (!$process.WaitForExit(15000)) { throw 'Browser did not exit within 15 seconds of normal close.' }
+     if ($process.ExitCode -ne 0) { throw "Browser exited with code $($process.ExitCode)" }
+-    Write-Output 'PASS: Windows published-app window startup, profile cache creation and normal close.'
++    foreach ($child in $descendants) {
++        $remaining = Get-CimInstance Win32_Process -Filter "ProcessId = $($child.ProcessId)"
++        if ($remaining -and $remaining.CreationDate -eq $child.CreationDate) {
++            throw "Browser descendant remained after shutdown: $($child.Name) ($($child.ProcessId))"
++        }
++    }
++    Write-Output "PASS: observed application descendants exited ($($descendants.Count))"
++    Write-Output "PASS: Windows published-app window startup, profile cache creation and normal close. Lab=$Lab"
+     Write-Output 'NOT TESTED: rendered content, navigation, permissions, cookie behavior or visual correctness.'
+ }
+ finally {

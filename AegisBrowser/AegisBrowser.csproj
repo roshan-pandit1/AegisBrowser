@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,8 +13,9 @@
     <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="CefSharp.WinForms.NETCore" Version="151.3.240" />
+    <PackageReference Include="CefSharp.WinForms.NETCore" Version="154.0.340" />
     <ProjectReference Include="../AegisBrowser.Core/AegisBrowser.Core.csproj" />
+    <ProjectReference Include="../AegisBrowser.Lab/AegisBrowser.Lab.csproj" />
     <EmbeddedResource Include="diagnostics.html" />
   </ItemGroup>
 </Project>

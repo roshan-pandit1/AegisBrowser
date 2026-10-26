@@ -4,3 +4,6 @@ artifacts/
 publish/
 .vs/
 .DS_Store
+
+# Python source-audit helper cache only.
+scripts/__pycache__/

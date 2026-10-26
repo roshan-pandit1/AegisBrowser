@@ -32,8 +32,17 @@ public sealed class SiteClassifier
         if (IPAddress.TryParse(host.Trim('[', ']'), out var address)) return address.ToString();
         return new IdnMapping().GetAscii(host.ToLowerInvariant()).ToLowerInvariant();
     }
-    public static string? Host(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var uri)
-        && uri.Scheme is "http" or "https" ? NormalizeHost(uri.IdnHost) : null;
+    public static string? Host(string? url)
+    {
+        if (string.IsNullOrEmpty(url) || url.Length > 65_536 || url.Any(char.IsControl)) return null;
+        try
+        {
+            return Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+                && !string.IsNullOrEmpty(uri.Host) ? NormalizeHost(uri.IdnHost) : null;
+        }
+        catch (ArgumentException) { return null; }
+        catch (UriFormatException) { return null; }
+    }
     public static bool DomainMatches(string host, string domain) => host == domain || (!IPAddress.TryParse(host, out _) && host.EndsWith("." + domain, StringComparison.Ordinal));
     public string Site(string host)
     {

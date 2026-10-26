@@ -1,0 +1,12 @@
+allowed_domains: [localhost, 127.0.0.1]
+external_enabled: false
+submission_enabled: false
+headed: true
+navigation_timeout_ms: 30000
+action_timeout_ms: 10000
+max_pages: 20
+# Completion must be an explicit visible marker on the authorized survey.
+completion_selector: '[data-survey-complete="true"]'
+# Next buttons must be explicitly marked; unknown submit buttons always need approval.
+next_selector: '[data-survey-next="true"]'
+data_dir: local-data

@@ -1,0 +1,126 @@
+From 62e0205e2dc69993fa08d0677c7c65ebd09b50d5 Mon Sep 17 00:00:00 2001
+From: roshan-pandit1 <roshan10pandit@gmail.com>
+Date: Sun, 25 Oct 2026 12:25:07 +0530
+Subject: [PATCH 1/2] Persist profile-local shortcuts and bookmarks with
+ validation
+
+---
+ AegisBrowser.Core/SiteLibraryStore.cs  | 52 ++++++++++++++++++++++++++
+ AegisBrowser.Tests/Program.cs          |  1 +
+ AegisBrowser.Tests/SiteLibraryTests.cs | 33 ++++++++++++++++
+ 3 files changed, 86 insertions(+)
+ create mode 100644 AegisBrowser.Core/SiteLibraryStore.cs
+ create mode 100644 AegisBrowser.Tests/SiteLibraryTests.cs
+
+diff --git a/AegisBrowser.Core/SiteLibraryStore.cs b/AegisBrowser.Core/SiteLibraryStore.cs
+new file mode 100644
+index 0000000..14fbeb1
+--- /dev/null
++++ b/AegisBrowser.Core/SiteLibraryStore.cs
+@@ -0,0 +1,52 @@
++using System.Text.Json;
++
++namespace AegisBrowser.Core;
++
++public sealed record SavedSite(string Title, string Url);
++public sealed record SiteLibrary(SavedSite[] Shortcuts, SavedSite[] Bookmarks)
++{
++    public static SiteLibrary Empty => new([], []);
++}
++
++// Explicitly saved sites only. No browsing history or remote favicon requests.
++public sealed class SiteLibraryStore(string profileDirectory)
++{
++    private readonly string path = Path.Combine(profileDirectory, "sites.json");
++    private bool loadFailed;
++    public SiteLibrary Load()
++    {
++        try {
++            if (!File.Exists(path)) return SiteLibrary.Empty;
++            if (new FileInfo(path).Length > 262144) throw new IOException("Saved sites file is too large.");
++            var value = JsonSerializer.Deserialize<SiteLibrary>(File.ReadAllText(path)) ?? throw new ArgumentException();
++            Validate(value); return value;
++        }
++        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) {
++            loadFailed = true;
++            throw new IOException("Could not load sites.json. Repair or rename it and restart before saving sites.", ex);
++        }
++    }
++    public static void Validate(SiteLibrary value)
++    {
++        foreach (var sites in new[] { value.Shortcuts, value.Bookmarks }) {
++            if (sites is null || sites.Length > 100) throw new ArgumentException("Use at most 100 sites per collection.");
++            foreach (var site in sites)
++                if (site is null || string.IsNullOrWhiteSpace(site.Title) || site.Title.Length > 120 || site.Title.Any(char.IsControl)
++                    || site.Url is null || site.Url.Length > 4096 || site.Url.Any(char.IsControl) || !BrowserPolicy.IsWebUrl(site.Url))
++                    throw new ArgumentException("Saved sites require a title and a valid HTTP(S) address without credentials.");
++        }
++    }
++    public void Save(SiteLibrary value)
++    {
++        if (loadFailed) throw new IOException("Repair or rename sites.json and restart before saving.");
++        Validate(value); Directory.CreateDirectory(profileDirectory);
++        var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
++        try {
++            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
++                JsonSerializer.Serialize(stream, value); stream.Flush(true);
++            }
++            File.Move(temp, path, overwrite: true);
++        }
++        finally { if (File.Exists(temp)) File.Delete(temp); }
++    }
++}
+diff --git a/AegisBrowser.Tests/Program.cs b/AegisBrowser.Tests/Program.cs
+index f2c5706..9d76fe4 100644
+--- a/AegisBrowser.Tests/Program.cs
++++ b/AegisBrowser.Tests/Program.cs
+@@ -12,6 +12,7 @@ if (args.Length == 2 && args[0] == "--probe-lock")
+ 
+ PrivacyTests.Run();
+ AddressTests.Run();
++SiteLibraryTests.Run();
+ await SecurityDecisionTests.Run();
+ var count = 0;
+ void Check(bool condition, string name)
+diff --git a/AegisBrowser.Tests/SiteLibraryTests.cs b/AegisBrowser.Tests/SiteLibraryTests.cs
+new file mode 100644
+index 0000000..d95917c
+--- /dev/null
++++ b/AegisBrowser.Tests/SiteLibraryTests.cs
+@@ -0,0 +1,33 @@
++using AegisBrowser.Core;
++
++internal static class SiteLibraryTests
++{
++    internal static void Run()
++    {
++        var count = 0;
++        void Check(bool value, string name) { if (!value) throw new Exception("FAIL: " + name); count++; }
++        var root = Path.Combine(Path.GetTempPath(), "aegis-sites-" + Guid.NewGuid().ToString("N"));
++        try {
++            var a = new SiteLibraryStore(Path.Combine(root, "a")); var b = new SiteLibraryStore(Path.Combine(root, "b"));
++            Check(a.Load().Shortcuts.Length == 0, "no hardcoded demo shortcuts");
++            var value = new SiteLibrary([new("Unicode café", "https://example.com/a?q=%E6%97%A5")], [new("Docs", "https://example.org/")]);
++            a.Save(value);
++            var restored = new SiteLibraryStore(Path.Combine(root, "a")).Load();
++            Check(restored.Shortcuts.Single() == value.Shortcuts.Single() && restored.Bookmarks.Single() == value.Bookmarks.Single(), "sites persist after reopening");
++            Check(b.Load().Bookmarks.Length == 0, "sites isolated by profile");
++            foreach (var url in new[] { "javascript:alert(1)", "file:///C:/private", "https://name:secret@example.com/" }) {
++                try { a.Save(new([new("Bad", url)], [])); throw new Exception("unsafe site accepted"); }
++                catch (ArgumentException) { count++; }
++            }
++            Check(a.Load().Bookmarks.Single() == value.Bookmarks.Single(), "failed validation preserves saved sites");
++            a.Save(SiteLibrary.Empty); Check(a.Load().Shortcuts.Length == 0 && a.Load().Bookmarks.Length == 0, "site deletion persists");
++            var file = Path.Combine(root, "a", "sites.json"); File.WriteAllText(file, "broken");
++            var broken = new SiteLibraryStore(Path.Combine(root, "a"));
++            try { broken.Load(); throw new Exception("corrupt file accepted"); } catch (IOException) { count++; }
++            try { broken.Save(value); throw new Exception("corrupt file overwritten"); } catch (IOException) { count++; }
++            Check(File.ReadAllText(file) == "broken", "unreadable original preserved");
++        }
++        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
++        Console.WriteLine($"PASS: {count} saved-site checks");
++    }
++}
+-- 
+2.54.0 (Apple Git-157)
+

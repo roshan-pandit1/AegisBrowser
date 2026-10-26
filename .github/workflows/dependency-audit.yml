@@ -1,0 +1,33 @@
+name: Scheduled dependency audit
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Audit pinned dependencies without executing downloaded applications
+        shell: pwsh
+        run: |
+          dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet list AegisBrowser/AegisBrowser.csproj package --include-transitive --vulnerable --format json | Set-Content vulnerabilities.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet list AegisBrowser/AegisBrowser.csproj package --outdated --format json | Set-Content outdated.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: dependency-review-evidence
+          path: |
+            vulnerabilities.json
+            outdated.json
+          if-no-files-found: warn

@@ -1,0 +1,32 @@
+name: Survey browser local verification
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Locate standalone project
+        shell: pwsh
+        run: |
+          if (Test-Path survey_research_browser/pyproject.toml) { "PROJECT_DIR=survey_research_browser" >> $env:GITHUB_ENV } else { "PROJECT_DIR=." >> $env:GITHUB_ENV }
+      - name: Install
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: python -m pip install -e ".[dev]"
+      - name: Chromium
+        run: python -m playwright install chromium
+      - name: Tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: python -m pytest -q --junitxml=test-results.xml
+      - name: Package
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: python scripts/package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SurveyResearchBrowser-windows
+          path: |
+            ${{ env.PROJECT_DIR }}/dist/*.zip
+            ${{ env.PROJECT_DIR }}/dist/*.sha256
+            ${{ env.PROJECT_DIR }}/test-results.xml

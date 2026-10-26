@@ -1,0 +1,50 @@
+Navigation diagnostics local validation
+Host: Darwin
+Source: release/windows-rc HEAD 9fd457276d3e741ade1041ea37655115b7beea4c plus uncommitted changes
+No Windows validation or live survey requests performed.
+
+$ dotnet --info
+BLOCKED before execution: [Errno 2] No such file or directory: 'dotnet'
+
+$ dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64
+BLOCKED before execution: [Errno 2] No such file or directory: 'dotnet'
+
+$ dotnet build AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --no-restore
+BLOCKED before execution: [Errno 2] No such file or directory: 'dotnet'
+
+$ dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64
+BLOCKED before execution: [Errno 2] No such file or directory: 'dotnet'
+
+$ dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
+BLOCKED before execution: [Errno 2] No such file or directory: 'dotnet'
+
+$ python3 scripts/security_audit.py
+PASS static: consistent pinned CefSharp versions
+PASS static: application command-line forwarding disabled
+PASS static: no explicit dangerous production startup switches/settings
+PASS static: diagnostics inline script/style CSP hashes match
+PASS static: diagnostics response and request boundary hooks present
+PASS static: transitive NuGet auditing and failure gates configured
+PASS static: Windows runner and .NET 8 SDK configured
+
+Exit code: 0
+
+$ python3 -m unittest discover -s scripts -p test_security_audit.py -v
+test_actual_source_gates (test_security_audit.AuditTests.test_actual_source_gates) ... ok
+test_credentials_and_debug_files_rejected (test_security_audit.AuditTests.test_credentials_and_debug_files_rejected) ... ok
+test_empty_payload_rejected (test_security_audit.AuditTests.test_empty_payload_rejected) ... ok
+test_inventory_uses_actual_assets_and_file_hashes (test_security_audit.AuditTests.test_inventory_uses_actual_assets_and_file_hashes) ... ok
+test_profile_payload_rejected (test_security_audit.AuditTests.test_profile_payload_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.007s
+
+OK
+
+Exit code: 0
+
+$ git diff --check
+
+Exit code: 0
+PASS: 7 project/props XML parses (not compilation)
+BLOCKED: Windows CEF executable, complete native suites, PowerShell smoke/publish/package verification. Darwin host; dotnet/pwsh absent.

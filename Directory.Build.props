@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <!-- Audit unavailability is not a clean result. High/critical advisories block CI. -->
+    <WarningsAsErrors>$(WarningsAsErrors);NU1900;NU1903;NU1904;NU1905</WarningsAsErrors>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+</Project>

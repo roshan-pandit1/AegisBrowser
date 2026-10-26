@@ -1,0 +1,45 @@
+{
+  "total_count": 2,
+  "artifacts": [
+    {
+      "id": 12566364032,
+      "node_id": "MDg6QXJ0aWZhY3QxMjU2NjM2NDAzMg==",
+      "name": "AegisBrowser-win-x64",
+      "size_in_bytes": 273417384,
+      "url": "https://api.github.com/repos/roshan-pandit1/AegisBrowser/actions/artifacts/12566364032",
+      "archive_download_url": "https://api.github.com/repos/roshan-pandit1/AegisBrowser/actions/artifacts/12566364032/zip",
+      "expired": false,
+      "digest": "sha256:b137e9d8b5f3ccaa373ca61068837d560bd6465cbae98a087ca5369ad99a51fe",
+      "created_at": "2026-10-24T16:25:38Z",
+      "updated_at": "2026-10-24T16:25:38Z",
+      "expires_at": "2027-01-22T16:23:30Z",
+      "workflow_run": {
+        "id": 40111338731,
+        "repository_id": 1426690410,
+        "head_repository_id": 1426690410,
+        "head_branch": "feature/security-lab-mock-allow",
+        "head_sha": "07da0a7b4f563bf56bc19c6f22a602c7ec8b6211"
+      }
+    },
+    {
+      "id": 12566329324,
+      "node_id": "MDg6QXJ0aWZhY3QxMjU2NjMyOTMyNA==",
+      "name": "AegisBrowser-portable-win-x64",
+      "size_in_bytes": 274255928,
+      "url": "https://api.github.com/repos/roshan-pandit1/AegisBrowser/actions/artifacts/12566329324",
+      "archive_download_url": "https://api.github.com/repos/roshan-pandit1/AegisBrowser/actions/artifacts/12566329324/zip",
+      "expired": false,
+      "digest": "sha256:495585c3278921dbe0a6690a33d100efd1b6829532041a407dc5e400daef4a4a",
+      "created_at": "2026-10-24T16:26:18Z",
+      "updated_at": "2026-10-24T16:26:18Z",
+      "expires_at": "2027-01-22T16:23:30Z",
+      "workflow_run": {
+        "id": 40111338731,
+        "repository_id": 1426690410,
+        "head_repository_id": 1426690410,
+        "head_branch": "feature/security-lab-mock-allow",
+        "head_sha": "07da0a7b4f563bf56bc19c6f22a602c7ec8b6211"
+      }
+    }
+  ]
+}

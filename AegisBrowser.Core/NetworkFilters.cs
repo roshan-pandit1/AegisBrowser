@@ -3,8 +3,10 @@ using System.Text.RegularExpressions;
 
 namespace AegisBrowser.Core;
 
-public sealed record NetworkRequest(string Url, string? TopUrl, string Type, bool MainFrame = false);
-public sealed record FilterDecision(bool Blocked, bool? ThirdParty, string Rule);
+public sealed record NetworkRequest(string Url, string? TopUrl, string Type, bool MainFrame = false, bool UnknownResource = false);
+[Flags]
+public enum FilterFallback { None = 0, BudgetExceeded = 1, UnknownSite = 2, UnknownResource = 4, InvalidInput = 8 }
+public sealed record FilterDecision(bool Blocked, bool? ThirdParty, string Rule, FilterFallback Fallback = FilterFallback.None);
 
 /// <summary>Supported ABP network syntax only. Unsupported options reject the entire rule.</summary>
 public sealed class NetworkFilterList
@@ -42,10 +44,13 @@ public sealed class NetworkFilterList
         if (parts.Length > 2 || (parts[0].Length > 1 && parts[0].StartsWith('/') && parts[0].EndsWith('/'))) return false;
         if (parts[0].Length == 0) { if (parts.Length == 1) return false; parts[0] = "*"; }
         bool? thirdParty = null; bool matchCase = false;
+        var seenOptions = new HashSet<string>(StringComparer.Ordinal);
         var domains = Array.Empty<string>(); var types = new List<string>();
         if (parts.Length == 2)
         foreach (var option in parts[1].Split(','))
         {
+            var name = option.StartsWith("domain=") ? "domain" : option.TrimStart('~');
+            if (option.StartsWith("~~") || !seenOptions.Add(name)) return false;
             if (option == "third-party") thirdParty = true;
             else if (option == "~third-party") thirdParty = false;
             else if (option == "match-case") matchCase = true;
@@ -53,7 +58,10 @@ public sealed class NetworkFilterList
             {
                 try
                 {
-                    domains = option[7..].Split('|').Select(d => (d.StartsWith('~') ? "~" : "") + ValidateDomain(d.TrimStart('~'))).ToArray();
+                    domains = option[7..].Split('|').Select(d => {
+                        if (d.StartsWith("~~")) throw new ArgumentException("Invalid domain negation.");
+                        return (d.StartsWith('~') ? "~" : "") + ValidateDomain(d.StartsWith('~') ? d[1..] : d);
+                    }).ToArray();
                 }
                 catch (ArgumentException) { return false; }
             }
@@ -66,6 +74,16 @@ public sealed class NetworkFilterList
         var suffix = pattern.EndsWith('|') ? "$" : "";
         if (suffix.Length > 0) pattern = pattern[..^1];
         if (pattern.Length == 0 || pattern.Contains('|')) return false;
+        if (prefix.StartsWith("^https", StringComparison.Ordinal))
+        {
+            var end = pattern.IndexOfAny(new[] { '^', '/', '?', ':' });
+            var hostPart = end < 0 ? pattern : pattern[..end];
+            if (!hostPart.Contains('*'))
+            {
+                try { pattern = ValidateDomain(hostPart) + (end < 0 ? "" : pattern[end..]); }
+                catch (ArgumentException) { return false; }
+            }
+        }
         var expression = prefix + Regex.Escape(pattern).Replace(@"\*", ".*").Replace(@"\^", @"(?:[^a-zA-Z0-9_\-.%]|$)") + suffix;
         try
         {
@@ -80,6 +98,7 @@ public sealed class NetworkFilterList
             return true;
         }
         catch (ArgumentException) { return false; }
+        catch (NotSupportedException) { return false; } // NonBacktracking rejects oversized automata.
     }
     public static string ValidateDomain(string domain)
     {
@@ -87,10 +106,11 @@ public sealed class NetworkFilterList
         if (Uri.CheckHostName(domain) == UriHostNameType.Unknown || domain.Contains(':')) throw new ArgumentException("Enter a hostname without scheme, path or port.");
         return domain;
     }
-    public string? Match(NetworkRequest request, bool? thirdParty, bool allow)
+    public string? Match(NetworkRequest request, bool? thirdParty, bool allow) =>
+        Match(request, thirdParty, allow, Stopwatch.GetTimestamp());
+    internal string? Match(NetworkRequest request, bool? thirdParty, bool allow, long started)
     {
         var top = SiteClassifier.Host(request.TopUrl);
-        var started = Stopwatch.GetTimestamp();
         var host = SiteClassifier.Host(request.Url);
         IEnumerable<Rule> Candidates()
         {
@@ -152,11 +172,23 @@ public sealed class RequestFilter
     }
     public FilterDecision Evaluate(NetworkRequest request)
     {
-        try { return EvaluateCore(request); }
+        if (string.IsNullOrEmpty(request.Url) || request.Url.Length > 65_536 || request.TopUrl?.Length > 65_536)
+            return new(false, null, "Request input limit exceeded: allowed", FilterFallback.InvalidInput);
+        var third = SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl);
+        var coverage = request.UnknownResource ? FilterFallback.UnknownResource : FilterFallback.None;
+        if (!request.MainFrame && third is null && SiteClassifier.Host(request.Url) is not null)
+            coverage |= FilterFallback.UnknownSite;
+        try
+        {
+            var result = EvaluateCore(request, Stopwatch.GetTimestamp());
+            return result with { Fallback = result.Fallback | coverage };
+        }
         catch (Exception ex) when (ex is FilterBudgetExceededException or RegexMatchTimeoutException)
-        { return new(false, SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl), "Filter evaluation budget exceeded: allowed"); }
+        { return new(false, third, "Filter evaluation budget exceeded: allowed", coverage | FilterFallback.BudgetExceeded); }
+        catch (ArgumentException)
+        { return new(false, third, "Invalid request classification: allowed", coverage | FilterFallback.InvalidInput); }
     }
-    private FilterDecision EvaluateCore(NetworkRequest request)
+    private FilterDecision EvaluateCore(NetworkRequest request, long started)
     {
         var third = SiteClassifier.Default.IsThirdParty(request.Url, request.TopUrl);
         FilterDecision Result(bool block, string rule) => new(block, third, rule);
@@ -167,9 +199,9 @@ public sealed class RequestFilter
         if (top is not null && siteExceptions.FirstOrDefault(d => SiteClassifier.DomainMatches(top, d)) is { } site)
             return Result(false, "Site exception: " + site);
         if (allows.FirstOrDefault(d => SiteClassifier.DomainMatches(host, d)) is { } allowed) return Result(false, "Allow domain: " + allowed);
-        if (list.Match(request, third, true) is { } exception) return Result(false, exception);
+        if (list.Match(request, third, true, started) is { } exception) return Result(false, exception);
         if (blocks.FirstOrDefault(d => SiteClassifier.DomainMatches(host, d)) is { } blocked) return Result(true, "Block domain: " + blocked);
-        if (list.Match(request, third, false) is { } match) return Result(true, match);
+        if (list.Match(request, third, false, started) is { } match) return Result(true, match);
         if (mode == PrivacyMode.Strict && third == true) return Result(true, "Strict: third-party request");
         return Result(false, third is null ? "Unknown document site: allowed" : "No matching rule");
     }
