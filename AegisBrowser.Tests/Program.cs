@@ -49,6 +49,7 @@ ProfileDashboardTests.Run();
 ProfileOperationsTests.Run();
 ProfileBulkTests.Run();
 ProfileTransferTests.Run();
+ProfileBackupTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {

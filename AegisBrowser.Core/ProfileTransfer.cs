@@ -213,7 +213,7 @@ public sealed class ProfileTransfer(string root, ProfileRepository profiles, Pro
         return output.ToArray();
     }
 
-    private static void CheckDuplicateProperties(JsonElement value)
+    internal static void CheckDuplicateProperties(JsonElement value)
     {
         if (value.ValueKind == JsonValueKind.Object)
         {
