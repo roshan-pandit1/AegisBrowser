@@ -1,6 +1,7 @@
 using AegisBrowser.Core;
 using System.Diagnostics;
 using System.Reflection;
+using Microsoft.Data.Sqlite;
 
 // A child process proves that the OS lease is exclusive beyond this process.
 if (args.Length == 2 && args[0] == "--probe-lock")
@@ -10,9 +11,27 @@ if (args.Length == 2 && args[0] == "--probe-lock")
     return;
 }
 
+// Hold an uncommitted write until the parent kills this process to test SQLite recovery.
+if (args.Length == 2 && args[0] == "--hold-metadata-transaction")
+{
+    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = args[1], Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
+    connection.Open();
+    using var transaction = connection.BeginTransaction();
+    using var command = connection.CreateCommand();
+    command.Transaction = transaction;
+    command.CommandText = "UPDATE profiles SET notes='uncommitted crash write'";
+    command.ExecuteNonQuery();
+    Console.WriteLine("READY");
+    Console.Out.Flush();
+    Thread.Sleep(Timeout.Infinite);
+    return;
+}
+
 PrivacyTests.Run();
 AddressTests.Run();
 ProfileCatalogTests.Run();
+ProfileRepositoryTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {
