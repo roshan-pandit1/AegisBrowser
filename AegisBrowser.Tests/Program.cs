@@ -19,6 +19,18 @@ if (args.Length == 2 && args[0] == "--dashboard-lease-child")
     return;
 }
 
+if (args.Length == 4 && args[0] == "--settings-apply-child")
+{
+    var repository = new ProfileRepository(args[1]);
+    var templates = new ProfileTemplateRepository(args[1]);
+    var profile = repository.GetBySlug(args[2]) ?? throw new Exception("Missing test profile.");
+    var template = templates.List().Single(t => t.Id == Guid.Parse(args[3]));
+    var service = new ProfileSettingsTransactions(args[1], repository, templates, () =>
+    { Console.WriteLine("READY"); Console.Out.Flush(); Thread.Sleep(Timeout.Infinite); });
+    _ = service.Apply([profile], template, CancellationToken.None);
+    return;
+}
+
 // Hold an uncommitted write until the parent kills this process to test SQLite recovery.
 if (args.Length == 2 && args[0] == "--hold-metadata-transaction")
 {
@@ -50,6 +62,7 @@ ProfileOperationsTests.Run();
 ProfileBulkTests.Run();
 ProfileTransferTests.Run();
 ProfileBackupTests.Run();
+ProfileSettingsTransactionTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {

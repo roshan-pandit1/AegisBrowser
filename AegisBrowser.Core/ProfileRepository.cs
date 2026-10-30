@@ -91,6 +91,13 @@ public sealed class ProfileRepository : IProfileRepository
         current.MetadataCreatedUtc == snapshot.MetadataCreatedUtc && current.UpdatedUtc == snapshot.UpdatedUtc &&
         current.Tags.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Tags) && current.Folders.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Folders);
 
+    internal T WithExpectedProfile<T>(ProfileDefinition expected, Func<T> action) => WithStore(db =>
+    {
+        var current = ReadBySlug(db, expected.Slug);
+        if (current is null || !MatchesSnapshot(current, expected)) throw new IOException("Profile changed; refresh before applying settings.");
+        return action();
+    });
+
     public ProfileDefinition GetOrMigrate(string slug, ProfileLease lease)
     {
         slug = NormalizeSlug(slug);

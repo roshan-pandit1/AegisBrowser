@@ -26,6 +26,7 @@ internal static class Program
             var path = BrowserPolicy.ProfilePath(root, profile);
             ProfileRepository.CheckSafeProfilePath(root, profile);
             lease = new ProfileLease(path);
+            ProfileSettingsTransactions.EnsureNoPending(root, profile);
             _ = new ProfileRepository(root).GetOrMigrate(profile, lease);
             var settings = new CefSettings
             {
