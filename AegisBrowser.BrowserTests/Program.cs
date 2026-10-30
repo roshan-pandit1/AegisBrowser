@@ -203,6 +203,24 @@ internal static class Program
             Check(templateList.Items.Count == 0, "native template search filters results");
             templates.Close();
         }
+        await Wait(() => grid.Rows.Cast<DataGridViewRow>().Any(r => (string?)r.Cells["Slug"].Value == "ui-copy"), "dashboard refresh after copy");
+        Control<Button>(manager, "SelectVisible").PerformClick();
+        Check(Control<Label>(manager, "SelectedProfileCount").Text == "2 selected", "dashboard selects registered visible profiles");
+        search.Text = "ui-copy";
+        Check(grid.Rows.Count == 1 && Control<Label>(manager, "SelectedProfileCount").Text == "2 selected", "profile selection survives filtering");
+        search.Clear();
+        var selected = new[] { repository.GetBySlug("ui-test")!, repository.GetBySlug("ui-copy")! };
+        var bulkService = new ProfileBulkOperations(profilesRoot, repository, duplicator);
+        using (var bulk = new ProfileBulkForm(bulkService, selected, false))
+        {
+            bulk.Show(manager);
+            Control<TextBox>(bulk, "BulkLabels").Text = "shared";
+            Control<Button>(bulk, "StartBulk").PerformClick();
+            await Wait(() => Control<TextBox>(bulk, "BulkResults").Text.Contains("Succeeded", StringComparison.Ordinal), "bulk result display");
+            Check(repository.GetBySlug("ui-test")!.Tags.Contains("shared") && repository.GetBySlug("ui-copy")!.Tags.Contains("shared"),
+                "native bulk dialog updates selected profiles");
+            bulk.Close();
+        }
         manager.Close();
     }
 

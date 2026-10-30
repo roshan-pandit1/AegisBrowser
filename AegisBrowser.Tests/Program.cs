@@ -47,6 +47,7 @@ ProfileCatalogTests.Run();
 ProfileRepositoryTests.Run();
 ProfileDashboardTests.Run();
 ProfileOperationsTests.Run();
+ProfileBulkTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {
