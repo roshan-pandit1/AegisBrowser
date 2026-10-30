@@ -26,6 +26,8 @@ Later work must independently test proxy authentication scope, HTTP/HTTPS/SOCKS5
 
 The Windows native suite contains a controlled, research-only CEF probe. It observes the default loopback bypass, then sets the special bypass-subtraction rule **only in the test process** to examine one HTTP request through a loopback fixture and a stopped proxy. The local origin and proxy are independent listeners. This narrow observation does not enable production routing, test proxy authentication, establish behavior for other traffic or justify overriding Chromium's loopback security protections in production.
 
+The pinned [CefSharp proxy helper](https://github.com/cefsharp/CefSharp/blob/v154.0.340/CefSharp/RequestContextExtensions.cs) lists HTTP and SOCKS schemes, but does not list HTTPS in its scheme validator. That does not by itself establish whether an HTTPS proxy works through a lower-level preference; it requires a separate native test.
+
 ## Manual Windows verification still required
 
 - On a test account, verify credential replacement and loss of access after moving protected data to a different Windows user.

@@ -59,12 +59,14 @@ internal static partial class Program
                     var baseUrl = "http://127.0.0.1:" + origin.Port;
                     await LoadReady(browser, baseUrl + "/default-bypass");
                     await Wait(() => origin.Saw("/default-bypass"), "direct loopback observation");
-                    Check(!proxy.Saw("/default-bypass"), "CEF default proxy settings bypass loopback");
+                    Check(!proxy.Saw("/default-bypass") && await Js(browser, "document.title") == "origin",
+                        "CEF default proxy settings bypass loopback");
 
                     await Configure(true);
                     await LoadReady(browser, baseUrl + "/proxied");
                     await Wait(() => proxy.Saw("/proxied"), "proxied loopback observation");
-                    Check(!origin.Saw("/proxied"), "CEF test-only bypass override routed HTTP to local proxy");
+                    Check(!origin.Saw("/proxied") && await Js(browser, "document.title") == "proxy",
+                        "CEF test-only bypass override routed HTTP to local proxy");
 
                     proxy.Stop();
                     var offlineUrl = baseUrl + "/offline";
