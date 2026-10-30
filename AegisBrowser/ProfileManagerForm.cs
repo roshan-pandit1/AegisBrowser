@@ -11,6 +11,7 @@ public sealed class ProfileManagerForm : Form
     private readonly IProfileDuplicationService duplication;
     private readonly ProfileTemplateRepository templateRepository;
     private readonly ProfileTemplateService templates;
+    private readonly ProfileBulkOperations bulk;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private readonly TextBox search = new() { Name = "ProfileSearch", AccessibleName = "Search profiles, tags and folders", Width = 220, PlaceholderText = "Search profiles, tags, folders" };
     private readonly ComboBox statusFilter = new() { Name = "StatusFilter", AccessibleName = "Filter by status", DropDownStyle = ComboBoxStyle.DropDownList, Width = 125 };
@@ -18,7 +19,7 @@ public sealed class ProfileManagerForm : Form
     private readonly ComboBox sort = new() { Name = "SortProfiles", AccessibleName = "Sort profiles", DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly DataGridView grid = new()
     {
-        Name = "ProfileGrid", AccessibleName = "Profiles", Dock = DockStyle.Fill, ReadOnly = true,
+        Name = "ProfileGrid", AccessibleName = "Profiles", Dock = DockStyle.Fill, ReadOnly = false,
         AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false,
         MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false,
         BackgroundColor = Color.White, BorderStyle = BorderStyle.None, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None
@@ -30,7 +31,9 @@ public sealed class ProfileManagerForm : Form
     private readonly Button editDetails = new() { Text = "Edit metadata", AccessibleName = "Edit selected profile", AutoSize = true };
     private readonly ContextMenuStrip actions = new();
     private IReadOnlyList<DashboardProfile> allProfiles = [];
-    private bool loading, pendingRefresh, filterUpdating;
+    private readonly HashSet<Guid> selectedIds = [];
+    private readonly Label selectionCount = new() { Name = "SelectedProfileCount", AccessibleName = "Selected profile count", AutoSize = true };
+    private bool loading, pendingRefresh, filterUpdating, updatingRows;
     private string? pendingSelection;
 
     public ProfileManagerForm(string root)
@@ -41,6 +44,7 @@ public sealed class ProfileManagerForm : Form
         var repository = new ProfileRepository(root);
         dashboard = new ProfileDashboard(root, repository, processes);
         duplication = new ProfileDuplicationService(root, repository);
+        bulk = new ProfileBulkOperations(root, repository, duplication);
         templateRepository = new ProfileTemplateRepository(root);
         templates = new ProfileTemplateService(root, repository, templateRepository);
         Text = "Aegis Browser — Profiles";
@@ -82,10 +86,20 @@ public sealed class ProfileManagerForm : Form
         folderFilter.Items.Add("All folders"); folderFilter.SelectedIndex = 0;
         var clear = new Button { Text = "Clear filters", AccessibleName = "Clear profile filters", AutoSize = true };
         clear.Click += (_, _) => { search.Clear(); statusFilter.SelectedIndex = 0; folderFilter.SelectedIndex = 0; sort.SelectedIndex = 0; };
-        tools.Controls.AddRange([search, statusFilter, folderFilter, sort, clear]);
+        var selectVisible = new Button { Name = "SelectVisible", Text = "Select visible", AccessibleName = "Select visible profiles", AutoSize = true };
+        var clearSelection = new Button { Name = "ClearProfileSelection", Text = "Clear selection", AccessibleName = "Clear profile selection", AutoSize = true };
+        var bulkEdit = new Button { Name = "BulkEdit", Text = "Bulk labels", AccessibleName = "Bulk edit tags and folders", AutoSize = true };
+        var bulkCopy = new Button { Name = "BulkCopy", Text = "Clean copy selected", AccessibleName = "Clean duplicate selected profiles", AutoSize = true };
+        selectVisible.Click += (_, _) => { foreach (DataGridViewRow row in grid.Rows) if (row.Tag is DashboardProfile p && p.Metadata is not null) selectedIds.Add(p.Metadata.Id); UpdateSelectionCells(); };
+        clearSelection.Click += (_, _) => { selectedIds.Clear(); UpdateSelectionCells(); };
+        bulkEdit.Click += (_, _) => RunBulk(false);
+        bulkCopy.Click += (_, _) => RunBulk(true);
+        selectionCount.Text = "0 selected";
+        tools.Controls.AddRange([search, statusFilter, folderFilter, sort, clear, selectVisible, clearSelection, bulkEdit, bulkCopy, selectionCount]);
         content.Controls.Add(tools, 0, 1); content.Controls.Add(summary, 0, 2);
         var main = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 8, 0, 0) };
         main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); main.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "SelectProfile", HeaderText = "Select", Width = 55 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "DisplayName", HeaderText = "Name", Width = 170 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ProfileId", HeaderText = "Profile ID", Width = 250 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Slug", HeaderText = "Storage slug", Width = 125 });
@@ -96,6 +110,7 @@ public sealed class ProfileManagerForm : Form
         grid.Columns.Add(new DataGridViewButtonColumn { Name = "Launch", HeaderText = "", Text = "Launch", UseColumnTextForButtonValue = true, Width = 75 });
         grid.Columns.Add(new DataGridViewButtonColumn { Name = "Edit", HeaderText = "", Text = "Edit", UseColumnTextForButtonValue = true, Width = 60 });
         grid.Columns.Add(new DataGridViewButtonColumn { Name = "Actions", HeaderText = "", Text = "Actions", UseColumnTextForButtonValue = true, Width = 75 });
+        foreach (DataGridViewColumn column in grid.Columns) if (column.Name != "SelectProfile") column.ReadOnly = true;
         main.Controls.Add(grid, 0, 0);
         var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Padding = new Padding(12, 0, 0, 0) };
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize)); detailPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -119,14 +134,24 @@ public sealed class ProfileManagerForm : Form
         folderFilter.SelectedIndexChanged += (_, _) => { if (!filterUpdating) ApplyFilters(); };
         sort.SelectedIndexChanged += (_, _) => ApplyFilters();
         grid.SelectionChanged += (_, _) => ShowDetails();
+        grid.CurrentCellDirtyStateChanged += (_, _) => { if (grid.IsCurrentCellDirty) grid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+        grid.CellValueChanged += (_, e) =>
+        {
+            if (updatingRows || e.RowIndex < 0 || e.ColumnIndex < 0 || grid.Columns[e.ColumnIndex].Name != "SelectProfile") return;
+            var row = grid.Rows[e.RowIndex];
+            if (row.Tag is not DashboardProfile p || p.Metadata is null) return;
+            if (row.Cells[e.ColumnIndex].Value is true) selectedIds.Add(p.Metadata.Id); else selectedIds.Remove(p.Metadata.Id);
+            UpdateSelectionCount();
+        };
         grid.CellDoubleClick += async (_, e) =>
         {
-            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && grid.Columns[e.ColumnIndex] is not DataGridViewButtonColumn)
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && grid.Columns[e.ColumnIndex] is not DataGridViewButtonColumn and not DataGridViewCheckBoxColumn)
                 await LaunchSelected();
         };
         grid.CellContentClick += async (_, e) =>
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (grid.Columns[e.ColumnIndex].Name == "SelectProfile") return;
             grid.ClearSelection(); grid.Rows[e.RowIndex].Selected = true;
             switch (grid.Columns[e.ColumnIndex].Name)
             {
@@ -150,7 +175,9 @@ public sealed class ProfileManagerForm : Form
             {
                 e.Handled = true; e.SuppressKeyPress = true;
                 var cell = grid.CurrentCell;
-                if (cell is not null && grid.Columns[cell.ColumnIndex].Name == "Edit") await EditSelected();
+                if (cell is not null && grid.Columns[cell.ColumnIndex].Name == "SelectProfile" && !cell.ReadOnly)
+                    cell.Value = !(cell.Value is true);
+                else if (cell is not null && grid.Columns[cell.ColumnIndex].Name == "Edit") await EditSelected();
                 else if (cell is not null && grid.Columns[cell.ColumnIndex].Name == "Actions")
                 {
                     var bounds = grid.GetCellDisplayRectangle(cell.ColumnIndex, cell.RowIndex, true);
@@ -233,14 +260,16 @@ public sealed class ProfileManagerForm : Form
         grid.SuspendLayout();
         try
         {
+            updatingRows = true;
             grid.Rows.Clear();
             foreach (var profile in rows)
             {
                 var metadata = profile.Metadata;
-                var index = grid.Rows.Add(profile.DisplayName, metadata?.Id.ToString("D") ?? "Not registered", profile.Slug,
+                var index = grid.Rows.Add(metadata is not null && selectedIds.Contains(metadata.Id), profile.DisplayName, metadata?.Id.ToString("D") ?? "Not registered", profile.Slug,
                     metadata is null ? "" : string.Join(", ", metadata.Tags), metadata is null ? "" : string.Join(", ", metadata.Folders),
                     metadata?.UpdatedUtc.ToLocalTime().ToString("g") ?? "—", StatusText(profile.Status.Activity));
                 grid.Rows[index].Tag = profile;
+                grid.Rows[index].Cells["SelectProfile"].ReadOnly = metadata is null;
             }
             grid.ClearSelection();
             var selected = grid.Rows.Cast<DataGridViewRow>().FirstOrDefault(r => (r.Tag as DashboardProfile)?.Slug == previous);
@@ -248,9 +277,28 @@ public sealed class ProfileManagerForm : Form
             if (selected is not null) { selected.Selected = true; grid.CurrentCell = selected.Cells[Math.Clamp(column, 0, grid.Columns.Count - 1)]; }
             if (scroll >= 0 && grid.Rows.Count > 0) grid.FirstDisplayedScrollingRowIndex = Math.Min(scroll, grid.Rows.Count - 1);
         }
-        finally { grid.ResumeLayout(); }
+        finally { updatingRows = false; grid.ResumeLayout(); }
         summary.Text = rows.Count == 0 ? "No profiles match these filters. Clear filters or create a profile." : $"{rows.Count} profile(s) shown · Refreshes every 3 seconds";
         ShowDetails();
+        UpdateSelectionCount();
+    }
+
+    private void UpdateSelectionCount() => selectionCount.Text = selectedIds.Count + " selected";
+    private void UpdateSelectionCells()
+    {
+        updatingRows = true;
+        try { foreach (DataGridViewRow row in grid.Rows) row.Cells["SelectProfile"].Value = row.Tag is DashboardProfile p && p.Metadata is not null && selectedIds.Contains(p.Metadata.Id); }
+        finally { updatingRows = false; }
+        UpdateSelectionCount();
+    }
+
+    private void RunBulk(bool duplicate)
+    {
+        var targets = allProfiles.Where(p => p.Metadata is not null && selectedIds.Contains(p.Metadata.Id)).Select(p => p.Metadata!).ToArray();
+        if (targets.Length == 0 || targets.Length != selectedIds.Count) { feedback.Text = "Select registered profiles and refresh before starting a bulk operation."; return; }
+        using var form = new ProfileBulkForm(bulk, targets, duplicate);
+        form.ShowDialog(this);
+        _ = RefreshProfiles(manual: true);
     }
 
     private static string StatusText(ProfileActivity state) => state switch

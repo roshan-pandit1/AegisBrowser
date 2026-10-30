@@ -73,6 +73,21 @@ commit fails, the profile directory is retained and can be adopted on a later la
 Do not remove an existing `profile-*` directory as cleanup. Back up and inspect any
 leftover staging directory before manually removing it.
 
+## Bulk labels and clean copies
+
+Use the Select checkbox beside registered profiles, **Select visible**, or **Clear
+selection**. Selection is tracked by profile GUID and remains selected when filters
+or periodic refresh change the visible rows. Directory-only profiles must first be
+opened or edited so they have metadata. **Bulk labels** adds or removes tags or folder
+assignments; enter one label per line. **Clean copy selected** generates a distinct
+`-copy` slug for each source and excludes notes, settings and Chromium storage.
+
+Each selected profile is updated independently with its original revision. Results
+show success, failure or cancellation for each profile; a conflict leaves that profile
+unchanged and requires refresh before retrying. Cancel stops work before the next
+profile and does not undo changes already committed. The operation does not delete
+profiles or stop browsers.
+
 Directory-only profiles remain visible as **Not registered** until opened or edited.
 Editing one first requires its profile lease and creates the same validated metadata
 backup used during migration. If it is already in use, close it before editing. The
