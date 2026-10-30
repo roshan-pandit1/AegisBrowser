@@ -62,6 +62,12 @@ internal static class ProfileSettingsTransactionTests
             ProfileSettingsTransactions.EnsureNoPending(root, "work");
             Check(new PrivacySettingsStore(path).Load().Mode == PrivacyMode.Standard && new SearchSettingsStore(path).Load().EngineId == "duckduckgo" &&
                 File.ReadAllText(Path.Combine(path, "Cache", "sentinel")) == "browser data", "recovery restores both original settings without touching Chromium data");
+            var pending = Path.Combine(root, ".settings-pending"); Directory.CreateDirectory(pending);
+            var corruptMarker = Path.Combine(pending, "profile-work.json"); File.WriteAllText(corruptMarker, "{}");
+            Reject(() => ProfileSettingsTransactions.EnsureNoPending(root, "work"), "corrupt marker still blocks startup");
+            Reject(() => service.Recover(changed), "corrupt marker is not automatically removed");
+            Check(File.ReadAllText(corruptMarker) == "{}" && new PrivacySettingsStore(path).Load().Mode == PrivacyMode.Standard,
+                "corrupt marker and current settings preserved");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         Console.WriteLine($"PASS: {count} settings transaction checks");

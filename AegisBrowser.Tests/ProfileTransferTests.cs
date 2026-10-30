@@ -73,6 +73,22 @@ internal static class ProfileTransferTests
             using (var writer = new StreamWriter(archive.CreateEntry("../escape.json").Open())) writer.Write("{}");
             Reject(() => transfer.Preview(slip), "ZIP traversal rejected");
             Check(!File.Exists(Path.Combine(testRoot, "escape.json")), "ZIP is never extracted");
+            var linkedZip = Path.Combine(testRoot, "link.zip");
+            using (var file = File.Create(linkedZip)) using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("aegis-profile-export.json");
+                entry.ExternalAttributes = unchecked((int)0xA0000000);
+                using var writer = new StreamWriter(entry.Open()); writer.Write("{}");
+            }
+            Reject(() => transfer.Preview(linkedZip), "ZIP symbolic link rejected");
+            var bomb = Path.Combine(testRoot, "bomb.zip");
+            using (var file = File.Create(bomb)) using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+            using (var output = archive.CreateEntry("aegis-profile-export.json").Open())
+            {
+                var block = new byte[65_536]; var remaining = ProfileTransfer.MaxBytes + 1;
+                while (remaining > 0) { var amount = Math.Min(block.Length, remaining); output.Write(block, 0, amount); remaining -= amount; }
+            }
+            Reject(() => transfer.Preview(bomb), "oversized decompressed ZIP rejected");
             var corruptZip = Path.Combine(testRoot, "corrupt.zip"); File.WriteAllBytes(corruptZip, [(byte)'P', (byte)'K', 3, 4, 1, 2]);
             Reject(() => transfer.Preview(corruptZip), "corrupt ZIP rejected");
             var oversized = Path.Combine(testRoot, "oversized.json");
