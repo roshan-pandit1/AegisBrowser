@@ -108,6 +108,39 @@ result is reported separately; cancellation stops before the next item and leave
 already imported profiles in place. If a destination is created between preview and
 import, that item fails safely and can be retried after a new preview.
 
+## Manual metadata backups and recovery
+
+Select a registered profile and open **Backups**. A manual backup uses SQLite's
+online backup API to capture the complete application metadata database, including
+committed WAL data. The manifest identifies the selected profile and may additionally
+include its privacy/search settings if explicitly selected; those settings require the
+profile to be closed. Backups contain no Chromium cookies, sessions, cache or history.
+They are stored unencrypted in `Profiles\manual-backups\backup-<id>` and can contain
+private notes and rules. Protect them with the Windows account.
+
+The list validates each backup's version, manifest and database checksums, SQLite
+integrity and selected profile identity. Checksums detect accidental corruption, not
+the origin or authenticity of a backup. Invalid backups remain in place and cannot be
+restored. The retention reminder threshold is saved with a revision check; it only
+warns when the count is reached and never deletes backups automatically.
+
+**Restore metadata** previews and, after confirmation, restores the backed-up name,
+notes, tags and folders to the same profile ID and slug. The profile must be closed.
+The current revision is checked again, and a validated SQLite safety snapshot of the
+current database is created under `Profiles\metadata-backups` before the transactional
+update. Chromium files and existing privacy/search settings are not changed by this
+operation. **Restore as new profile** creates a fresh GUID, slug and Chromium storage,
+and applies the settings captured in the backup. It never overwrites an existing profile.
+The UI does not replace the entire live SQLite database or overwrite settings in an
+existing profile. To recover the pre-restore metadata snapshot, follow the rollback
+instructions below after closing all browsers and managers.
+
+An interrupted backup can leave a `.creating-backup-<id>` directory. It is not listed
+as a completed backup and is not deleted automatically. Inspect and back it up before
+any manual removal; do not remove `profile-*` directories as cleanup. A failed safety
+backup or a revision conflict stops metadata restoration. SQLite transaction recovery
+protects the metadata update if the process exits during the write.
+
 Directory-only profiles remain visible as **Not registered** until opened or edited.
 Editing one first requires its profile lease and creates the same validated metadata
 backup used during migration. If it is already in use, close it before editing. The

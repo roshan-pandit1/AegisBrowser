@@ -13,6 +13,8 @@ public sealed class ProfileManagerForm : Form
     private readonly ProfileTemplateService templates;
     private readonly ProfileBulkOperations bulk;
     private readonly ProfileTransfer transfer;
+    private readonly ProfileBackupService backups;
+    private readonly ProfileRepository repository;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private readonly TextBox search = new() { Name = "ProfileSearch", AccessibleName = "Search profiles, tags and folders", Width = 220, PlaceholderText = "Search profiles, tags, folders" };
     private readonly ComboBox statusFilter = new() { Name = "StatusFilter", AccessibleName = "Filter by status", DropDownStyle = ComboBoxStyle.DropDownList, Width = 125 };
@@ -42,13 +44,14 @@ public sealed class ProfileManagerForm : Form
         var executable = Environment.ProcessPath ?? throw new IOException("Could not find the application executable.");
         processes = new ProfileProcessSupervisor(new ProfileLeaseProbe(root),
             new ProfileChildStarter(executable, typeof(ProfileManagerForm).Assembly.Location, AppContext.BaseDirectory));
-        var repository = new ProfileRepository(root);
+        repository = new ProfileRepository(root);
         dashboard = new ProfileDashboard(root, repository, processes);
         duplication = new ProfileDuplicationService(root, repository);
         bulk = new ProfileBulkOperations(root, repository, duplication);
         templateRepository = new ProfileTemplateRepository(root);
         templates = new ProfileTemplateService(root, repository, templateRepository);
         transfer = new ProfileTransfer(root, repository, templateRepository);
+        backups = new ProfileBackupService(root, repository);
         Text = "Aegis Browser — Profiles";
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.CenterScreen;
@@ -71,10 +74,12 @@ public sealed class ProfileManagerForm : Form
         var create = new Button { Name = "CreateProfile", Text = "+ New profile", AccessibleName = "Create profile", Width = 150, Height = 38 };
         var refresh = new Button { Text = "Refresh", AccessibleName = "Refresh profiles", Width = 150, Height = 36 };
         var manageTemplates = new Button { Name = "ManageTemplates", Text = "Templates", AccessibleName = "Manage profile templates", Width = 150, Height = 36 };
+        var manageBackups = new Button { Name = "ManageBackups", Text = "Backups", AccessibleName = "Manage metadata backups", Width = 150, Height = 36 };
         create.Click += (_, _) => CreateProfile();
         refresh.Click += async (_, _) => await RefreshProfiles(manual: true);
         manageTemplates.Click += (_, _) => ManageTemplates();
-        sidebar.Controls.Add(create); sidebar.Controls.Add(refresh); sidebar.Controls.Add(manageTemplates);
+        manageBackups.Click += async (_, _) => await ManageBackups();
+        sidebar.Controls.Add(create); sidebar.Controls.Add(refresh); sidebar.Controls.Add(manageTemplates); sidebar.Controls.Add(manageBackups);
         sidebar.Controls.Add(new Label { Text = "Local profiles\nEach profile uses its own browser storage.", ForeColor = Color.Gainsboro, Width = 150, Height = 70, Margin = new Padding(0, 24, 0, 0) });
 
         var content = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new Padding(16) };
@@ -419,5 +424,20 @@ public sealed class ProfileManagerForm : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         { if (!IsDisposed) feedback.Text = "Could not preview import: " + ex.Message; }
+    }
+
+    private async Task ManageBackups()
+    {
+        var selected = Selected;
+        try
+        {
+            var profile = selected?.Metadata;
+            if (IsDisposed) return;
+            using var form = new ProfileBackupsForm(backups, repository, profile);
+            form.ShowDialog(this);
+            await RefreshProfiles(selected?.Slug, true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not open backups: " + ex.Message; }
     }
 }

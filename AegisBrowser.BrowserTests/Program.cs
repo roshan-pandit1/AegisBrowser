@@ -235,6 +235,18 @@ internal static class Program
             Check(repository.GetBySlug(preview.Profiles[0].DestinationSlug) is not null, "native import creates previewed profile");
             import.Close();
         }
+        var backupService = new ProfileBackupService(profilesRoot, repository);
+        using (var backupForm = new ProfileBackupsForm(backupService, repository, repository.GetBySlug("ui-test")!))
+        {
+            backupForm.Show(manager);
+            var backupDetails = Control<TextBox>(backupForm, "BackupDetails");
+            await Wait(() => backupDetails.Text.Contains("No manual backups"), "backup manager load");
+            Control<Button>(backupForm, "CreateBackup").PerformClick();
+            var backupList = Control<ListBox>(backupForm, "BackupList");
+            await Wait(() => backupList.Items.Count == 1 && backupDetails.Text.Contains("ui-test"), "backup creation and preview");
+            Check(backupService.List().Single().Valid, "native backup manager creates and previews a verified snapshot");
+            backupForm.Close();
+        }
         manager.Close();
     }
 
