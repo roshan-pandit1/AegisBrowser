@@ -58,12 +58,30 @@ public static class BrowserPolicy
 public sealed class ProfileLease : IDisposable
 {
     private readonly FileStream stream;
+    private readonly string profilePath;
+    private bool disposed;
     public ProfileLease(string path)
     {
-        Directory.CreateDirectory(path);
+        profilePath = Path.GetFullPath(path);
+        RejectLink(profilePath);
+        Directory.CreateDirectory(profilePath);
+        RejectLink(profilePath);
+        var lockPath = Path.Combine(profilePath, ".profile.lock");
+        RejectLink(lockPath);
         // The OS releases the exclusive handle even following a crash. Do not delete the lock file.
-        stream = new FileStream(Path.Combine(path, ".profile.lock"), FileMode.OpenOrCreate,
-            FileAccess.ReadWrite, FileShare.None);
+        stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     }
-    public void Dispose() => stream.Dispose();
+    private static void RejectLink(string path)
+    {
+        try
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Linked profile and lock paths are not supported: " + path);
+        }
+        catch (FileNotFoundException) { }
+        catch (DirectoryNotFoundException) { }
+    }
+    internal bool IsHeldFor(string path) => !disposed &&
+        string.Equals(profilePath, Path.GetFullPath(path), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    public void Dispose() { stream.Dispose(); disposed = true; }
 }

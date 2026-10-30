@@ -22,6 +22,8 @@ The first tab displays local diagnostics. Use the address bar to navigate; Priva
 
 “Portable” describes the application folder, not its data location. Profiles and privacy settings are stored under `%LOCALAPPDATA%\AegisBrowser\Profiles\profile-<name>`. Pause and inspector history reset on exit. Each profile can be opened by only one process at a time.
 
+The package includes `PROFILE-MANAGER.md`, which explains the separate metadata database, migration backups and recovery steps.
+
 Close every browser window before replacing the application folder with a newly extracted version. Keep a backup of profile data before upgrades. Do not mix files from different releases. There is no automatic Chromium updater; use reviewed builds with current engine security fixes.
 
 To remove the application, close it and delete its extracted folder. Removing profile directories separately permanently erases cookies, storage and settings; keep them if you intend to reinstall. Copying the executable folder alone does not back up profiles.

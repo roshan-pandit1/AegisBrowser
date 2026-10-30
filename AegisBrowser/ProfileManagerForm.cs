@@ -8,6 +8,7 @@ namespace AegisBrowser;
 public sealed class ProfileManagerForm : Form
 {
     private readonly ProfileCatalog catalog;
+    private readonly ProfileRepository repository;
     private readonly ListBox profiles = new() { Dock = DockStyle.Fill, AccessibleName = "Browser profiles" };
     private readonly TextBox newName = new()
     {
@@ -22,6 +23,7 @@ public sealed class ProfileManagerForm : Form
     public ProfileManagerForm(string root)
     {
         catalog = new ProfileCatalog(root);
+        repository = new ProfileRepository(root);
         Text = "Aegis Browser — Profiles";
         StartPosition = FormStartPosition.CenterScreen;
         Width = 700;
@@ -93,7 +95,7 @@ public sealed class ProfileManagerForm : Form
     {
         try
         {
-            var created = catalog.Create(newName.Text.Trim());
+            var created = repository.Create(newName.Text.Trim()).Slug;
             newName.Clear();
             RefreshProfiles(created);
             feedback.Text = "Created " + created + ". Select Open to launch it.";

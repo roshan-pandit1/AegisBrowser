@@ -24,7 +24,9 @@ internal static class Program
             }
             var profile = BrowserPolicy.ReadProfile(args);
             var path = BrowserPolicy.ProfilePath(root, profile);
+            ProfileRepository.CheckSafeProfilePath(root, profile);
             lease = new ProfileLease(path);
+            _ = new ProfileRepository(root).GetOrMigrate(profile, lease);
             var settings = new CefSettings
             {
                 RootCachePath = path,
