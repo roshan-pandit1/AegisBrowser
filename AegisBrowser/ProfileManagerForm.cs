@@ -184,6 +184,8 @@ public sealed class ProfileManagerForm : Form
     {
         var selected = folderFilter.SelectedIndex > 0 ? folderFilter.SelectedItem as string : null;
         var folders = allProfiles.SelectMany(p => p.Metadata?.Folders ?? []).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (folderFilter.Items.Count == folders.Length + 1 &&
+            folderFilter.Items.Cast<string>().Skip(1).SequenceEqual(folders, StringComparer.Ordinal)) return;
         filterUpdating = true;
         try
         {
@@ -254,7 +256,8 @@ public sealed class ProfileManagerForm : Form
         var m = p.Metadata;
         details.Text = $"{p.DisplayName}\r\n\r\nStatus: {StatusText(p.Status.Activity)}\r\n{p.Status.Detail}\r\n\r\n" +
             $"Profile ID: {m?.Id.ToString("D") ?? "Not registered"}\r\nStorage slug: {p.Slug}\r\n" +
-            $"Updated: {m?.UpdatedUtc.ToLocalTime().ToString("g") ?? "—"}\r\n\r\n" +
+            $"Metadata version: {m?.MetadataVersion.ToString() ?? "—"}\r\nRevision: {m?.Revision.ToString() ?? "—"}\r\n" +
+            $"Created: {m?.MetadataCreatedUtc.ToLocalTime().ToString("g") ?? "—"}\r\nUpdated: {m?.UpdatedUtc.ToLocalTime().ToString("g") ?? "—"}\r\n\r\n" +
             $"Tags: {(m is null ? "" : string.Join(", ", m.Tags))}\r\nFolders: {(m is null ? "" : string.Join(", ", m.Folders))}\r\n\r\nNotes:\r\n{m?.Notes ?? ""}";
     }
 

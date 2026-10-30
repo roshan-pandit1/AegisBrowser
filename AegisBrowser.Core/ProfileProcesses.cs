@@ -34,7 +34,7 @@ public sealed class ProfileLeaseProbe(string root) : IProfileLeaseProbe
             catch (FileNotFoundException) { return new(ProfileActivity.Stopped); }
             catch (DirectoryNotFoundException) { return new(ProfileActivity.Missing, "Profile directory does not exist."); }
             catch (IOException ex) when ((ex.HResult & 0xffff) is 32 or 33)
-            { return new(ProfileActivity.InUse, "The profile lease is held by another process."); }
+            { return new(ProfileActivity.InUse, "The profile lease is already held by a browser or another process."); }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         { return new(ProfileActivity.Unknown, "Could not inspect the profile: " + ex.Message); }

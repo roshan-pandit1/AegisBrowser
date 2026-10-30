@@ -135,6 +135,9 @@ internal static class Program
         var row = grid.Rows.Cast<DataGridViewRow>().Single(r => (string?)r.Cells["Slug"].Value == "ui-test");
         Check((string?)row.Cells["DisplayName"].Value == "Dashboard sample" && (string?)row.Cells["ProfileId"].Value == original.Id.ToString("D") &&
             (string?)row.Cells["Tags"].Value == "blue" && (string?)row.Cells["Folders"].Value == "Work", "dashboard renders real metadata");
+        grid.ClearSelection(); row.Selected = true;
+        Check(Control<TextBox>(manager, "ProfileDetails").Text.Contains(original.Id.ToString("D")) &&
+            Control<TextBox>(manager, "ProfileDetails").Text.Contains("old note"), "dashboard shows selected profile details");
         var search = Control<TextBox>(manager, "ProfileSearch");
         search.Text = "BLUE";
         Check(grid.Rows.Count == 1 && (string?)grid.Rows[0].Cells["Slug"].Value == "ui-test", "dashboard search filters rendered rows");
