@@ -148,7 +148,7 @@ public sealed class ProfileTemplateService(string root, ProfileRepository profil
     {
         var settings = ProfileSettings.ReadClosed(root, source.Slug, copyPrivacy, copySearch);
         var current = profiles.GetBySlug(source.Slug);
-        if (current is null || current.Id != source.Id || current.Revision != source.Revision)
+        if (current is null || !ProfileRepository.MatchesSnapshot(current, source))
             throw new IOException("The source profile changed; reload it before saving a template.");
         return templates.Create(name, description, source.Tags, source.Folders, settings);
     }

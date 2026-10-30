@@ -33,6 +33,7 @@ internal static class ProfileOperationsTests
             Check(configured.Id != source.Id && configured.Notes == "private note" && new PrivacySettingsStore(configuredPath).Load().Mode == PrivacyMode.Strict &&
                 new SearchSettingsStore(configuredPath).Load().EngineId == "google" && !Directory.Exists(Path.Combine(configuredPath, "Cache")), "selected application settings copied without Chromium data");
             Reject(() => duplicates.DuplicateClean(source, "CLEAN", "Duplicate", false, false, false), "duplicate destination rejected");
+            Reject(() => duplicates.DuplicateClean(source with { Notes = "forged" }, "forged", "Forged", true, false, false), "tampered source snapshot rejected");
             using (var lease = new ProfileLease(sourcePath))
             {
                 Reject(() => duplicates.DuplicateClean(source, "busy-settings", "Busy", false, true, false), "settings capture requires a closed source");

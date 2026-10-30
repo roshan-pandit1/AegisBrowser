@@ -61,7 +61,7 @@ public sealed class ProfileRepository : IProfileRepository
             if (source is not null)
             {
                 var current = ReadBySlug(db, source.Slug);
-                if (current is null || current.Id != source.Id || current.Revision != source.Revision)
+                if (current is null || !MatchesSnapshot(current, source))
                     throw new IOException("The source profile changed; reload it before duplicating.");
             }
             CheckProfilePath(slug, mustExist: false);
@@ -84,6 +84,12 @@ public sealed class ProfileRepository : IProfileRepository
             }
         });
     }
+
+    internal static bool MatchesSnapshot(ProfileDefinition current, ProfileDefinition snapshot) =>
+        current.Id == snapshot.Id && current.Revision == snapshot.Revision && current.Slug == snapshot.Slug &&
+        current.MetadataVersion == snapshot.MetadataVersion && current.DisplayName == snapshot.DisplayName && current.Notes == snapshot.Notes &&
+        current.MetadataCreatedUtc == snapshot.MetadataCreatedUtc && current.UpdatedUtc == snapshot.UpdatedUtc &&
+        current.Tags.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Tags) && current.Folders.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Folders);
 
     public ProfileDefinition GetOrMigrate(string slug, ProfileLease lease)
     {
