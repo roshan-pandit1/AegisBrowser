@@ -35,6 +35,7 @@ public sealed class ProfileTransfer(string root, ProfileRepository profiles, Pro
             var settings = ProfileSettings.ReadClosed(root, source.Slug, includePrivacy, includeSearch);
             current = profiles.GetBySlug(source.Slug);
             if (current is null || !ProfileRepository.MatchesSnapshot(current, source)) throw new IOException("A selected profile changed; refresh before export.");
+            new ProxyRepository(root).EnsurePortableSafe(source);
             items.Add(new(source.Id, source.MetadataVersion, source.Slug, source.DisplayName, source.Notes, source.Tags.ToArray(), source.Folders.ToArray(), settings));
         }
         var currentTemplates = templates.List().ToDictionary(t => t.Id);

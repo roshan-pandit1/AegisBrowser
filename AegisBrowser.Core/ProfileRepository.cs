@@ -63,6 +63,7 @@ public sealed class ProfileRepository : IProfileRepository
                 var current = ReadBySlug(db, source.Slug);
                 if (current is null || !MatchesSnapshot(current, source))
                     throw new IOException("The source profile changed; reload it before duplicating.");
+                new ProxyRepository(root).EnsurePortableSafeLocked(source);
             }
             CheckProfilePath(slug, mustExist: false);
             if (ReadBySlug(db, slug) is not null) throw new IOException("That browser profile already has metadata.");

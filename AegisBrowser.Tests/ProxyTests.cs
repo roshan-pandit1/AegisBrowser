@@ -108,8 +108,17 @@ internal static class ProxyTests
                 var secondId = replaced.Configuration.Settings.CredentialId!.Value;
                 Check(secondId != firstId && !File.Exists(blob) && vault.Read(first.Id, secondId).Username == replacement.Username,
                     "credential replacement commits new secret before removing old");
+                var transfer = new ProfileTransfer(root, profiles, new ProfileTemplateRepository(root));
+                Reject(() => transfer.Export(Path.Combine(testRoot, "proxy-export.json"), [first], [], false, false, false),
+                    "export cannot silently drop required proxy configuration");
+                Reject(() => new ProfileDuplicationService(root, profiles).DuplicateClean(first, "proxy-copy", "Clean copy", false, false, false),
+                    "clean duplicate cannot silently drop required proxy configuration");
+                Check(profiles.GetBySlug("proxy-copy") is null, "rejected duplication creates no profile");
+                var templates = new ProfileTemplateRepository(root);
+                Reject(() => new ProfileTemplateService(root, profiles, templates).SaveFromProfile(first, "Proxy template", "", false, false),
+                    "template cannot silently drop required proxy configuration");
                 var export = Path.Combine(testRoot, "export.json");
-                new ProfileTransfer(root, profiles, new ProfileTemplateRepository(root)).Export(export, [first], [], false, false, false);
+                transfer.Export(export, [second], [], false, false, false);
                 var exportText = File.ReadAllText(export);
                 Check(!exportText.Contains(replacement.Username, StringComparison.Ordinal) && !exportText.Contains(replacement.Password, StringComparison.Ordinal) &&
                     !exportText.Contains(secondId.ToString("D"), StringComparison.Ordinal), "metadata export excludes credentials and references");
@@ -117,7 +126,7 @@ internal static class ProxyTests
                 var backupDir = Path.Combine(root, "manual-backups", "backup-" + backup.Manifest.Content.BackupId.ToString("D"));
                 Check(Directory.GetFiles(backupDir).All(p => !Encoding.UTF8.GetString(File.ReadAllBytes(p)).Contains(secondId.ToString("D"), StringComparison.Ordinal)),
                     "metadata backup excludes proxy credentials and references");
-                var copy = new ProfileDuplicationService(root, profiles).DuplicateClean(first, "proxy-copy", "Clean copy", false, false, false);
+                var copy = new ProfileDuplicationService(root, profiles).DuplicateClean(second, "proxy-copy", "Clean copy", false, false, false);
                 using (var copyLease = new ProfileLease(BrowserPolicy.ProfilePath(root, copy.Slug)))
                     Check(repo.Get(copy, copyLease) is null, "clean duplicate does not copy proxy configuration");
                 Reject(() => vault.Read(copy.Id, secondId), "clean duplicate does not receive protected credentials");

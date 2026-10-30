@@ -150,6 +150,7 @@ public sealed class ProfileTemplateService(string root, ProfileRepository profil
         var current = profiles.GetBySlug(source.Slug);
         if (current is null || !ProfileRepository.MatchesSnapshot(current, source))
             throw new IOException("The source profile changed; reload it before saving a template.");
+        new ProxyRepository(root).EnsurePortableSafe(source);
         return templates.Create(name, description, source.Tags, source.Folders, settings);
     }
 

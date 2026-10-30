@@ -94,6 +94,27 @@ public sealed class ProxyRepository : IProxyRepository
             throw new IOException("This profile has a required or interrupted proxy configuration. Proxy networking is not available in this build; the profile was not started. Restore the configuration or explicitly select Direct in a compatible management tool.");
     }
 
+    // P2 transfer formats do not carry proxy policy. Refuse to create an apparently
+    // direct copy of a profile that has required or interrupted proxy settings.
+    internal void EnsurePortableSafe(ProfileDefinition profile) => profiles.WithExpectedProfile(profile, () =>
+    {
+        EnsurePortableSafeLocked(profile);
+        return 0;
+    });
+
+    // Caller already holds the profile metadata store lock.
+    internal void EnsurePortableSafeLocked(ProfileDefinition profile)
+    {
+        var marker = Marker(profile); RejectLink(marker);
+        WithStore(false, db =>
+        {
+            var settings = db is null ? null : Read(db, profile.Id);
+            if (Exists(marker) || (settings is not null && settings.Settings.Protocol != ProxyProtocol.Direct))
+                throw new IOException("This profile has a required or interrupted proxy configuration. Copying or exporting it without that policy is not supported.");
+            return 0;
+        });
+    }
+
     private void CheckLease(ProfileDefinition profile, ProfileLease lease)
     {
         ArgumentNullException.ThrowIfNull(profile); ArgumentNullException.ThrowIfNull(lease);
