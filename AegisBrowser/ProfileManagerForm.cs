@@ -14,6 +14,7 @@ public sealed class ProfileManagerForm : Form
     private readonly ProfileBulkOperations bulk;
     private readonly ProfileTransfer transfer;
     private readonly ProfileBackupService backups;
+    private readonly ProfileSettingsTransactions settingsTransactions;
     private readonly ProfileRepository repository;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private readonly TextBox search = new() { Name = "ProfileSearch", AccessibleName = "Search profiles, tags and folders", Width = 220, PlaceholderText = "Search profiles, tags, folders" };
@@ -52,6 +53,7 @@ public sealed class ProfileManagerForm : Form
         templates = new ProfileTemplateService(root, repository, templateRepository);
         transfer = new ProfileTransfer(root, repository, templateRepository);
         backups = new ProfileBackupService(root, repository);
+        settingsTransactions = new ProfileSettingsTransactions(root, repository, templateRepository);
         Text = "Aegis Browser — Profiles";
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.CenterScreen;
@@ -99,14 +101,16 @@ public sealed class ProfileManagerForm : Form
         var bulkCopy = new Button { Name = "BulkCopy", Text = "Clean copy selected", AccessibleName = "Clean duplicate selected profiles", AutoSize = true };
         var export = new Button { Name = "ExportProfiles", Text = "Export selected", AccessibleName = "Export selected profiles", AutoSize = true };
         var import = new Button { Name = "ImportProfiles", Text = "Import", AccessibleName = "Import profiles or templates", AutoSize = true };
+        var applyTemplate = new Button { Name = "ApplyTemplateSettings", Text = "Apply template settings", AccessibleName = "Apply template settings to selected profiles", AutoSize = true };
         selectVisible.Click += (_, _) => { foreach (DataGridViewRow row in grid.Rows) if (row.Tag is DashboardProfile p && p.Metadata is not null) selectedIds.Add(p.Metadata.Id); UpdateSelectionCells(); };
         clearSelection.Click += (_, _) => { selectedIds.Clear(); UpdateSelectionCells(); };
         bulkEdit.Click += (_, _) => RunBulk(false);
         bulkCopy.Click += (_, _) => RunBulk(true);
         export.Click += (_, _) => ExportSelected();
         import.Click += async (_, _) => await ImportProfiles();
+        applyTemplate.Click += (_, _) => ApplyTemplateSettings();
         selectionCount.Text = "0 selected";
-        tools.Controls.AddRange([search, statusFilter, folderFilter, sort, clear, selectVisible, clearSelection, bulkEdit, bulkCopy, export, import, selectionCount]);
+        tools.Controls.AddRange([search, statusFilter, folderFilter, sort, clear, selectVisible, clearSelection, bulkEdit, bulkCopy, applyTemplate, export, import, selectionCount]);
         content.Controls.Add(tools, 0, 1); content.Controls.Add(summary, 0, 2);
         var main = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 8, 0, 0) };
         main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); main.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
@@ -135,6 +139,7 @@ public sealed class ProfileManagerForm : Form
         actions.Items.Add("Edit metadata", null, async (_, _) => await EditSelected());
         actions.Items.Add("Duplicate clean profile", null, async (_, _) => await DuplicateSelected());
         actions.Items.Add("Save as template", null, async (_, _) => await SaveTemplate());
+        actions.Items.Add("Recover interrupted settings", null, async (_, _) => await RecoverSettings());
         actions.Items.Add("Refresh", null, async (_, _) => await RefreshProfiles(manual: true));
     }
 
@@ -439,5 +444,29 @@ public sealed class ProfileManagerForm : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         { if (!IsDisposed) feedback.Text = "Could not open backups: " + ex.Message; }
+    }
+
+    private void ApplyTemplateSettings()
+    {
+        var targets = allProfiles.Where(p => p.Metadata is not null && selectedIds.Contains(p.Metadata.Id)).Select(p => p.Metadata!).ToArray();
+        if (targets.Length == 0 || targets.Length != selectedIds.Count) { feedback.Text = "Select registered profiles and refresh before applying settings."; return; }
+        using var form = new ProfileTemplateApplyForm(templateRepository, settingsTransactions, targets);
+        form.ShowDialog(this);
+        _ = RefreshProfiles(manual: true);
+    }
+
+    private async Task RecoverSettings()
+    {
+        var profile = Selected?.Metadata;
+        if (profile is null) { feedback.Text = "Select a registered profile to recover settings."; return; }
+        if (MessageBox.Show(this, "Restore the previous privacy/search settings for this interrupted operation? The profile must be closed.",
+            "Recover interrupted settings", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        try
+        {
+            await Task.Run(() => settingsTransactions.Recover(profile));
+            if (!IsDisposed) feedback.Text = "Previous settings restored. The profile can be opened again.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not recover settings: " + ex.Message; }
     }
 }

@@ -39,6 +39,7 @@ public sealed class ProfileDashboard(string root, IProfileRepository repository,
 
     public void Launch(DashboardProfile profile)
     {
+        ProfileSettingsTransactions.EnsureNoPending(root, profile.Slug);
         // Recheck the actual filesystem and lease; the displayed row may be stale.
         var current = new DashboardProfile(profile.Slug, profile.Metadata, processes.GetStatus(profile.Slug));
         if (current.Status.Activity == ProfileActivity.Missing && repository.GetBySlug(profile.Slug) is not null)

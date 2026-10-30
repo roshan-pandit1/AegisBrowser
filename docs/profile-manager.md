@@ -88,6 +88,26 @@ unchanged and requires refresh before retrying. Cancel stops work before the nex
 profile and does not undo changes already committed. The operation does not delete
 profiles or stop browsers.
 
+**Apply template settings** applies the selected template's saved privacy and/or
+search settings to selected profiles, after confirmation. Each profile must be closed,
+its metadata revision must still match, and each settings file to be replaced must
+already exist and be valid. Save the corresponding settings once in the browser first
+if a file is absent. Notes, tags and folders are unchanged. Results are reported per
+profile and cancellation stops before the next profile.
+
+Before replacing settings, Aegis writes a checked recovery record and copies the old
+application settings to an owned `.settings-work-<id>` directory. If application is
+interrupted, the current build refuses to open that profile until **Actions → Recover
+interrupted settings** restores the old files. Recovery checks that current files
+still match either the old or proposed values; unexpected external edits are preserved
+and require manual repair. Keep the recovery marker and staging directory for inspection
+if recovery reports an error. A failure before publication can leave an unlisted
+staging directory; completed operations remove only their own known temporary files.
+These temporary files can contain private rules and should be protected like profile
+data. Older Aegis builds do not recognize the recovery marker: do not use them to open
+a profile with an interrupted operation. This feature does not modify Chromium caches
+or security policies.
+
 ## Metadata export and import
 
 Select registered profiles and choose **Export selected**, or export a template from
