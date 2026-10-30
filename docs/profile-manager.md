@@ -273,3 +273,8 @@ unwritable metadata/backup location and recovery from a corrupt database; check
 manager keyboard operation and 100/150/200% scaling; and close multiple active
 profiles normally while verifying that their locks are released. Do not infer a
 manual pass from the automated suites.
+
+# Proxy configuration
+
+The initial proxy configuration and user-protected credential foundation is described in [proxy-configuration.md](proxy-configuration.md). Proxy routing and proxy controls are not enabled in this slice; configured required proxies block profile startup until supported networking is available.
+
