@@ -28,6 +28,8 @@ The Windows native suite contains a controlled, research-only CEF probe. It obse
 
 The pinned [CefSharp proxy helper](https://github.com/cefsharp/CefSharp/blob/v154.0.340/CefSharp/RequestContextExtensions.cs) lists HTTP and SOCKS schemes, but does not list HTTPS in its scheme validator. That does not by itself establish whether an HTTPS proxy works through a lower-level preference; it requires a separate native test.
 
+A second test-only probe exercises a Basic HTTP proxy challenge using fake credentials. Its callback applies a host, port, protocol and `isProxy` scope and caps credential submissions. A synthetic website challenge is canceled and checked for an `Authorization` header. The fixture never forwards requests, and the credentials and request headers are not logged. This is evidence about a test callback, not production proxy-authentication support. Basic authentication to an HTTP proxy is not encrypted between the browser and that proxy; an HTTPS proxy would require separate validation.
+
 ## Manual Windows verification still required
 
 - On a test account, verify credential replacement and loss of access after moving protected data to a different Windows user.
