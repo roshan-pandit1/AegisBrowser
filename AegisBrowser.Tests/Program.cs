@@ -20,7 +20,12 @@ if (args.Length == 2 && args[0] == "--hold-metadata-transaction")
     using var transaction = connection.BeginTransaction();
     using var command = connection.CreateCommand();
     command.Transaction = transaction;
-    command.CommandText = "UPDATE profiles SET notes='uncommitted crash write'";
+    command.CommandText = """
+        UPDATE profiles SET notes='uncommitted crash write';
+        INSERT INTO profiles (id,slug,display_name,notes,metadata_version,revision,created_utc,updated_utc)
+        VALUES ('10000000-0000-0000-0000-000000000001','interrupted','interrupted','',1,1,
+                '2026-01-01T00:00:00.0000000+00:00','2026-01-01T00:00:00.0000000+00:00');
+        """;
     command.ExecuteNonQuery();
     Console.WriteLine("READY");
     Console.Out.Flush();

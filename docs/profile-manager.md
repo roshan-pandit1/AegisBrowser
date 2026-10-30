@@ -90,10 +90,12 @@ select Profiles on the toolbar and confirm the manager launches separate process
 
 The console suite covers directory-only migration, metadata round trips and revision
 conflicts, backup restoration, failed migration and retry, duplicate and concurrent
-creation, invalid paths, a Windows junction, corrupt/newer databases, and recovery
-from a killed process with an uncommitted SQLite transaction. It also retains the
-existing directory/lease checks. The Windows workflow runs the native browser and
-filtering suites, publish, smoke and portable packaging checks.
+creation, invalid paths, Windows junctions and a read-only database, corrupt/newer
+databases, and recovery from a killed process with an uncommitted SQLite transaction.
+It also retains the existing directory/lease checks. The Windows native browser suite
+creates two CEF profiles without metadata, migrates them before restarting CEF, and
+checks their cookie/localStorage isolation, persistence and stable IDs over repeated
+process restarts. The workflow also runs filtering, publish, smoke and packaging checks.
 
 Manual Windows acceptance remains necessary: upgrade a copy of an existing default
 and named profile containing cookies, IndexedDB, local storage and privacy/search

@@ -104,7 +104,9 @@ public sealed class ProfileRepository : IProfileRepository
             if (current.Id != candidate.Id || current.MetadataCreatedUtc != candidate.MetadataCreatedUtc ||
                 current.Revision != expectedRevision)
                 throw new IOException("Profile metadata changed; reload it before saving.");
-            var updated = candidate with { Revision = checked(expectedRevision + 1), UpdatedUtc = DateTimeOffset.UtcNow };
+            var now = DateTimeOffset.UtcNow;
+            if (now < current.UpdatedUtc) now = current.UpdatedUtc;
+            var updated = candidate with { Revision = checked(expectedRevision + 1), UpdatedUtc = now };
             using var transaction = db.BeginTransaction();
             using (var command = Command(db, transaction, "UPDATE profiles SET display_name=$display, notes=$notes, updated_utc=$updated, revision=$next WHERE id=$id AND revision=$expected"))
             {
@@ -150,9 +152,10 @@ public sealed class ProfileRepository : IProfileRepository
     private void InitializeDatabase()
     {
         var temporary = Path.Combine(root, ".profile-metadata-" + Guid.NewGuid().ToString("N") + ".tmp");
+        var ownsTemporary = false;
         try
         {
-            using (new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+            using (new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { ownsTemporary = true; }
             using (var db = Open(temporary, SqliteOpenMode.ReadWrite))
             {
                 using var tx = db.BeginTransaction();
@@ -174,7 +177,7 @@ public sealed class ProfileRepository : IProfileRepository
             }
             File.Move(temporary, DatabasePath); // Never overwrite an existing database.
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        finally { if (ownsTemporary && File.Exists(temporary)) File.Delete(temporary); }
     }
 
     private void BackupBeforeMigration(SqliteConnection db)
@@ -186,9 +189,10 @@ public sealed class ProfileRepository : IProfileRepository
         var name = "metadata-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfffffff", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N");
         var temporary = Path.Combine(directory, "." + name + ".tmp");
         var destination = Path.Combine(directory, name + ".sqlite3");
+        var ownsTemporary = false;
         try
         {
-            using (new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+            using (new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { ownsTemporary = true; }
             using (var backup = Open(temporary, SqliteOpenMode.ReadWrite))
             {
                 db.BackupDatabase(backup);
@@ -199,7 +203,7 @@ public sealed class ProfileRepository : IProfileRepository
             }
             File.Move(temporary, destination);
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        finally { if (ownsTemporary && File.Exists(temporary)) File.Delete(temporary); }
     }
 
     private static void ValidateDatabase(SqliteConnection db)

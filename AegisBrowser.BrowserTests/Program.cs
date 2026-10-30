@@ -26,8 +26,28 @@ internal static class Program
         Directory.CreateDirectory(root);
         var initialized = false;
         var result = 0;
+        ProfileLease? leaseA = null, leaseB = null;
         try
         {
+            if (args[0] == "read")
+            {
+                // The write process created these CEF profiles without metadata. Adopt them
+                // before CEF starts, then verify their real cookie/localStorage data below.
+                var pathA = BrowserPolicy.ProfilePath(root, "a");
+                var pathB = BrowserPolicy.ProfilePath(root, "b");
+                Check(Directory.Exists(pathA) && Directory.Exists(pathB), "legacy CEF profiles exist before migration");
+                ProfileRepository.CheckSafeProfilePath(root, "a");
+                ProfileRepository.CheckSafeProfilePath(root, "b");
+                leaseA = new ProfileLease(pathA);
+                leaseB = new ProfileLease(pathB);
+                var repository = new ProfileRepository(root);
+                var a = repository.GetOrMigrate("a", leaseA);
+                var b = repository.GetOrMigrate("b", leaseB);
+                var idsPath = Path.Combine(root, "metadata-test-ids.txt");
+                var ids = a.Id.ToString("D") + "\n" + b.Id.ToString("D");
+                if (File.Exists(idsPath)) Check(File.ReadAllText(idsPath) == ids, "profile metadata IDs survive process restart");
+                else { Check(a.Id != Guid.Empty && b.Id != Guid.Empty && a.Id != b.Id, "legacy CEF profiles receive distinct IDs"); File.WriteAllText(idsPath, ids); }
+            }
             foreach (var dependency in new[] { "CefSharp.BrowserSubprocess.exe", "CefSharp.BrowserSubprocess.runtimeconfig.json", "CefSharp.BrowserSubprocess.Core.dll" })
             {
                 var dependencyPath = Path.Combine(AppContext.BaseDirectory, dependency);
@@ -73,7 +93,11 @@ internal static class Program
             Application.Run(host);
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
-        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
+        finally
+        {
+            if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); }
+            leaseB?.Dispose(); leaseA?.Dispose();
+        }
         if (result == 0) Console.WriteLine("PASS: CEF shutdown completed (" + args[0] + ")");
         return result;
     }

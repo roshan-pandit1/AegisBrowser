@@ -113,8 +113,35 @@ internal static class ProfileRepositoryTests
             File.Delete(Path.Combine(failedRoot, ProfileRepository.BackupDirectoryName));
             using (var lease = new ProfileLease(failedPath)) Check(failedRepository.GetOrMigrate("legacy", lease).Id != Guid.Empty, "migration retries after failure");
 
+            if (OperatingSystem.IsWindows())
+            {
+                var readonlyPath = BrowserPolicy.ProfilePath(failedRoot, "readonly");
+                Directory.CreateDirectory(readonlyPath);
+                File.WriteAllText(Path.Combine(readonlyPath, "sentinel"), "read-only data");
+                var readonlyDb = Path.Combine(failedRoot, ProfileRepository.DatabaseFileName);
+                var attributes = File.GetAttributes(readonlyDb);
+                try
+                {
+                    File.SetAttributes(readonlyDb, attributes | FileAttributes.ReadOnly);
+                    using var lease = new ProfileLease(readonlyPath);
+                    Reject(() => failedRepository.GetOrMigrate("readonly", lease), "read-only metadata prevents migration");
+                }
+                finally { File.SetAttributes(readonlyDb, attributes); }
+                Check(failedRepository.GetBySlug("readonly") is null && File.ReadAllText(Path.Combine(readonlyPath, "sentinel")) == "read-only data",
+                    "read-only failure preserves data");
+                using var retryLease = new ProfileLease(readonlyPath);
+                Check(failedRepository.GetOrMigrate("readonly", retryLease).Id != Guid.Empty, "migration retries when write permission returns");
+            }
+
+            var interruptedPath = BrowserPolicy.ProfilePath(root, "interrupted");
+            Directory.CreateDirectory(interruptedPath);
+            File.WriteAllText(Path.Combine(interruptedPath, "sentinel"), "interrupted data");
             CrashDuringTransaction(dbPath);
-            Check(repository.GetBySlug("work")!.Notes == "private note", "uncommitted transaction rolls back after process termination");
+            Check(repository.GetBySlug("work")!.Notes == "private note" && repository.GetBySlug("interrupted") is null,
+                "uncommitted migration rolls back after process termination");
+            using (var lease = new ProfileLease(interruptedPath))
+                Check(repository.GetOrMigrate("interrupted", lease).Id != Guid.Empty && File.ReadAllText(Path.Combine(interruptedPath, "sentinel")) == "interrupted data",
+                    "interrupted migration retries without cache loss");
 
             var corruptRoot = Path.Combine(testRoot, "corrupt");
             var corruptPath = BrowserPolicy.ProfilePath(corruptRoot, "legacy");
@@ -177,10 +204,7 @@ internal static class ProfileRepositoryTests
         Directory.CreateDirectory(root);
         Directory.CreateDirectory(target);
         File.WriteAllText(Path.Combine(target, "sentinel"), "outside");
-        var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (var arg in new[] { "/d", "/c", "mklink", "/J", link, target }) start.ArgumentList.Add(arg);
-        using var process = Process.Start(start) ?? throw new Exception("Could not create junction probe");
-        if (!process.WaitForExit(15000) || process.ExitCode != 0) throw new Exception("Could not create junction for profile test: " + process.StandardError.ReadToEnd());
+        MakeJunction(link, target);
         try
         {
             reject(() => ProfileRepository.CheckSafeProfilePath(root, "linked"), "linked profile rejected before lease");
@@ -188,5 +212,26 @@ internal static class ProfileRepositoryTests
             check(File.ReadAllText(Path.Combine(target, "sentinel")) == "outside" && !File.Exists(Path.Combine(target, ".profile.lock")), "junction target untouched");
         }
         finally { Directory.Delete(link); }
+
+        var oldPath = BrowserPolicy.ProfilePath(root, "legacy");
+        Directory.CreateDirectory(oldPath);
+        var backupLink = Path.Combine(root, ProfileRepository.BackupDirectoryName);
+        MakeJunction(backupLink, target);
+        try
+        {
+            using var lease = new ProfileLease(oldPath);
+            reject(() => new ProfileRepository(root).GetOrMigrate("legacy", lease), "linked backup directory rejected");
+            check(Directory.GetFiles(target).Length == 1 && File.ReadAllText(Path.Combine(target, "sentinel")) == "outside", "backup junction target untouched");
+        }
+        finally { Directory.Delete(backupLink); }
+    }
+
+    private static void MakeJunction(string link, string target)
+    {
+        var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        foreach (var arg in new[] { "/d", "/c", "mklink", "/J", link, target }) start.ArgumentList.Add(arg);
+        using var process = Process.Start(start) ?? throw new Exception("Could not create junction probe");
+        if (!process.WaitForExit(15000)) { process.Kill(true); throw new Exception("Junction probe timed out"); }
+        if (process.ExitCode != 0) throw new Exception("Could not create junction for profile test: " + process.StandardError.ReadToEnd());
     }
 }
