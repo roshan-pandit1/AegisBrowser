@@ -28,7 +28,8 @@ internal static partial class Program
             if (!initialized) throw new IOException("CEF initialization failed.");
             using var context = Cef.GetGlobalRequestContext();
             using var origin = new LocalHttpFixture("origin");
-            using var proxy = new LocalHttpFixture("proxy");
+            // The test-only proxy can connect only to this one loopback origin.
+            using var proxy = new LocalHttpFixture("proxy", origin.Port);
             using var host = new Form { Width = 800, Height = 600, Text = "Local CEF proxy probe" };
             host.Shown += async (_, _) =>
             {
@@ -59,14 +60,15 @@ internal static partial class Program
                     var baseUrl = "http://127.0.0.1:" + origin.Port;
                     await LoadReady(browser, baseUrl + "/default-bypass");
                     await Wait(() => origin.Saw("/default-bypass"), "direct loopback observation");
-                    Check(!proxy.Saw("/default-bypass") && await Js(browser, "document.title") == "origin",
+                    Check(!proxy.Saw("/default-bypass") && origin.SawDirect("/default-bypass") && await Js(browser, "document.title") == "origin",
                         "CEF default proxy settings bypass loopback");
 
                     await Configure(true);
                     await LoadReady(browser, baseUrl + "/proxied");
                     await Wait(() => proxy.Saw("/proxied"), "proxied loopback observation");
-                    Check(!origin.Saw("/proxied") && await Js(browser, "document.title") == "proxy",
-                        "CEF test-only bypass override routed HTTP to local proxy");
+                    await Wait(() => origin.SawViaProxy("/proxied"), "proxy forwarded to controlled origin");
+                    Check(!origin.SawDirect("/proxied") && await Js(browser, "document.title") == "proxy",
+                        "CEF test-only bypass override routed HTTP through the local proxy to its origin");
 
                     proxy.Stop();
                     var offlineUrl = baseUrl + "/offline";
@@ -108,21 +110,24 @@ internal static partial class Program
     {
         private readonly TcpListener listener = new(IPAddress.Loopback, 0);
         private readonly CancellationTokenSource cancellation = new();
-        private readonly ConcurrentQueue<string> requests = new();
+        private readonly ConcurrentQueue<(string Line, bool ViaProxy)> requests = new();
         private readonly ConcurrentBag<Task> clients = new();
         private readonly string label;
+        private readonly int? allowedOriginPort;
         private readonly Task loop;
         private bool stopped;
         public int Port { get; }
 
-        public LocalHttpFixture(string label)
+        public LocalHttpFixture(string label, int? allowedOriginPort = null)
         {
-            this.label = label;
+            this.label = label; this.allowedOriginPort = allowedOriginPort;
             listener.Start(); Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             loop = Task.Run(AcceptLoop);
         }
 
-        public bool Saw(string path) => requests.Any(line => line.Contains(path, StringComparison.Ordinal));
+        public bool Saw(string path) => requests.Any(request => request.Line.Contains(path, StringComparison.Ordinal));
+        public bool SawDirect(string path) => requests.Any(request => !request.ViaProxy && request.Line.Contains(path, StringComparison.Ordinal));
+        public bool SawViaProxy(string path) => requests.Any(request => request.ViaProxy && request.Line.Contains(path, StringComparison.Ordinal));
 
         private async Task AcceptLoop()
         {
@@ -149,14 +154,32 @@ internal static partial class Program
                     using var reader = new StreamReader(stream, Encoding.ASCII, false, 4096, leaveOpen: true);
                     var first = await reader.ReadLineAsync(token);
                     if (first is null || first.Length > 8192) return;
+                    var viaProxy = false;
                     for (var i = 0; i < 100; i++)
                     {
                         var line = await reader.ReadLineAsync(token);
                         if (string.IsNullOrEmpty(line)) break;
                         if (line.Length > 8192) throw new IOException("Fixture request headers are too large.");
+                        if (line.Equals("X-Aegis-Test-Proxy: yes", StringComparison.OrdinalIgnoreCase)) viaProxy = true;
                     }
-                    requests.Enqueue(first); // Only a controlled request line, never headers or credentials.
-                    var body = Encoding.ASCII.GetBytes("<!doctype html><title>" + label + "</title><p>local fixture</p>");
+                    requests.Enqueue((first, viaProxy)); // Only a controlled request line and a boolean; no headers or credentials.
+                    if (allowedOriginPort is int port)
+                    {
+                        var parts = first.Split(' ', 3);
+                        if (parts.Length != 3 || parts[0] != "GET" || !Uri.TryCreate(parts[1], UriKind.Absolute, out var target) ||
+                            target.Scheme != "http" || target.Host != "127.0.0.1" || target.Port != port)
+                            return; // Never act as a general forwarding service.
+                        using var upstream = new TcpClient(AddressFamily.InterNetwork);
+                        await upstream.ConnectAsync(IPAddress.Loopback, port, token);
+                        using var upstreamStream = upstream.GetStream();
+                        // Forward only the controlled path, not browser headers or credentials.
+                        var request = Encoding.ASCII.GetBytes("GET " + target.PathAndQuery + " HTTP/1.1\r\nHost: 127.0.0.1:" + port +
+                            "\r\nX-Aegis-Test-Proxy: yes\r\nConnection: close\r\n\r\n");
+                        await upstreamStream.WriteAsync(request, token);
+                        await upstreamStream.CopyToAsync(stream, token);
+                        return;
+                    }
+                    var body = Encoding.ASCII.GetBytes("<!doctype html><title>" + (viaProxy ? "proxy" : label) + "</title><p>local fixture</p>");
                     var headers = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " + body.Length + "\r\nConnection: close\r\n\r\n");
                     await stream.WriteAsync(headers, token);
                     await stream.WriteAsync(body, token);
