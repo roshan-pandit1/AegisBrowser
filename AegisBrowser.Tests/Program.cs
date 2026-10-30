@@ -63,6 +63,7 @@ ProfileBulkTests.Run();
 ProfileTransferTests.Run();
 ProfileBackupTests.Run();
 ProfileSettingsTransactionTests.Run();
+ProxyTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {

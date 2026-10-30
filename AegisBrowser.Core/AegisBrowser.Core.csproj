@@ -3,5 +3,6 @@
   <ItemGroup>
     <EmbeddedResource Include="public_suffix_list.dat" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.33" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 </Project>

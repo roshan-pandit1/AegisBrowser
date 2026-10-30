@@ -27,7 +27,8 @@ internal static class Program
             ProfileRepository.CheckSafeProfilePath(root, profile);
             lease = new ProfileLease(path);
             ProfileSettingsTransactions.EnsureNoPending(root, profile);
-            _ = new ProfileRepository(root).GetOrMigrate(profile, lease);
+            var definition = new ProfileRepository(root).GetOrMigrate(profile, lease);
+            new ProxyRepository(root).EnsureRuntimeReady(definition, lease);
             var settings = new CefSettings
             {
                 RootCachePath = path,
