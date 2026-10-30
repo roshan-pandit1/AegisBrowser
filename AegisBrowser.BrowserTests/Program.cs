@@ -171,6 +171,38 @@ internal static class Program
                 "native editor retains stale input without overwriting");
             editor.Close();
         }
+        var latest = repository.GetBySlug("ui-test")!;
+        var duplicator = new ProfileDuplicationService(profilesRoot, repository);
+        using (var copy = new ProfileCopyForm("Duplicate profile", "UI copy", true,
+            (slug, name, notes, privacy, searchSetting) => duplicator.DuplicateClean(latest, slug, name, notes, privacy, searchSetting)))
+        {
+            copy.Show(manager);
+            Control<TextBox>(copy, "CopySlug").Text = "ui-copy";
+            Control<Button>(copy, "CopySave").PerformClick();
+            await Wait(() => copy.IsDisposed || !copy.Visible, "clean copy dialog");
+        }
+        var copied = repository.GetBySlug("ui-copy");
+        Check(copied is not null && copied.Id != latest.Id &&
+            !Directory.Exists(Path.Combine(BrowserPolicy.ProfilePath(profilesRoot, "ui-copy"), "Cache")), "native clean-copy dialog creates fresh storage");
+        var templateRepository = new ProfileTemplateRepository(profilesRoot);
+        var templateService = new ProfileTemplateService(profilesRoot, repository, templateRepository);
+        using (var capture = new TemplateCaptureForm(templateService, latest))
+        {
+            capture.Show(manager);
+            Control<TextBox>(capture, "TemplateName").Text = "UI template";
+            Control<Button>(capture, "SaveTemplate").PerformClick();
+            await Wait(() => capture.IsDisposed || !capture.Visible, "template capture dialog");
+        }
+        Check(templateRepository.List().Single().Name == "UI template", "native template dialog persists template");
+        using (var templates = new ProfileTemplatesForm(templateRepository, templateService))
+        {
+            templates.Show(manager);
+            var templateList = Control<ListBox>(templates, "TemplateList");
+            await Wait(() => templateList.Items.Count == 1, "template manager load");
+            Control<TextBox>(templates, "TemplateSearch").Text = "no matching template";
+            Check(templateList.Items.Count == 0, "native template search filters results");
+            templates.Close();
+        }
         manager.Close();
     }
 
