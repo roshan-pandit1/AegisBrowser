@@ -119,28 +119,73 @@ public sealed class ProfileRepository : IProfileRepository
         Validate(candidate);
         if (expectedRevision < 1 || expectedRevision != candidate.Revision)
             throw new ArgumentException("An exact current revision is required.", nameof(expectedRevision));
+        return WithStore(db => UpdateCore(db, candidate, expectedRevision));
+    }
+
+    private static ProfileDefinition UpdateCore(SqliteConnection db, ProfileDefinition candidate, long expectedRevision)
+    {
+        var current = ReadBySlug(db, candidate.Slug) ?? throw new IOException("Profile metadata was not found.");
+        if (current.Id != candidate.Id || current.MetadataCreatedUtc != candidate.MetadataCreatedUtc || current.Revision != expectedRevision)
+            throw new IOException("Profile metadata changed; reload it before saving.");
+        var now = DateTimeOffset.UtcNow;
+        if (now < current.UpdatedUtc) now = current.UpdatedUtc;
+        var updated = candidate with { Revision = checked(expectedRevision + 1), UpdatedUtc = now };
+        using var transaction = db.BeginTransaction();
+        using (var command = Command(db, transaction, "UPDATE profiles SET display_name=$display, notes=$notes, updated_utc=$updated, revision=$next WHERE id=$id AND revision=$expected"))
+        {
+            command.Parameters.AddWithValue("$display", updated.DisplayName); command.Parameters.AddWithValue("$notes", updated.Notes);
+            command.Parameters.AddWithValue("$updated", FormatTime(updated.UpdatedUtc)); command.Parameters.AddWithValue("$next", updated.Revision);
+            command.Parameters.AddWithValue("$id", updated.Id.ToString("D")); command.Parameters.AddWithValue("$expected", expectedRevision);
+            if (command.ExecuteNonQuery() != 1) throw new IOException("Profile metadata changed; reload it before saving.");
+        }
+        ReplaceLabels(db, transaction, updated);
+        transaction.Commit();
+        return updated;
+    }
+
+    internal void CreateConsistentSnapshot(string destination)
+    {
+        WithStore(db =>
+        {
+            using (new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+            using var backup = Open(destination, SqliteOpenMode.ReadWrite);
+            db.BackupDatabase(backup);
+            Execute(backup, null, "PRAGMA journal_mode=DELETE");
+            ValidateDatabase(backup);
+            return 0;
+        });
+    }
+
+    internal static ProfileDefinition ReadSnapshotProfile(string path, string slug)
+    {
+        try
+        {
+            CheckNotLink(path);
+            foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
+                if (Exists(path + suffix)) throw new IOException("Backup database has unexpected sidecar files.");
+            using var db = Open(path, SqliteOpenMode.ReadOnly);
+            ValidateDatabase(db);
+            return ReadBySlug(db, NormalizeSlug(slug)) ?? throw new IOException("The backup does not contain that profile.");
+        }
+        catch (SqliteException ex) { throw new IOException("Backup metadata is corrupt or incompatible.", ex); }
+    }
+
+    internal ProfileDefinition RestoreMetadata(ProfileDefinition snapshot, ProfileDefinition expected, ProfileLease lease)
+    {
+        if (!lease.IsHeldFor(BrowserPolicy.ProfilePath(root, expected.Slug))) throw new IOException("Close the profile before restoring metadata.");
+        if (snapshot.Id != expected.Id || snapshot.Slug != expected.Slug || snapshot.MetadataCreatedUtc != expected.MetadataCreatedUtc)
+            throw new IOException("Backup identity does not match this profile; restore it as a new profile instead.");
+        var candidate = expected with { DisplayName = snapshot.DisplayName, Notes = snapshot.Notes, Tags = snapshot.Tags, Folders = snapshot.Folders };
+        Validate(candidate);
         return WithStore(db =>
         {
-            var current = ReadBySlug(db, candidate.Slug) ?? throw new IOException("Profile metadata was not found.");
-            if (current.Id != candidate.Id || current.MetadataCreatedUtc != candidate.MetadataCreatedUtc ||
-                current.Revision != expectedRevision)
-                throw new IOException("Profile metadata changed; reload it before saving.");
-            var now = DateTimeOffset.UtcNow;
-            if (now < current.UpdatedUtc) now = current.UpdatedUtc;
-            var updated = candidate with { Revision = checked(expectedRevision + 1), UpdatedUtc = now };
-            using var transaction = db.BeginTransaction();
-            using (var command = Command(db, transaction, "UPDATE profiles SET display_name=$display, notes=$notes, updated_utc=$updated, revision=$next WHERE id=$id AND revision=$expected"))
-            {
-                command.Parameters.AddWithValue("$display", updated.DisplayName);
-                command.Parameters.AddWithValue("$notes", updated.Notes);
-                command.Parameters.AddWithValue("$updated", FormatTime(updated.UpdatedUtc));
-                command.Parameters.AddWithValue("$next", updated.Revision);
-                command.Parameters.AddWithValue("$id", updated.Id.ToString("D"));
-                command.Parameters.AddWithValue("$expected", expectedRevision);
-                if (command.ExecuteNonQuery() != 1) throw new IOException("Profile metadata changed; reload it before saving.");
-            }
-            ReplaceLabels(db, transaction, updated);
-            transaction.Commit();
+            var current = ReadBySlug(db, expected.Slug);
+            if (current is null || !MatchesSnapshot(current, expected)) throw new IOException("Profile metadata changed after the restore preview; refresh and retry.");
+            // A consistent validated copy of the current database is required first.
+            BackupBeforeMigration(db);
+            var updated = UpdateCore(db, candidate, expected.Revision);
+            var verified = ReadBySlug(db, expected.Slug);
+            if (verified is null || !MatchesSnapshot(verified, updated)) throw new IOException("Restore verification failed; retain the safety backup for recovery.");
             return updated;
         });
     }
