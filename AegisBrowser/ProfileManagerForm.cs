@@ -8,6 +8,9 @@ public sealed class ProfileManagerForm : Form
 {
     private readonly ProfileProcessSupervisor processes;
     private readonly ProfileDashboard dashboard;
+    private readonly IProfileDuplicationService duplication;
+    private readonly ProfileTemplateRepository templateRepository;
+    private readonly ProfileTemplateService templates;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private readonly TextBox search = new() { Name = "ProfileSearch", AccessibleName = "Search profiles, tags and folders", Width = 220, PlaceholderText = "Search profiles, tags, folders" };
     private readonly ComboBox statusFilter = new() { Name = "StatusFilter", AccessibleName = "Filter by status", DropDownStyle = ComboBoxStyle.DropDownList, Width = 125 };
@@ -35,7 +38,11 @@ public sealed class ProfileManagerForm : Form
         var executable = Environment.ProcessPath ?? throw new IOException("Could not find the application executable.");
         processes = new ProfileProcessSupervisor(new ProfileLeaseProbe(root),
             new ProfileChildStarter(executable, typeof(ProfileManagerForm).Assembly.Location, AppContext.BaseDirectory));
-        dashboard = new ProfileDashboard(root, new ProfileRepository(root), processes);
+        var repository = new ProfileRepository(root);
+        dashboard = new ProfileDashboard(root, repository, processes);
+        duplication = new ProfileDuplicationService(root, repository);
+        templateRepository = new ProfileTemplateRepository(root);
+        templates = new ProfileTemplateService(root, repository, templateRepository);
         Text = "Aegis Browser — Profiles";
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.CenterScreen;
@@ -57,9 +64,11 @@ public sealed class ProfileManagerForm : Form
         sidebar.Controls.Add(new Label { Text = "Profiles", ForeColor = Color.White, AutoSize = true, Margin = new Padding(0, 0, 0, 14) });
         var create = new Button { Name = "CreateProfile", Text = "+ New profile", AccessibleName = "Create profile", Width = 150, Height = 38 };
         var refresh = new Button { Text = "Refresh", AccessibleName = "Refresh profiles", Width = 150, Height = 36 };
+        var manageTemplates = new Button { Name = "ManageTemplates", Text = "Templates", AccessibleName = "Manage profile templates", Width = 150, Height = 36 };
         create.Click += (_, _) => CreateProfile();
         refresh.Click += async (_, _) => await RefreshProfiles(manual: true);
-        sidebar.Controls.Add(create); sidebar.Controls.Add(refresh);
+        manageTemplates.Click += (_, _) => ManageTemplates();
+        sidebar.Controls.Add(create); sidebar.Controls.Add(refresh); sidebar.Controls.Add(manageTemplates);
         sidebar.Controls.Add(new Label { Text = "Local profiles\nEach profile uses its own browser storage.", ForeColor = Color.Gainsboro, Width = 150, Height = 70, Margin = new Padding(0, 24, 0, 0) });
 
         var content = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new Padding(16) };
@@ -98,6 +107,8 @@ public sealed class ProfileManagerForm : Form
         shell.Controls.Add(sidebar, 0, 0); shell.Controls.Add(content, 1, 0); Controls.Add(shell);
         actions.Items.Add("Launch", null, async (_, _) => await LaunchSelected());
         actions.Items.Add("Edit metadata", null, async (_, _) => await EditSelected());
+        actions.Items.Add("Duplicate clean profile", null, async (_, _) => await DuplicateSelected());
+        actions.Items.Add("Save as template", null, async (_, _) => await SaveTemplate());
         actions.Items.Add("Refresh", null, async (_, _) => await RefreshProfiles(manual: true));
     }
 
@@ -293,5 +304,41 @@ public sealed class ProfileManagerForm : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or Win32Exception)
         { if (!IsDisposed) { feedback.Text = "Could not launch profile: " + ex.Message; await RefreshProfiles(profile.Slug); } }
+    }
+
+    private async Task DuplicateSelected()
+    {
+        var selected = Selected; if (selected is null) return;
+        try
+        {
+            var source = await Task.Run(() => dashboard.PrepareEdit(selected.Slug));
+            if (IsDisposed) return;
+            using var form = new ProfileCopyForm("Duplicate profile", source.DisplayName + " copy", true,
+                (slug, name, notes, privacy, search) => duplication.DuplicateClean(source, slug, name, notes, privacy, search));
+            if (form.ShowDialog(this) == DialogResult.OK) await RefreshProfiles(form.CreatedSlug, true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not duplicate profile: " + ex.Message; }
+    }
+
+    private async Task SaveTemplate()
+    {
+        var selected = Selected; if (selected is null) return;
+        try
+        {
+            var source = await Task.Run(() => dashboard.PrepareEdit(selected.Slug));
+            if (IsDisposed) return;
+            using var form = new TemplateCaptureForm(templates, source);
+            if (form.ShowDialog(this) == DialogResult.OK) feedback.Text = "Template saved.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not save template: " + ex.Message; }
+    }
+
+    private void ManageTemplates()
+    {
+        using var form = new ProfileTemplatesForm(templateRepository, templates);
+        form.ShowDialog(this);
+        _ = RefreshProfiles(manual: true);
     }
 }

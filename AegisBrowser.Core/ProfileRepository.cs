@@ -45,15 +45,25 @@ public sealed class ProfileRepository : IProfileRepository
 
     public ProfileDefinition Create(string slug) => Create(new ProfileDraft(slug, NormalizeSlug(slug), "", [], []));
 
-    public ProfileDefinition Create(ProfileDraft draft)
+    public ProfileDefinition Create(ProfileDraft draft) => CreateConfigured(draft, new ProfileSettingsSnapshot(null, null), null);
+
+    public ProfileDefinition CreateConfigured(ProfileDraft draft, ProfileSettingsSnapshot settings, ProfileDefinition? source)
     {
         ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(settings);
+        ProfileSettings.Validate(settings);
         var slug = NormalizeSlug(draft.Slug);
         var definition = NewDefinition(slug) with { DisplayName = draft.DisplayName, Notes = draft.Notes, Tags = draft.Tags, Folders = draft.Folders };
         // Validate before creating the database or profile directory.
         Validate(definition);
         return WithStore(db =>
         {
+            if (source is not null)
+            {
+                var current = ReadBySlug(db, source.Slug);
+                if (current is null || !MatchesSnapshot(current, source))
+                    throw new IOException("The source profile changed; reload it before duplicating.");
+            }
             CheckProfilePath(slug, mustExist: false);
             if (ReadBySlug(db, slug) is not null) throw new IOException("That browser profile already has metadata.");
             using var transaction = db.BeginTransaction();
@@ -61,7 +71,7 @@ public sealed class ProfileRepository : IProfileRepository
             var directoryCreated = false;
             try
             {
-                new ProfileCatalog(root).Create(slug);
+                new ProfileCatalog(root).Create(slug, staging => ProfileSettings.Write(staging, settings));
                 directoryCreated = true;
                 transaction.Commit();
                 return definition;
@@ -74,6 +84,12 @@ public sealed class ProfileRepository : IProfileRepository
             }
         });
     }
+
+    internal static bool MatchesSnapshot(ProfileDefinition current, ProfileDefinition snapshot) =>
+        current.Id == snapshot.Id && current.Revision == snapshot.Revision && current.Slug == snapshot.Slug &&
+        current.MetadataVersion == snapshot.MetadataVersion && current.DisplayName == snapshot.DisplayName && current.Notes == snapshot.Notes &&
+        current.MetadataCreatedUtc == snapshot.MetadataCreatedUtc && current.UpdatedUtc == snapshot.UpdatedUtc &&
+        current.Tags.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Tags) && current.Folders.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Folders);
 
     public ProfileDefinition GetOrMigrate(string slug, ProfileLease lease)
     {

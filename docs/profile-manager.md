@@ -37,6 +37,42 @@ final arbiter and prevents both from opening the same profile. The manager never
 force-stops a process. Close the browser normally to release its lease. Closing the
 dashboard leaves browser processes running.
 
+## Clean duplication and templates
+
+Select a profile and choose **Actions → Duplicate clean profile**. Enter a new slug
+and display name. Tags and folders are copied; notes and the privacy/search settings
+are separate opt-in choices. A new GUID is assigned. The new profile has fresh
+Chromium storage: cookies, history, credentials, local storage and caches are never
+copied. Metadata-only duplication can use a running source. To copy privacy or search
+settings, close the source first; the operation holds its profile lease while reading
+those settings. Invalid, linked or unreadable settings are rejected.
+
+Choose **Actions → Save as template** to save metadata labels and optionally the
+profile's privacy/search settings. **Templates** in the sidebar can search, edit,
+duplicate and delete templates or create new profiles from them. Deletion asks for
+confirmation and does not remove profiles. Template edits and deletion check their
+revision, and a template cannot replace an existing profile. Templates use versioned
+JSON files under `Profiles\templates`, with a separate interprocess lock and atomic
+file replacement. They contain no Chromium profile data. Their descriptions, tags,
+folders and optional privacy rules can contain personal information; protect the
+files using the Windows account. No template encryption is provided.
+
+Full browser-data duplication is **unavailable**. A closed profile copy has not been
+validated across CefSharp/Chromium versions, Windows account boundaries or credential
+encryption. Windows DPAPI data is typically tied to the user and machine
+([Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata));
+Chrome also documents application-bound cookie encryption on Windows
+([Google](https://security.googleblog.com/2024/07/improving-security-of-chrome-cookies-on.html)).
+Those Chrome details do not establish which protection this CefSharp build uses.
+Do not copy or attempt to decrypt Chromium databases as a workaround.
+
+New profiles are prepared in a `.creating-<id>` directory before publication. If an
+operation fails after writing staged settings, that clearly named directory may remain
+for inspection; it is not listed as a profile. If publication succeeds but the metadata
+commit fails, the profile directory is retained and can be adopted on a later launch.
+Do not remove an existing `profile-*` directory as cleanup. Back up and inspect any
+leftover staging directory before manually removing it.
+
 Directory-only profiles remain visible as **Not registered** until opened or edited.
 Editing one first requires its profile lease and creates the same validated metadata
 backup used during migration. If it is already in use, close it before editing. The
