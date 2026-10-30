@@ -36,7 +36,7 @@ before initializing CEF. Creating a profile in the manager creates its metadata 
 part of the operation. A missing default profile is registered on first launch.
 Older application versions continue to use the same directories and ignore the new
 database. Slugs remain subject to the existing name policy and are not renamed here.
-Linked profile folders and linked database paths are rejected; protect the profile
+Linked profile folders, profile lock files and database paths are rejected; protect the profile
 root with the Windows account's normal permissions. These path checks are not a
 defense against an attacker who can concurrently replace files in that account.
 

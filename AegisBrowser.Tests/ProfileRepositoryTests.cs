@@ -208,10 +208,22 @@ internal static class ProfileRepositoryTests
         try
         {
             reject(() => ProfileRepository.CheckSafeProfilePath(root, "linked"), "linked profile rejected before lease");
+            reject(() => { using var lease = new ProfileLease(link); }, "lease rejects linked profile");
             check(!new ProfileCatalog(root).List().Contains("linked"), "junction excluded from profile discovery");
             check(File.ReadAllText(Path.Combine(target, "sentinel")) == "outside" && !File.Exists(Path.Combine(target, ".profile.lock")), "junction target untouched");
         }
         finally { Directory.Delete(link); }
+
+        var lockProfile = BrowserPolicy.ProfilePath(root, "linkedlock");
+        Directory.CreateDirectory(lockProfile);
+        var lockLink = Path.Combine(lockProfile, ".profile.lock");
+        MakeJunction(lockLink, target);
+        try
+        {
+            reject(() => { using var lease = new ProfileLease(lockProfile); }, "lease rejects linked lock path");
+            check(Directory.GetFiles(target).Length == 1, "linked lock target untouched");
+        }
+        finally { Directory.Delete(lockLink); }
 
         var oldPath = BrowserPolicy.ProfilePath(root, "legacy");
         Directory.CreateDirectory(oldPath);
