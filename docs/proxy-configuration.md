@@ -30,6 +30,8 @@ The pinned [CefSharp proxy helper](https://github.com/cefsharp/CefSharp/blob/v15
 
 A second test-only probe exercises a Basic HTTP proxy challenge using fake credentials. Its callback applies a host, port, protocol and `isProxy` scope and caps credential submissions. A synthetic website challenge is canceled and checked for an `Authorization` header. The fixture never forwards requests, and the credentials and request headers are not logged. This is evidence about a test callback, not production proxy-authentication support. Basic authentication to an HTTP proxy is not encrypted between the browser and that proxy; an HTTPS proxy would require separate validation.
 
+The routing probe also attempts to gather a WebRTC ICE candidate using a short-lived STUN listener on loopback. It reports whether it observed a STUN UDP packet without logging candidate addresses. No packet, an unavailable API, or a non-STUN packet is explicitly inconclusive; none proves absence of DNS or WebRTC leaks. The listener is test-only and sends no packets to a public STUN service.
+
 ## Manual Windows verification still required
 
 - On a test account, verify credential replacement and loss of access after moving protected data to a different Windows user.

@@ -70,6 +70,8 @@ internal static partial class Program
                     Check(!origin.SawDirect("/proxied") && await Js(browser, "document.title") == "proxy",
                         "CEF test-only bypass override routed HTTP through the local proxy to its origin");
 
+                    await ObserveWebRtcUdp(browser);
+
                     proxy.Stop();
                     var offlineUrl = baseUrl + "/offline";
                     var failed = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
