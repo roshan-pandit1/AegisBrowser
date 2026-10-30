@@ -58,6 +58,16 @@ jobs:
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy probe checks')) { throw 'CEF proxy probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy probe shutdown completed')) { throw 'CEF proxy probe did not complete native shutdown' }
+      - name: Controlled CEF proxy authentication probe
+        timeout-minutes: 3
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-proxy-auth-probe-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-auth-probe $profileRoot 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy authentication probe checks')) { throw 'CEF proxy authentication probe failed or incomplete' }
+          if (!(($output -join "`n") -match 'PASS: CEF proxy authentication probe shutdown completed')) { throw 'CEF authentication probe did not complete native shutdown' }
       - name: Build Chromium filtering tests
         if: ${{ !cancelled() }}
         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
