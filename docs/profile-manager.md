@@ -14,8 +14,11 @@ your text remains in the editor and you must reopen the profile to reload it.
 
 Search matches display name, slug, tags and folders; status and folder filters and
 name/update-time sorting only change the view. Use Ctrl+F for search, Ctrl+N for a
-new profile, F5 to refresh, and Enter on the selected table row to launch. Clear
+new profile, F5 to refresh, and Enter on a table row to launch (or activate its
+focused Edit or Actions cell). Clear
 filters restores the full list. The table scrolls horizontally when necessary.
+The running filter includes Starting, Running and In use; the stopped filter includes
+Stopped and Failed. Missing and Unknown profiles remain visible under All statuses.
 
 The dashboard reads profile status and metadata in the background and refreshes
 approximately every three seconds. **Running** means a manager-launched child is

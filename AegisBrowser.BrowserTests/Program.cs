@@ -209,7 +209,9 @@ internal static class Program
                 if (browser.HasExited) throw new Exception("Published browser exited immediately after startup.");
                 Check(supervisor.GetStatus(slug).Activity == ProfileActivity.Running && Directory.Exists(Path.Combine(path, "Cache")),
                     "published browser holds the profile lease and creates its cache");
-                if (!browser.CloseMainWindow() || !browser.WaitForExit(15000) || browser.ExitCode != 0)
+                // This window was found by enumeration; the supervisor owns the process
+                // handle and reports a nonzero exit as Failed below.
+                if (!browser.CloseMainWindow() || !browser.WaitForExit(15000))
                     throw new Exception("Published browser did not close normally.");
                 browser.Dispose(); browser = null;
                 Check(supervisor.GetStatus(slug).Activity == ProfileActivity.Stopped && repository.GetBySlug(slug)?.Id == created.Id,

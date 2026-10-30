@@ -108,7 +108,11 @@ public sealed class ProfileManagerForm : Form
         folderFilter.SelectedIndexChanged += (_, _) => { if (!filterUpdating) ApplyFilters(); };
         sort.SelectedIndexChanged += (_, _) => ApplyFilters();
         grid.SelectionChanged += (_, _) => ShowDetails();
-        grid.CellDoubleClick += async (_, e) => { if (e.RowIndex >= 0) await LaunchSelected(); };
+        grid.CellDoubleClick += async (_, e) =>
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && grid.Columns[e.ColumnIndex] is not DataGridViewButtonColumn)
+                await LaunchSelected();
+        };
         grid.CellContentClick += async (_, e) =>
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
@@ -131,7 +135,18 @@ public sealed class ProfileManagerForm : Form
             if (e.Control && e.KeyCode == Keys.F) { search.Focus(); e.Handled = true; }
             else if (e.Control && e.KeyCode == Keys.N) { CreateProfile(); e.Handled = true; }
             else if (e.KeyCode == Keys.F5) { await RefreshProfiles(manual: true); e.Handled = true; }
-            else if (e.KeyCode == Keys.Enter && grid.Focused) { await LaunchSelected(); e.Handled = true; }
+            else if (e.KeyCode == Keys.Enter && grid.Focused)
+            {
+                e.Handled = true; e.SuppressKeyPress = true;
+                var cell = grid.CurrentCell;
+                if (cell is not null && grid.Columns[cell.ColumnIndex].Name == "Edit") await EditSelected();
+                else if (cell is not null && grid.Columns[cell.ColumnIndex].Name == "Actions")
+                {
+                    var bounds = grid.GetCellDisplayRectangle(cell.ColumnIndex, cell.RowIndex, true);
+                    actions.Show(grid.PointToScreen(new Point(bounds.Left, bounds.Bottom)));
+                }
+                else await LaunchSelected();
+            }
         };
     }
 
