@@ -69,7 +69,15 @@ public sealed class ProfileLease : IDisposable
         var lockPath = Path.Combine(profilePath, ".profile.lock");
         RejectLink(lockPath);
         // The OS releases the exclusive handle even following a crash. Do not delete the lock file.
-        stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        // A read-only dashboard probe may briefly hold this same exclusive handle.
+        // Retry short sharing conflicts; a real running browser still retains the lease.
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            try { stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); break; }
+            catch (IOException ex) when ((ex.HResult & 0xffff) is 32 or 33 && deadline.ElapsedMilliseconds < 500)
+            { Thread.Sleep(10); RejectLink(lockPath); }
+        }
     }
     private static void RejectLink(string path)
     {

@@ -43,14 +43,19 @@ public sealed class ProfileRepository : IProfileRepository
         });
     }
 
-    public ProfileDefinition Create(string slug)
+    public ProfileDefinition Create(string slug) => Create(new ProfileDraft(slug, NormalizeSlug(slug), "", [], []));
+
+    public ProfileDefinition Create(ProfileDraft draft)
     {
-        slug = NormalizeSlug(slug);
+        ArgumentNullException.ThrowIfNull(draft);
+        var slug = NormalizeSlug(draft.Slug);
+        var definition = NewDefinition(slug) with { DisplayName = draft.DisplayName, Notes = draft.Notes, Tags = draft.Tags, Folders = draft.Folders };
+        // Validate before creating the database or profile directory.
+        Validate(definition);
         return WithStore(db =>
         {
             CheckProfilePath(slug, mustExist: false);
             if (ReadBySlug(db, slug) is not null) throw new IOException("That browser profile already has metadata.");
-            var definition = NewDefinition(slug);
             using var transaction = db.BeginTransaction();
             Insert(db, transaction, definition);
             var directoryCreated = false;

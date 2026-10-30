@@ -11,6 +11,14 @@ if (args.Length == 2 && args[0] == "--probe-lock")
     return;
 }
 
+if (args.Length == 2 && args[0] == "--dashboard-lease-child")
+{
+    using var lease = new ProfileLease(args[1]);
+    Console.WriteLine("READY"); Console.Out.Flush();
+    Environment.ExitCode = Console.ReadLine() == "fail" ? 7 : 0;
+    return;
+}
+
 // Hold an uncommitted write until the parent kills this process to test SQLite recovery.
 if (args.Length == 2 && args[0] == "--hold-metadata-transaction")
 {
@@ -37,6 +45,7 @@ PrivacyTests.Run();
 AddressTests.Run();
 ProfileCatalogTests.Run();
 ProfileRepositoryTests.Run();
+ProfileDashboardTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {
