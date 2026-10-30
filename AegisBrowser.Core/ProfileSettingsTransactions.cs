@@ -111,8 +111,8 @@ public sealed class ProfileSettingsTransactions
         try
         {
             var swapped = false;
-            if (manifest.Privacy) { ReplaceNew(stage, directory, "privacy.json", manifest.OldPrivacy!); swapped = true; afterFirstSwap?.Invoke(); }
-            if (manifest.Search) { ReplaceNew(stage, directory, "search.json", manifest.OldSearch!); if (!swapped) afterFirstSwap?.Invoke(); }
+            if (manifest.Privacy) { ReplaceNew(stage, directory, "privacy.json", manifest.OldPrivacy!, manifest.NewPrivacy!); swapped = true; afterFirstSwap?.Invoke(); }
+            if (manifest.Search) { ReplaceNew(stage, directory, "search.json", manifest.OldSearch!, manifest.NewSearch!); if (!swapped) afterFirstSwap?.Invoke(); }
             if ((manifest.Privacy && FileHash(Path.Combine(directory, "privacy.json")) != manifest.NewPrivacy) ||
                 (manifest.Search && FileHash(Path.Combine(directory, "search.json")) != manifest.NewSearch))
                 throw new IOException("Applied settings could not be verified.");
@@ -177,11 +177,14 @@ public sealed class ProfileSettingsTransactions
         finally { if (owns && File.Exists(temporary)) File.Delete(temporary); }
     }
 
-    private static void ReplaceNew(string stage, string directory, string name, string oldHash)
+    private static void ReplaceNew(string stage, string directory, string name, string oldHash, string newHash)
     {
+        RejectLink(stage);
+        var source = Path.Combine(stage, name); RejectLink(source);
+        if (FileHash(source) != newHash) throw new IOException("Staged settings changed; no replacement was made.");
         var destination = Path.Combine(directory, name); RejectLink(destination);
         if (FileHash(destination) != oldHash) throw new IOException("Settings changed outside this operation; no replacement was made.");
-        File.Move(Path.Combine(stage, name), destination, true);
+        File.Move(source, destination, true);
     }
     private static void DeleteMarker(string marker, SettingsPending expected)
     {
