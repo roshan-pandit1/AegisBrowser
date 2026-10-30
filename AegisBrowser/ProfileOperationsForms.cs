@@ -133,6 +133,7 @@ internal sealed class ProfileTemplatesForm : Form
 {
     private readonly ProfileTemplateRepository repository;
     private readonly ProfileTemplateService service;
+    private readonly ProfileTransfer transfer;
     private readonly TextBox search = new() { Name = "TemplateSearch", AccessibleName = "Search templates", Dock = DockStyle.Top, PlaceholderText = "Search templates, tags and folders" };
     private readonly ListBox list = new() { Name = "TemplateList", AccessibleName = "Templates", Dock = DockStyle.Fill };
     private readonly Label feedback = new() { Name = "TemplatesFeedback", AccessibleName = "Template messages", Dock = DockStyle.Fill, AutoEllipsis = true };
@@ -140,9 +141,9 @@ internal sealed class ProfileTemplatesForm : Form
     private sealed record Item(ProfileTemplate Value) { public override string ToString() => Value.Name; }
     private ProfileTemplate? Selected => (list.SelectedItem as Item)?.Value;
 
-    public ProfileTemplatesForm(ProfileTemplateRepository repository, ProfileTemplateService service)
+    public ProfileTemplatesForm(ProfileTemplateRepository repository, ProfileTemplateService service, ProfileTransfer transfer)
     {
-        this.repository = repository; this.service = service;
+        this.repository = repository; this.service = service; this.transfer = transfer;
         Text = "Profile templates"; AutoScaleMode = AutoScaleMode.Dpi; StartPosition = FormStartPosition.CenterParent;
         Width = 760; Height = 540; MinimumSize = new Size(500, 360);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(16) };
@@ -154,6 +155,7 @@ internal sealed class ProfileTemplatesForm : Form
         buttons.Controls.Add(Action("Create profile", (_, _) => CreateProfile()));
         buttons.Controls.Add(Action("Edit", (_, _) => Edit()));
         buttons.Controls.Add(Action("Duplicate", async (_, _) => await Duplicate()));
+        buttons.Controls.Add(Action("Export", (_, _) => Export()));
         buttons.Controls.Add(Action("Delete", async (_, _) => await Delete()));
         buttons.Controls.Add(Action("Refresh", async (_, _) => await RefreshTemplates()));
         layout.Controls.Add(buttons, 0, 2); layout.Controls.Add(feedback, 0, 3); Controls.Add(layout);
@@ -202,5 +204,11 @@ internal sealed class ProfileTemplatesForm : Form
         using var form = new ProfileCopyForm("Create profile from template", template.Name, false,
             (slug, name, _, _, _) => service.CreateProfile(template, slug, name));
         if (form.ShowDialog(this) == DialogResult.OK) feedback.Text = "Created " + form.CreatedSlug + ".";
+    }
+    private void Export()
+    {
+        var template = Selected; if (template is null) return;
+        using var form = new ProfileExportForm(transfer, [], [template]);
+        form.ShowDialog(this);
     }
 }
