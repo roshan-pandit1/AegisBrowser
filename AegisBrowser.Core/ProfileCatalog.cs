@@ -39,7 +39,9 @@ public sealed class ProfileCatalog
         return profiles.ToArray();
     }
 
-    public string Create(string name)
+    public string Create(string name) => Create(name, null);
+
+    internal string Create(string name, Action<string>? initialize)
     {
         var normalized = BrowserPolicy.ReadProfile(["--profile=" + name]);
         Directory.CreateDirectory(root);
@@ -52,11 +54,18 @@ public sealed class ProfileCatalog
         Directory.CreateDirectory(staging);
         try
         {
+            if ((File.GetAttributes(staging) & FileAttributes.ReparsePoint) != 0 || Directory.EnumerateFileSystemEntries(staging).Any())
+                throw new IOException("The profile staging directory is not empty or is linked.");
+            initialize?.Invoke(staging);
             Directory.Move(staging, BrowserPolicy.ProfilePath(root, normalized));
         }
         finally
         {
-            if (Directory.Exists(staging)) Directory.Delete(staging);
+            // Delete only an empty staging directory. Incomplete data is retained for
+            // inspection; never recursively delete a directory that may contain files.
+            if (Directory.Exists(staging) && (File.GetAttributes(staging) & FileAttributes.ReparsePoint) == 0 &&
+                !Directory.EnumerateFileSystemEntries(staging).Any())
+                Directory.Delete(staging);
         }
         return normalized;
     }

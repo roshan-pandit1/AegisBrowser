@@ -46,6 +46,7 @@ AddressTests.Run();
 ProfileCatalogTests.Run();
 ProfileRepositoryTests.Run();
 ProfileDashboardTests.Run();
+ProfileOperationsTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {
