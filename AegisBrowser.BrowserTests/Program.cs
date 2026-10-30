@@ -247,6 +247,16 @@ internal static class Program
             Check(backupService.List().Single().Valid, "native backup manager creates and previews a verified snapshot");
             backupForm.Close();
         }
+        templateRepository.Create("Settings template", "", [], [], new(null, new SearchSettings("google")));
+        var transactionService = new ProfileSettingsTransactions(profilesRoot, repository, templateRepository);
+        using (var applyForm = new ProfileTemplateApplyForm(templateRepository, transactionService, [repository.GetBySlug("ui-test")!]))
+        {
+            applyForm.Show(manager);
+            var choices = Control<ListBox>(applyForm, "ApplyTemplateList");
+            await Wait(() => choices.Items.Count == 1, "template settings choices load");
+            Check(choices.Items[0]!.ToString()!.Contains("Settings template"), "native template application shows settings-capable templates");
+            applyForm.Close();
+        }
         manager.Close();
     }
 
