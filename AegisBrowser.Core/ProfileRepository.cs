@@ -319,6 +319,14 @@ public sealed class ProfileRepository : IProfileRepository
         return new(Guid.NewGuid(), slug, slug, "", Array.Empty<string>(), Array.Empty<string>(), CurrentVersion, 1, now, now);
     }
 
+    internal static void ValidateDraft(ProfileDraft draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        var normalized = NormalizeSlug(draft.Slug);
+        if (!string.Equals(normalized, draft.Slug, StringComparison.Ordinal)) throw new ArgumentException("Profile slug must be canonical.");
+        Validate(NewDefinition(normalized) with { DisplayName = draft.DisplayName, Notes = draft.Notes, Tags = draft.Tags, Folders = draft.Folders });
+    }
+
     private static void Validate(ProfileDefinition p)
     {
         if (p.Id == Guid.Empty || p.Slug != NormalizeSlug(p.Slug) || p.MetadataVersion != CurrentVersion || p.Revision is < 1 or long.MaxValue ||
