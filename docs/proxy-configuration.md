@@ -2,7 +2,7 @@
 
 This first P3 slice stores proxy configuration and credentials. It does **not** configure CefSharp networking, test a proxy, expose a dashboard editor, or establish network isolation. HTTP, HTTPS and SOCKS5 are configuration values, not supported browser transports yet. There is no claim of fail-closed network behavior after a browser starts.
 
-An existing profile with no proxy record retains its previous startup behavior. A profile with a required proxy, an interrupted proxy update, invalid proxy metadata or an unsupported proxy database version is stopped before CEF initialization. A saved Direct record is an explicit choice; invalid proxy input never becomes Direct. The application cannot currently edit these records through its UI. Configuration changes require the matching closed-profile lease, the current profile metadata snapshot and the expected proxy revision.
+An existing profile with no proxy record retains its previous startup behavior. A profile with a required proxy, an interrupted proxy update, invalid proxy metadata or an unsupported proxy database version is stopped before CEF initialization. A saved Direct record expresses intent and permits startup; it does not yet force Chromium to bypass system proxy settings. Invalid proxy input never becomes Direct. The application cannot currently edit these records through its UI. Configuration changes require the matching closed-profile lease, the current profile metadata snapshot and the expected proxy revision.
 
 ## Storage and recovery
 

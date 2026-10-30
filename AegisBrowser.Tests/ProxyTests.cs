@@ -143,7 +143,12 @@ internal static class ProxyTests
 
             using (var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString()))
             {
-                db.Open(); using var command = db.CreateCommand(); command.CommandText = "PRAGMA user_version=99"; command.ExecuteNonQuery();
+                db.Open(); using var command = db.CreateCommand();
+                command.CommandText = "UPDATE profile_proxies SET protocol=99 WHERE profile_id=$id";
+                command.Parameters.AddWithValue("$id", first.Id.ToString("D")); command.ExecuteNonQuery();
+                Reject(() => repo.EnsureRuntimeReady(first, firstLease), "invalid persisted protocol blocks startup");
+                command.CommandText = "UPDATE profile_proxies SET protocol=0 WHERE profile_id=$id"; command.ExecuteNonQuery();
+                command.CommandText = "PRAGMA user_version=99"; command.ExecuteNonQuery();
             }
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "future database version blocks startup");
             Check(File.Exists(dbPath), "unsupported database preserved");
