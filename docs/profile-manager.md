@@ -88,6 +88,26 @@ unchanged and requires refresh before retrying. Cancel stops work before the nex
 profile and does not undo changes already committed. The operation does not delete
 profiles or stop browsers.
 
+## Metadata export and import
+
+Select registered profiles and choose **Export selected**, or export a template from
+the Templates window. JSON and ZIP exports use format version 1 and contain profile
+metadata, tags, folders and selected Aegis settings; template exports include their
+saved settings. Profile privacy/search settings are opt-in and require closed source
+profiles. Cookies, browser caches, sessions, passwords and extensions are excluded.
+Exports are unencrypted and can contain notes and private rules: store and share them
+accordingly. Exports are written to a new file outside profile storage and never
+replace an existing file. The SHA-256 checksum detects corruption; it does not prove
+who created the file.
+
+**Import** validates the version, checksum, size, identities and fields before showing
+a preview. ZIP files must contain only the expected JSON entry and are never extracted
+to disk. Confirm the preview to create profiles and templates with new IDs; profile
+slugs get an available `-copy` suffix. Existing profiles are never replaced. Each
+result is reported separately; cancellation stops before the next item and leaves
+already imported profiles in place. If a destination is created between preview and
+import, that item fails safely and can be retried after a new preview.
+
 Directory-only profiles remain visible as **Not registered** until opened or edited.
 Editing one first requires its profile lease and creates the same validated metadata
 backup used during migration. If it is already in use, close it before editing. The

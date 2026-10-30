@@ -194,7 +194,8 @@ internal static class Program
             await Wait(() => capture.IsDisposed || !capture.Visible, "template capture dialog");
         }
         Check(templateRepository.List().Single().Name == "UI template", "native template dialog persists template");
-        using (var templates = new ProfileTemplatesForm(templateRepository, templateService))
+        using (var templates = new ProfileTemplatesForm(templateRepository, templateService,
+            new ProfileTransfer(profilesRoot, repository, templateRepository)))
         {
             templates.Show(manager);
             var templateList = Control<ListBox>(templates, "TemplateList");
@@ -220,6 +221,19 @@ internal static class Program
             Check(repository.GetBySlug("ui-test")!.Tags.Contains("shared") && repository.GetBySlug("ui-copy")!.Tags.Contains("shared"),
                 "native bulk dialog updates selected profiles");
             bulk.Close();
+        }
+        var transfer = new ProfileTransfer(profilesRoot, repository, templateRepository);
+        var exportPath = Path.Combine(root, "dashboard-export.json");
+        transfer.Export(exportPath, [repository.GetBySlug("ui-test")!], [], false, false, false);
+        var preview = transfer.Preview(exportPath);
+        using (var import = new ProfileImportForm(transfer, preview))
+        {
+            import.Show(manager);
+            Check(Control<TextBox>(import, "ImportPreview").Text.Contains(preview.Profiles[0].DestinationSlug), "native import displays destination preview");
+            Control<Button>(import, "ConfirmImport").PerformClick();
+            await Wait(() => Control<TextBox>(import, "ImportPreview").Text.Contains("Succeeded", StringComparison.Ordinal), "native import result");
+            Check(repository.GetBySlug(preview.Profiles[0].DestinationSlug) is not null, "native import creates previewed profile");
+            import.Close();
         }
         manager.Close();
     }
