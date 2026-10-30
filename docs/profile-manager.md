@@ -1,12 +1,48 @@
 # Local profile manager and metadata
 
-Use the new **Profiles** button from an open browser, or start the manager without a Chromium instance:
+Use the **Profiles** button from an open browser, or start the manager without a Chromium instance:
 
     AegisBrowser.exe --profiles
 
-The window lists existing profile directories, offers a Create action for a new profile,
-and launches a selected profile as a separate AegisBrowser process. Double-click opens
-the selected profile. The default profile is always available to launch.
+The dashboard lists profiles in a table, including name, GUID, storage slug, tags,
+folders, metadata update time and observed status. Select a row for details or use
+its Launch, Edit and Actions buttons. **New profile** creates a storage slug and
+metadata together. Editing changes the display name, notes, tags and folders without
+renaming the storage directory. Enter one tag or folder per line. The editor checks
+the original metadata revision when saving: if another manager has changed it,
+your text remains in the editor and you must reopen the profile to reload it.
+
+Search matches display name, slug, tags and folders; status and folder filters and
+name/update-time sorting only change the view. Use Ctrl+F for search, Ctrl+N for a
+new profile, F5 to refresh, and Enter on a table row to launch (or activate its
+focused Edit or Actions cell). Clear
+filters restores the full list. The table scrolls horizontally when necessary.
+The running filter includes Starting, Running and In use; the stopped filter includes
+Stopped and Failed. Missing and Unknown profiles remain visible under All statuses.
+
+The dashboard reads profile status and metadata in the background and refreshes
+approximately every three seconds. **Running** means a manager-launched child is
+alive and the lease is held; the lease owner is not independently verified. **In
+use** means the lease is held without a child tracked by this manager. **Starting**
+means a launched process has not yet been observed with the lease, not that CEF is
+ready; check for a browser startup dialog if it persists. **Unknown** means the lock
+could not be inspected, so launch is disabled. **Failed** reports a nonzero exit
+from a child this manager launched. An unheld lock file means stopped; the file is
+never removed by the dashboard. External processes are recognized by their lease,
+not by PID or window enumeration.
+
+The manager rejects duplicate starts it observes. Two managers can race between
+checking a lease and starting children; the browser's exclusive lease remains the
+final arbiter and prevents both from opening the same profile. The manager never
+force-stops a process. Close the browser normally to release its lease. Closing the
+dashboard leaves browser processes running.
+
+Directory-only profiles remain visible as **Not registered** until opened or edited.
+Editing one first requires its profile lease and creates the same validated metadata
+backup used during migration. If it is already in use, close it before editing. The
+default profile can be launched before its directory exists. A registered profile
+whose directory has gone missing cannot be launched into a new empty directory;
+restore its directory first.
 
 Names follow the existing 1–40 ASCII character policy (letters, digits, hyphens,
 underscores), case-insensitively. The manager uses the existing
@@ -24,8 +60,8 @@ The database uses SQLite WAL and schema version 1. Each registered profile has a
 stable GUID, its existing case-insensitive ASCII directory slug, a separate display
 name, notes, tags, folders, timestamps for the metadata, and a revision. Display
 names may coincide; IDs and slugs distinguish profiles. The repository validates
-updates and rejects stale revisions. This milestone supplies the persistence model;
-editing these fields and displaying folders/tags in the manager are later work.
+updates and rejects stale revisions. Notes are shown in the selected-profile details
+and editor but are not included in search or diagnostic output.
 The timestamps describe metadata creation and update, not the unknown creation time
 of a legacy Chromium profile.
 
@@ -92,12 +128,21 @@ The console suite covers directory-only migration, metadata round trips and revi
 conflicts, backup restoration, failed migration and retry, duplicate and concurrent
 creation, invalid paths, Windows junctions and a read-only database, corrupt/newer
 databases, and recovery from a killed process with an uncommitted SQLite transaction.
-It also retains the existing directory/lease checks. The Windows native browser suite
+Dashboard tests also cover creating and editing metadata, stale revisions, search,
+filtering, sorting, duplicate launches, and a separate helper process acquiring and
+releasing the actual OS profile lease. It also retains existing directory/lease checks.
+The Windows native browser suite exercises the dashboard and editor controls, including
+an edit conflict. The lease helper is not a Chromium process. After publishing, CI also
+launches the actual browser through the dashboard service, rejects a duplicate, requests
+normal window closure, confirms lease release and reopens the same profile. The separate CEF suite
 creates two CEF profiles without metadata, migrates them before restarting CEF, and
 checks their cookie/localStorage isolation, persistence and stable IDs over repeated
 process restarts. The workflow also runs filtering, publish, smoke and packaging checks.
 
-Manual Windows acceptance remains necessary: upgrade a copy of an existing default
+Manual Windows acceptance remains necessary: use the dashboard with keyboard-only
+navigation and 100/150/200% scaling; launch, close and reopen multiple profiles and
+check external launches and duplicate-start messages; terminate a disposable browser
+unexpectedly and verify status and lock recovery. Upgrade a copy of an existing default
 and named profile containing cookies, IndexedDB, local storage and privacy/search
 settings; verify login and settings after restart and rollback; try a locked profile,
 unwritable metadata/backup location and recovery from a corrupt database; check
