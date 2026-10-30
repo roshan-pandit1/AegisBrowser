@@ -173,7 +173,8 @@ public sealed class ProfileManagerForm : Form
         try
         {
             folderFilter.Items.Clear(); folderFilter.Items.Add("All folders"); folderFilter.Items.AddRange(folders);
-            folderFilter.SelectedIndex = selected is null ? 0 : Math.Max(0, folderFilter.FindStringExact(selected));
+            folderFilter.SelectedIndex = selected is null ? 0 :
+                Array.FindIndex(folders, value => string.Equals(value, selected, StringComparison.OrdinalIgnoreCase)) + 1;
         }
         finally { filterUpdating = false; }
     }

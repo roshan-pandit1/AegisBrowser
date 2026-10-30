@@ -2,6 +2,7 @@ using AegisBrowser;
 using AegisBrowser.Core;
 using CefSharp;
 using CefSharp.WinForms;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.Security;
@@ -19,6 +20,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "dashboard-launch") return DashboardApplication(args[1]);
         if (args.Length != 2 || args[0] is not ("write" or "read")) return 2;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -167,6 +169,65 @@ internal static class Program
             editor.Close();
         }
         manager.Close();
+    }
+
+    private static int DashboardApplication(string executable)
+    {
+        var root = ProfileCatalog.DefaultRoot;
+        var slug = "dash-" + Guid.NewGuid().ToString("N");
+        var path = BrowserPolicy.ProfilePath(root, slug);
+        var targetTitle = "Aegis Browser — " + slug;
+        var repository = new ProfileRepository(root);
+        using var supervisor = new ProfileProcessSupervisor(new ProfileLeaseProbe(root),
+            new ProfileChildStarter(Path.GetFullPath(executable), "", Path.GetDirectoryName(Path.GetFullPath(executable))!));
+        var dashboard = new ProfileDashboard(root, repository, supervisor);
+        Process? browser = null;
+        try
+        {
+            var created = dashboard.Create(new ProfileDraft(slug, "Dashboard launch test", "", [], []));
+            for (var round = 0; round < 2; round++)
+            {
+                var row = dashboard.Load().Single(p => p.Slug == slug);
+                dashboard.Launch(row);
+                var rejected = false;
+                try { dashboard.Launch(row); } catch (IOException) { rejected = true; }
+                Check(rejected, "dashboard rejects duplicate actual browser launch");
+                var deadline = DateTime.UtcNow.AddSeconds(45);
+                while (browser is null && DateTime.UtcNow < deadline)
+                {
+                    foreach (var process in Process.GetProcessesByName("AegisBrowser"))
+                    {
+                        process.Refresh();
+                        if (process.MainWindowTitle == targetTitle && browser is null) browser = process;
+                        else process.Dispose();
+                    }
+                    if (browser is null) Thread.Sleep(250);
+                }
+                if (browser is null) throw new TimeoutException("Published browser window did not start.");
+                Thread.Sleep(2000);
+                browser.Refresh();
+                if (browser.HasExited) throw new Exception("Published browser exited immediately after startup.");
+                Check(supervisor.GetStatus(slug).Activity == ProfileActivity.Running && Directory.Exists(Path.Combine(path, "Cache")),
+                    "published browser holds the profile lease and creates its cache");
+                if (!browser.CloseMainWindow() || !browser.WaitForExit(15000) || browser.ExitCode != 0)
+                    throw new Exception("Published browser did not close normally.");
+                browser.Dispose(); browser = null;
+                Check(supervisor.GetStatus(slug).Activity == ProfileActivity.Stopped && repository.GetBySlug(slug)?.Id == created.Id,
+                    "normal shutdown releases the lease and preserves profile identity");
+            }
+            Console.WriteLine($"PASS: {checks} dashboard application checks");
+            return 0;
+        }
+        catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        finally
+        {
+            if (browser is not null)
+            {
+                if (!browser.HasExited) { browser.CloseMainWindow(); browser.WaitForExit(15000); }
+                browser.Dispose();
+            }
+            Console.WriteLine("Dashboard test profile: " + path);
+        }
     }
 
     private static async Task<string> Js(ChromiumWebBrowser browser, string script)

@@ -61,6 +61,10 @@ internal static class ProfileDashboardTests
             Check(ProfileDashboard.Filter(dates, "", DashboardStatusFilter.All, null, DashboardSort.Updated)[0].Slug == "alpha", "sort by newest metadata");
             Check(repository.GetBySlug("alpha")!.Revision == saved.Revision, "search and filtering do not write metadata");
             Reject(() => dashboard.Launch(list.Single(p => p.Slug == "alpha")), "external held lease prevents launch");
+            fakeProbe.Status["unknown"] = new(ProfileActivity.Unknown, "No access to lock");
+            Reject(() => supervisor.Launch("unknown"), "unknown lock status prevents launch");
+            using (var failing = new ProfileProcessSupervisor(fakeProbe, new FailingStarter()))
+                Reject(() => failing.Launch("beta"), "process start failure surfaced");
 
             var probe = new ProfileLeaseProbe(root);
             var starter = new LeaseChildStarter(root);
@@ -94,6 +98,15 @@ internal static class ProfileDashboardTests
             Check(realSupervisor.GetStatus("beta").Activity == ProfileActivity.Stopped, "profile can reopen after exit");
             using (var held = new ProfileLease(legacyPath)) Check(probe.Inspect("legacy").Activity == ProfileActivity.InUse, "existing external lease detected");
             Check(probe.Inspect("../escape").Activity == ProfileActivity.Unknown, "unsafe slug reported as unknown");
+            repository.Create("orphan");
+            Directory.Delete(BrowserPolicy.ProfilePath(root, "orphan"));
+            var realDashboard = new ProfileDashboard(root, repository, realSupervisor);
+            var orphan = realDashboard.Load().Single(p => p.Slug == "orphan");
+            Check(orphan.Status.Activity == ProfileActivity.Missing && !orphan.CanLaunch, "missing registered directory cannot launch");
+            Reject(() => realDashboard.Launch(orphan), "missing profile is not recreated");
+            var badPath = BrowserPolicy.ProfilePath(root, "badlock");
+            Directory.CreateDirectory(Path.Combine(badPath, ".profile.lock"));
+            Check(probe.Inspect("badlock").Activity == ProfileActivity.Unknown, "unreadable lock is not reported stopped");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         Console.WriteLine($"PASS: {count} profile dashboard checks");
@@ -109,6 +122,8 @@ internal static class ProfileDashboardTests
         public IProfileChild Start(string slug) => new FakeChild();
         private sealed class FakeChild : IProfileChild { public bool HasExited => false; public int ExitCode => 0; public void Dispose() { } }
     }
+    private sealed class FailingStarter : IProfileChildStarter
+    { public IProfileChild Start(string slug) => throw new IOException("Test process could not start."); }
     private sealed class LeaseChildStarter(string root) : IProfileChildStarter
     {
         public LeaseChild? Current { get; private set; }

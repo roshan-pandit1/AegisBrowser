@@ -129,8 +129,9 @@ Dashboard tests also cover creating and editing metadata, stale revisions, searc
 filtering, sorting, duplicate launches, and a separate helper process acquiring and
 releasing the actual OS profile lease. It also retains existing directory/lease checks.
 The Windows native browser suite exercises the dashboard and editor controls, including
-an edit conflict. The lease helper is not a Chromium process and does not prove native
-browser lifecycle behavior. The separate CEF suite
+an edit conflict. The lease helper is not a Chromium process. After publishing, CI also
+launches the actual browser through the dashboard service, rejects a duplicate, requests
+normal window closure, confirms lease release and reopens the same profile. The separate CEF suite
 creates two CEF profiles without metadata, migrates them before restarting CEF, and
 checks their cookie/localStorage isolation, persistence and stable IDs over repeated
 process restarts. The workflow also runs filtering, publish, smoke and packaging checks.

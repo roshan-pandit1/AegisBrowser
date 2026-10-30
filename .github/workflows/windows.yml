@@ -80,6 +80,14 @@ jobs:
           foreach ($file in @('AegisBrowser.exe', 'CefSharp.BrowserSubprocess.exe', 'libcef.dll', 'coreclr.dll')) {
             if (!(Get-ChildItem artifacts/win-x64 -Recurse -Filter $file)) { throw "Missing $file" }
           }
+      - name: Dashboard launches and reopens published browser
+        timeout-minutes: 3
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe dashboard-launch ./artifacts/win-x64/AegisBrowser.exe 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ dashboard application checks')) { throw 'Dashboard application launch test failed or incomplete' }
       - name: Smoke test published Windows application
         run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64
       - name: Upload complete publish directory
