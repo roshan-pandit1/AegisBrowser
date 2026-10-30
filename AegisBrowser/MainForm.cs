@@ -43,8 +43,8 @@ public sealed class MainForm : Form
         Width = 1250;
         Height = 850;
         MinimumSize = new Size(750, 450);
-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 10 };
-        for (var i = 0; i < 10; i++)
+        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 11 };
+        for (var i = 0; i < 11; i++)
             bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
                 i == 3 ? 100 : i >= 6 ? 100 : 48));
         back = MakeButton("←", () => Current?.Back());
@@ -75,6 +75,11 @@ public sealed class MainForm : Form
                 });
             searchWindow.Show(this); searchWindow.BringToFront();
         }), 9, 0);
+        bar.Controls.Add(MakeButton("Profiles", () =>
+        {
+            var manager = new ProfileManagerForm(ProfileCatalog.DefaultRoot);
+            manager.Show(this);
+        }), 10, 0);
         address.AccessibleName = "Search or enter address";
         address.PlaceholderText = "Search " + SearchEngines.Get(searchSettings.EngineId).Name + " or enter address";
         address.KeyDown += (_, e) =>
