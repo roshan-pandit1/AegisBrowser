@@ -145,7 +145,7 @@ public sealed class ProfileRepository : IProfileRepository
         catch (SqliteException ex)
         {
             throw new IOException("Profile metadata could not be read or saved. Existing files were preserved. " +
-                "Close Aegis Browser and follow the metadata recovery instructions in docs/profile-manager.md.", ex);
+                "Close Aegis Browser and follow the profile metadata recovery instructions before retrying.", ex);
         }
     }
 
