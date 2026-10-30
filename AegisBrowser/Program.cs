@@ -14,10 +14,16 @@ internal static class Program
         ProfileLease? lease = null;
         try
         {
+            var root = ProfileCatalog.DefaultRoot;
+            // The manager is a regular WinForms window; it never initializes CEF or holds a profile lease.
+            if (args.Length == 1 && args[0].Equals("--profiles", StringComparison.OrdinalIgnoreCase))
+            {
+                using var manager = new ProfileManagerForm(root);
+                Application.Run(manager);
+                return;
+            }
             var profile = BrowserPolicy.ReadProfile(args);
-            var path = BrowserPolicy.ProfilePath(Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AegisBrowser", "Profiles"), profile);
+            var path = BrowserPolicy.ProfilePath(root, profile);
             lease = new ProfileLease(path);
             var settings = new CefSettings
             {
