@@ -71,6 +71,7 @@ internal static partial class Program
                         "CEF test-only bypass override routed HTTP through the local proxy to its origin");
 
                     await ObserveWebRtcUdp(browser);
+                    await ObserveWebRtcPolicy(browser, context);
 
                     proxy.Stop();
                     var offlineUrl = baseUrl + "/offline";
