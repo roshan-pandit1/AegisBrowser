@@ -70,6 +70,27 @@ internal static partial class Program
                     Check(!origin.SawDirect("/proxied") && await Js(browser, "document.title") == "proxy",
                         "CEF test-only bypass override routed HTTP through the local proxy to its origin");
 
+                    await LoadReady(browser, baseUrl + "/proxy-page");
+                    await Wait(() => proxy.Saw("/proxy-page") && origin.SawViaProxy("/proxy-page") &&
+                        proxy.Saw("/proxy-script.js") && origin.SawViaProxy("/proxy-script.js"), "proxied script subresource");
+                    Check(!origin.SawDirect("/proxy-page") && !origin.SawDirect("/proxy-script.js") && await Js(browser, "document.title") == "proxied script",
+                        "CEF loaded the controlled script subresource through the test proxy");
+
+                    browser.Load(baseUrl + "/proxy-redirect");
+                    await Wait(() => proxy.Saw("/redirect-target") && origin.SawViaProxy("/redirect-target"), "proxied redirect target");
+                    await Wait(() => browser.Address == baseUrl + "/redirect-target" && !browser.IsLoading, "redirect completion");
+                    await Ready(browser);
+                    Check(proxy.Saw("/proxy-redirect") && origin.SawViaProxy("/proxy-redirect") && !origin.SawDirect("/proxy-redirect") &&
+                        !origin.SawDirect("/redirect-target") && await Js(browser, "document.title") == "proxy",
+                        "CEF routed the controlled redirect and its target through the test proxy");
+
+                    await Cef.UIThreadTaskFactory.StartNew(() => browser.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate",
+                        new Dictionary<string, object> { ["expression"] = "window.open('" + baseUrl + "/proxy-popup','proxy-popup')", ["userGesture"] = true }));
+                    await Wait(() => proxy.Saw("/proxy-popup") && origin.SawViaProxy("/proxy-popup"), "proxied popup request");
+                    Check(!origin.SawDirect("/proxy-popup"), "CEF routed the controlled native popup through the test proxy");
+                    var popupLifetime = browser.LifeSpanHandler as SafePopups ?? throw new InvalidOperationException("Popup lifetime handler is unavailable.");
+                    await Wait(() => popupLifetime.PopupCount == 0, "proxied popup closes");
+
                     await ObserveWebRtcUdp(browser);
                     await ObserveWebRtcPolicy(browser, context);
 
@@ -182,8 +203,23 @@ internal static partial class Program
                         await upstreamStream.CopyToAsync(stream, token);
                         return;
                     }
-                    var body = Encoding.ASCII.GetBytes("<!doctype html><title>" + (viaProxy ? "proxy" : label) + "</title><p>local fixture</p>");
-                    var headers = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " + body.Length + "\r\nConnection: close\r\n\r\n");
+                    var requestParts = first.Split(' ', 3);
+                    var path = requestParts.Length == 3 ? requestParts[1].Split('?', 2)[0] : "";
+                    if (path == "/proxy-redirect")
+                    {
+                        await stream.WriteAsync("HTTP/1.1 302 Found\r\nLocation: /redirect-target\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray(), token);
+                        return;
+                    }
+                    var contentType = path == "/proxy-script.js" ? "application/javascript" : "text/html";
+                    var content = path switch
+                    {
+                        "/proxy-page" => "<!doctype html><title>page</title><script src='/proxy-script.js'></script>",
+                        "/proxy-script.js" => "document.title='proxied script';",
+                        "/proxy-popup" => "<!doctype html><title>popup</title><script>window.close()</script>",
+                        _ => "<!doctype html><title>" + (viaProxy ? "proxy" : label) + "</title><p>local fixture</p>"
+                    };
+                    var body = Encoding.ASCII.GetBytes(content);
+                    var headers = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: " + contentType + "\r\nContent-Length: " + body.Length + "\r\nConnection: close\r\n\r\n");
                     await stream.WriteAsync(headers, token);
                     await stream.WriteAsync(body, token);
                 }
