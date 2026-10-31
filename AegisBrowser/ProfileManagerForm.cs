@@ -20,6 +20,7 @@ public sealed class ProfileManagerForm : Form
     private readonly IProxySavedDiagnostics proxyDiagnostics;
     private readonly ProxyBulkDrafts proxyBulk;
     private readonly IProxyPresetRepository proxyPresets;
+    private readonly IProxyPresetTransfer proxyPresetTransfer;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private readonly TextBox search = new() { Name = "ProfileSearch", AccessibleName = "Search profiles, tags and folders", Width = 220, PlaceholderText = "Search profiles, tags, folders" };
     private readonly ComboBox statusFilter = new() { Name = "StatusFilter", AccessibleName = "Filter by status", DropDownStyle = ComboBoxStyle.DropDownList, Width = 125 };
@@ -57,6 +58,7 @@ public sealed class ProfileManagerForm : Form
         proxyDiagnostics = new ProxySavedDiagnostics(root, proxyRepository, proxyVault, new ProxyTransportTester());
         proxyBulk = new ProxyBulkDrafts(proxyEditor);
         proxyPresets = new ProxyPresetRepository(root);
+        proxyPresetTransfer = new ProxyPresetTransfer(root, proxyPresets);
         dashboard = new ProfileDashboard(root, repository, processes, proxyRepository);
         duplication = new ProfileDuplicationService(root, repository);
         bulk = new ProfileBulkOperations(root, repository, duplication);
@@ -346,7 +348,7 @@ public sealed class ProfileManagerForm : Form
 
     private void ManageProxyPresets()
     {
-        using var form = new ProxyPresetsForm(proxyPresets, false);
+        using var form = new ProxyPresetsForm(proxyPresets, false, transfer: proxyPresetTransfer);
         form.ShowDialog(this);
     }
 

@@ -276,5 +276,5 @@ manual pass from the automated suites.
 
 # Proxy configuration
 
-The [proxy configuration guide](proxy-configuration.md) describes individual and bulk saved-draft editing, reusable non-secret endpoint presets, user-protected credentials and an opt-in .NET transport preflight. The preflight does not test Chromium or establish network isolation. Browser proxy routing is not available yet; the dashboard warns that saving a required proxy blocks profile startup until supported networking is available or the draft is removed. Bulk operations skip profiles with protected credentials.
+The [proxy configuration guide](proxy-configuration.md) describes individual and bulk saved-draft editing, reusable non-secret endpoint presets, preset JSON import/export, user-protected credentials and an opt-in .NET transport preflight. The preflight does not test Chromium or establish network isolation. Browser proxy routing is not available yet; the dashboard warns that saving a required proxy blocks profile startup until supported networking is available or the draft is removed. Bulk operations skip profiles with protected credentials.
 
