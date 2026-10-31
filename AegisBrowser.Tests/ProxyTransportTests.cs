@@ -100,28 +100,12 @@ internal static class ProxyTransportTests
             Check(result.Outcome == ProxyTransportOutcome.Connected && socks.Handshakes > 0 && origin.Requests == 0,
                 "SOCKS5 .NET preflight uses the controlled proxy");
         }
-        using (var tunnel = new HttpTunnelProxyFixture())
-        {
-            var draft = Draft(tunnel.Port) with { AuthenticationRequired = true, CredentialId = Guid.NewGuid() };
-            var result = await tester.TestAsync(draft, new ProxyCredentials("transport-fixture-user", "transport-fixture-password"),
-                "https://diagnostic.invalid/ip", CancellationToken.None);
-            Check(tunnel.ValidAuthentication > 0 && tunnel.TlsAttempts > 0 && result.Outcome == ProxyTransportOutcome.TlsFailed,
-                $"HTTPS target uses an authenticated proxy CONNECT and rejects its untrusted TLS endpoint (outcome: {result.Outcome})");
-        }
-        using (var tunnel = new HttpTunnelProxyFixture())
-        {
-            var draft = Draft(tunnel.Port) with { AuthenticationRequired = true, CredentialId = Guid.NewGuid() };
-            var result = await tester.TestAsync(draft, new ProxyCredentials("transport-fixture-user", "incorrect"),
-                "https://diagnostic.invalid/ip", CancellationToken.None);
-            Check(tunnel.InvalidAuthentication > 0 && tunnel.TlsAttempts == 0 &&
-                result.Outcome is ProxyTransportOutcome.AuthenticationFailed or ProxyTransportOutcome.EndpointOrProxyFailed,
-                $"rejected proxy CONNECT credentials do not start endpoint TLS (outcome: {result.Outcome})");
-        }
         var unsupported = await tester.TestAsync(Draft(1) with { Protocol = ProxyProtocol.Socks5, AuthenticationRequired = true, CredentialId = Guid.NewGuid() },
             null, endpoint, CancellationToken.None);
         Check(unsupported.Outcome == ProxyTransportOutcome.Unsupported, "SOCKS5 authentication is not advertised");
         if (includeWindowsPersistenceAndTls && OperatingSystem.IsWindows())
         {
+            await TestHttpsTunnel(tester);
             await TestTlsRejection(tester, origin.Port, endpoint);
             await TestSavedRevision(tester, origin.Port, endpoint);
         }
@@ -139,9 +123,66 @@ internal static class ProxyTransportTests
     private static async Task TestTlsRejection(ProxyTransportTester tester, int originPort, string endpoint)
     {
         using var tlsProxy = new TlsProxyFixture();
+        // First prove that the fixture can complete TLS when its own certificate is
+        // explicitly trusted for this one test client. No system trust store changes.
+        using (var client = new TcpClient())
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+        {
+            await client.ConnectAsync(IPAddress.Loopback, tlsProxy.Port, timeout.Token);
+            await VerifyFixtureTls(client.GetStream(), tlsProxy.Certificate, "127.0.0.1", timeout.Token);
+        }
+        var before = tlsProxy.Connections;
         var result = await tester.TestAsync(Draft(tlsProxy.Port) with { Protocol = ProxyProtocol.Https }, null, endpoint, CancellationToken.None);
-        Check(tlsProxy.Connections > 0 && result.Outcome == ProxyTransportOutcome.TlsFailed,
+        Check(tlsProxy.Connections > before && result.Outcome == ProxyTransportOutcome.TlsFailed,
             $"untrusted HTTPS proxy certificate is rejected without a TLS override (connections: {tlsProxy.Connections}, outcome: {result.Outcome})");
+    }
+
+    private static async Task VerifyFixtureTls(Stream transport, X509Certificate2 certificate, string host, CancellationToken cancellation)
+    {
+        using var stream = new SslStream(transport);
+        var policy = new X509ChainPolicy { TrustMode = X509ChainTrustMode.CustomRootTrust, RevocationMode = X509RevocationMode.NoCheck };
+        policy.CustomTrustStore.Add(certificate);
+        await stream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+        { TargetHost = host, CertificateChainPolicy = policy }, cancellation);
+        Check(stream.IsAuthenticated && stream.IsEncrypted, "controlled TLS fixture completes a handshake with its explicitly trusted certificate");
+    }
+
+    private static async Task TestHttpsTunnel(ProxyTransportTester tester)
+    {
+        using (var tunnel = new HttpTunnelProxyFixture())
+        {
+            // Exercise the same CONNECT/TLS fixture with a single-client custom root;
+            // this proves the following rejection is not just a broken TLS server.
+            using (var client = new TcpClient())
+            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+            {
+                await client.ConnectAsync(IPAddress.Loopback, tunnel.Port, timeout.Token);
+                var network = client.GetStream();
+                var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes("transport-fixture-user:transport-fixture-password"));
+                await network.WriteAsync(Encoding.ASCII.GetBytes("CONNECT diagnostic.invalid:443 HTTP/1.1\r\nHost: diagnostic.invalid:443\r\nProxy-Authorization: Basic " + auth + "\r\n\r\n"), timeout.Token);
+                using (var reader = new StreamReader(network, Encoding.ASCII, false, 4096, leaveOpen: true))
+                {
+                    Check((await reader.ReadLineAsync(timeout.Token)) == "HTTP/1.1 200 Connection Established", "controlled CONNECT fixture accepts the synthetic credential");
+                    for (var i = 0; i < 100; i++) { var line = await reader.ReadLineAsync(timeout.Token); if (string.IsNullOrEmpty(line)) break; }
+                }
+                await VerifyFixtureTls(network, tunnel.Certificate, "diagnostic.invalid", timeout.Token);
+            }
+            var before = tunnel.ValidAuthentication;
+            var draft = Draft(tunnel.Port) with { AuthenticationRequired = true, CredentialId = Guid.NewGuid() };
+            var result = await tester.TestAsync(draft, new ProxyCredentials("transport-fixture-user", "transport-fixture-password"),
+                "https://diagnostic.invalid/ip", CancellationToken.None);
+            Check(tunnel.ValidAuthentication > before && result.Outcome == ProxyTransportOutcome.TlsFailed,
+                $"HTTPS target uses an authenticated proxy CONNECT and rejects its untrusted TLS endpoint (outcome: {result.Outcome})");
+        }
+        using (var tunnel = new HttpTunnelProxyFixture())
+        {
+            var draft = Draft(tunnel.Port) with { AuthenticationRequired = true, CredentialId = Guid.NewGuid() };
+            var result = await tester.TestAsync(draft, new ProxyCredentials("transport-fixture-user", "incorrect"),
+                "https://diagnostic.invalid/ip", CancellationToken.None);
+            Check(tunnel.InvalidAuthentication > 0 && tunnel.TlsAttempts == 0 &&
+                result.Outcome is ProxyTransportOutcome.AuthenticationFailed or ProxyTransportOutcome.EndpointOrProxyFailed,
+                $"rejected proxy CONNECT credentials do not start endpoint TLS (outcome: {result.Outcome})");
+        }
     }
 
     private static async Task TestSavedRevision(ProxyTransportTester tester, int originPort, string endpoint)
@@ -324,12 +365,15 @@ internal static class ProxyTransportTests
         private readonly X509Certificate2 certificate;
         private int connections;
         public int Connections => Volatile.Read(ref connections);
+        public X509Certificate2 Certificate => certificate;
         public TlsProxyFixture()
         {
             using var key = RSA.Create(2048);
             var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var names = new SubjectAlternativeNameBuilder(); names.AddIpAddress(IPAddress.Loopback);
+            request.CertificateExtensions.Add(names.Build());
             using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(10));
-            certificate = new X509Certificate2(generated.Export(X509ContentType.Pfx), (string?)null, X509KeyStorageFlags.EphemeralKeySet);
+            certificate = new X509Certificate2(generated.Export(X509ContentType.Pfx), (string?)null, X509KeyStorageFlags.UserKeySet);
         }
         protected override async Task Serve(TcpClient client, CancellationToken token)
         {
@@ -348,12 +392,15 @@ internal static class ProxyTransportTests
         public int ValidAuthentication => Volatile.Read(ref validAuthentication);
         public int InvalidAuthentication => Volatile.Read(ref invalidAuthentication);
         public int TlsAttempts => Volatile.Read(ref tlsAttempts);
+        public X509Certificate2 Certificate => certificate;
         public HttpTunnelProxyFixture()
         {
             using var key = RSA.Create(2048);
             var request = new CertificateRequest("CN=diagnostic.invalid", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var names = new SubjectAlternativeNameBuilder(); names.AddDnsName("diagnostic.invalid");
+            request.CertificateExtensions.Add(names.Build());
             using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(10));
-            certificate = new X509Certificate2(generated.Export(X509ContentType.Pfx), (string?)null, X509KeyStorageFlags.EphemeralKeySet);
+            certificate = new X509Certificate2(generated.Export(X509ContentType.Pfx), (string?)null, X509KeyStorageFlags.UserKeySet);
         }
         protected override async Task Serve(TcpClient client, CancellationToken token)
         {
