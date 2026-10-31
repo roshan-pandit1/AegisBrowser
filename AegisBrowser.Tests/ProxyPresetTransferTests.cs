@@ -59,6 +59,9 @@ internal static class ProxyPresetTransferTests
             Reject(() => transfer.Export(output, original), "existing export is not overwritten");
             Check(File.ReadAllText(output) == exported, "existing export remains unchanged");
             Reject(() => transfer.Export(Path.Combine(root, "inside.json"), original), "export inside profile root rejected");
+            var blockedParent = Path.Combine(workspace, "not-a-directory"); File.WriteAllText(blockedParent, "retain");
+            Reject(() => transfer.Export(Path.Combine(blockedParent, "out.json"), original), "filesystem failure is reported");
+            Check(File.ReadAllText(blockedParent) == "retain", "filesystem failure preserves the existing file");
 
             var updated = repo.Update(original with { Name = "Updated" }, original.Revision);
             var stalePath = Path.Combine(workspace, "stale.json");

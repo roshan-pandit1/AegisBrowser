@@ -14,7 +14,8 @@ internal static partial class Program
         {
             form.Show(owner);
             await Wait(() => Control<Label>(form, "ProxyPresetFeedback").Text.Contains("Select or create", StringComparison.Ordinal), "proxy presets loaded");
-            Check(Control<Label>(form, "ProxyPresetWarning").Text.Contains("do not activate", StringComparison.Ordinal), "preset manager labels saved settings accurately");
+            Check(Control<Label>(form, "ProxyPresetWarning").Text.Contains("do not activate", StringComparison.Ordinal) &&
+                Control<Label>(form, "ProxyPresetWarning").Text.Contains("unencrypted", StringComparison.Ordinal), "preset manager labels saved settings and export privacy accurately");
             Control<TextBox>(form, "ProxyPresetName").Text = "QA endpoint";
             Control<TextBox>(form, "ProxyPresetDescription").Text = "Controlled test";
             Control<TextBox>(form, "ProxyPresetHost").Text = "proxy.example";

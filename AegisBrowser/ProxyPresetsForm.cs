@@ -48,7 +48,8 @@ internal sealed class ProxyPresetsForm : Form
         outer.RowStyles.Add(new RowStyle(SizeType.AutoSize)); outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         outer.Controls.Add(new Label { Name = "ProxyPresetWarning", AccessibleName = "Proxy preset limitations", Dock = DockStyle.Fill, AutoSize = true,
-            Text = "Presets contain non-secret endpoint settings only. They do not activate a proxy; do not put credentials in names or descriptions." }, 0, 0);
+            Text = "Presets contain non-secret endpoint settings only. They do not activate a proxy. Exported files are unencrypted; " +
+                   "do not put credentials in names, descriptions, labels or hosts." }, 0, 0);
         outer.Controls.Add(search, 0, 1);
         var main = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
         main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38)); main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
