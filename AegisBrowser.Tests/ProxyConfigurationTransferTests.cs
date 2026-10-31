@@ -33,6 +33,7 @@ internal static class ProxyConfigurationTransferTests
             var file = File.ReadAllText(path);
             Check(!file.Contains("CredentialId", StringComparison.OrdinalIgnoreCase) && !file.Contains("Password", StringComparison.OrdinalIgnoreCase) &&
                 !file.Contains("Username", StringComparison.OrdinalIgnoreCase) && !file.Contains(profile.Id.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                !file.Contains(configuration.Id.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
                 !file.Contains(draft.CredentialId!.Value.ToString("D"), StringComparison.OrdinalIgnoreCase), "export excludes identities and secrets");
             var preview = transfer.Preview(path);
             Check(preview.AuthenticationRequired && preview.Host == draft.Host && preview.Port == draft.Port && preview.Protocol == draft.Protocol,
@@ -80,6 +81,8 @@ internal static class ProxyConfigurationTransferTests
             Reject(() => transfer.Preview(bad), "duplicate fields rejected");
             File.WriteAllText(bad, Envelope(preview).Replace("\"Content\":{", "\"Content\":{\"Password\":\"fixture\",", StringComparison.Ordinal));
             Reject(() => transfer.Preview(bad), "password field rejected");
+            File.WriteAllText(bad, Envelope(preview).Replace("\"Content\":{", "\"Content\":{\"CredentialId\":\"" + Guid.NewGuid().ToString("D") + "\",", StringComparison.Ordinal));
+            Reject(() => transfer.Preview(bad), "credential reference field rejected");
             File.WriteAllText(bad, new string('x', 16_385));
             Reject(() => transfer.Preview(bad), "oversized input rejected");
             File.WriteAllText(bad, "{ invalid");
