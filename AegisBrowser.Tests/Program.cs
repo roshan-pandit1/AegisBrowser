@@ -65,6 +65,7 @@ ProfileBackupTests.Run();
 ProfileSettingsTransactionTests.Run();
 ProxyTests.Run();
 ProxyAuthenticationTests.Run();
+ProxyBulkTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {

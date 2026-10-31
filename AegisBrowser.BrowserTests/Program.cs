@@ -260,6 +260,7 @@ internal static partial class Program
             applyForm.Close();
         }
         await ProxySettingsUi(profilesRoot, repository, manager);
+        await ProxyBulkUi(profilesRoot, repository, manager);
         manager.Close();
     }
 
