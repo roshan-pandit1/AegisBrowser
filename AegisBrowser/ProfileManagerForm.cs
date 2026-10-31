@@ -18,6 +18,7 @@ public sealed class ProfileManagerForm : Form
     private readonly ProfileRepository repository;
     private readonly IProxyConfigurationEditor proxyEditor;
     private readonly ProxyBulkDrafts proxyBulk;
+    private readonly IProxyPresetRepository proxyPresets;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private readonly TextBox search = new() { Name = "ProfileSearch", AccessibleName = "Search profiles, tags and folders", Width = 220, PlaceholderText = "Search profiles, tags, folders" };
     private readonly ComboBox statusFilter = new() { Name = "StatusFilter", AccessibleName = "Filter by status", DropDownStyle = ComboBoxStyle.DropDownList, Width = 125 };
@@ -52,6 +53,7 @@ public sealed class ProfileManagerForm : Form
         var proxyRepository = new ProxyRepository(root);
         proxyEditor = new ProxyConfigurationEditor(root, proxyRepository, new ProxyCredentialVault(root));
         proxyBulk = new ProxyBulkDrafts(proxyEditor);
+        proxyPresets = new ProxyPresetRepository(root);
         dashboard = new ProfileDashboard(root, repository, processes, proxyRepository);
         duplication = new ProfileDuplicationService(root, repository);
         bulk = new ProfileBulkOperations(root, repository, duplication);
@@ -83,11 +85,13 @@ public sealed class ProfileManagerForm : Form
         var refresh = new Button { Text = "Refresh", AccessibleName = "Refresh profiles", Width = 150, Height = 36 };
         var manageTemplates = new Button { Name = "ManageTemplates", Text = "Templates", AccessibleName = "Manage profile templates", Width = 150, Height = 36 };
         var manageBackups = new Button { Name = "ManageBackups", Text = "Backups", AccessibleName = "Manage metadata backups", Width = 150, Height = 36 };
+        var manageProxyPresets = new Button { Name = "ManageProxyPresets", Text = "Proxy presets", AccessibleName = "Manage proxy presets", Width = 150, Height = 36 };
         create.Click += (_, _) => CreateProfile();
         refresh.Click += async (_, _) => await RefreshProfiles(manual: true);
         manageTemplates.Click += (_, _) => ManageTemplates();
         manageBackups.Click += async (_, _) => await ManageBackups();
-        sidebar.Controls.Add(create); sidebar.Controls.Add(refresh); sidebar.Controls.Add(manageTemplates); sidebar.Controls.Add(manageBackups);
+        manageProxyPresets.Click += (_, _) => ManageProxyPresets();
+        sidebar.Controls.Add(create); sidebar.Controls.Add(refresh); sidebar.Controls.Add(manageTemplates); sidebar.Controls.Add(manageBackups); sidebar.Controls.Add(manageProxyPresets);
         sidebar.Controls.Add(new Label { Text = "Local profiles\nEach profile uses its own browser storage.", ForeColor = Color.Gainsboro, Width = 150, Height = 70, Margin = new Padding(0, 24, 0, 0) });
 
         var content = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new Padding(16) };
@@ -332,9 +336,15 @@ public sealed class ProfileManagerForm : Form
     {
         var targets = allProfiles.Where(p => p.Metadata is not null && selectedIds.Contains(p.Metadata.Id)).Select(p => p.Metadata!).ToArray();
         if (targets.Length == 0 || targets.Length != selectedIds.Count) { feedback.Text = "Select registered profiles and refresh before starting a bulk operation."; return; }
-        using var form = new ProxyBulkDraftForm(proxyBulk, targets);
+        using var form = new ProxyBulkDraftForm(proxyBulk, targets, presets: proxyPresets);
         form.ShowDialog(this);
         _ = RefreshProfiles(manual: true);
+    }
+
+    private void ManageProxyPresets()
+    {
+        using var form = new ProxyPresetsForm(proxyPresets, false);
+        form.ShowDialog(this);
     }
 
     private static string StatusText(ProfileActivity state) => state switch

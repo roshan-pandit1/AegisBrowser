@@ -261,6 +261,7 @@ internal static partial class Program
         }
         await ProxySettingsUi(profilesRoot, repository, manager);
         await ProxyBulkUi(profilesRoot, repository, manager);
+        await ProxyPresetUi(profilesRoot, repository, manager);
         manager.Close();
     }
 
