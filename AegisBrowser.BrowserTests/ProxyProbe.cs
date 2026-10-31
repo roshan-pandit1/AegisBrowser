@@ -71,15 +71,17 @@ internal static partial class Program
                         "CEF test-only bypass override routed HTTP through the local proxy to its origin");
 
                     await LoadReady(browser, baseUrl + "/proxy-page");
-                    await Wait(() => proxy.Saw("/proxy-script.js") && origin.SawViaProxy("/proxy-script.js"), "proxied script subresource");
-                    Check(!origin.SawDirect("/proxy-script.js") && await Js(browser, "document.title") == "proxied script",
+                    await Wait(() => proxy.Saw("/proxy-page") && origin.SawViaProxy("/proxy-page") &&
+                        proxy.Saw("/proxy-script.js") && origin.SawViaProxy("/proxy-script.js"), "proxied script subresource");
+                    Check(!origin.SawDirect("/proxy-page") && !origin.SawDirect("/proxy-script.js") && await Js(browser, "document.title") == "proxied script",
                         "CEF loaded the controlled script subresource through the test proxy");
 
                     browser.Load(baseUrl + "/proxy-redirect");
                     await Wait(() => proxy.Saw("/redirect-target") && origin.SawViaProxy("/redirect-target"), "proxied redirect target");
                     await Wait(() => browser.Address == baseUrl + "/redirect-target" && !browser.IsLoading, "redirect completion");
                     await Ready(browser);
-                    Check(proxy.Saw("/proxy-redirect") && !origin.SawDirect("/redirect-target") && await Js(browser, "document.title") == "proxy",
+                    Check(proxy.Saw("/proxy-redirect") && origin.SawViaProxy("/proxy-redirect") && !origin.SawDirect("/proxy-redirect") &&
+                        !origin.SawDirect("/redirect-target") && await Js(browser, "document.title") == "proxy",
                         "CEF routed the controlled redirect and its target through the test proxy");
 
                     await Cef.UIThreadTaskFactory.StartNew(() => browser.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate",
