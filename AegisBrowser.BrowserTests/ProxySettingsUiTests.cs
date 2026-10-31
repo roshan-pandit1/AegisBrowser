@@ -58,6 +58,7 @@ internal static partial class Program
             try { proxyRepository.EnsureRuntimeReady(profile, lease); } catch (IOException) { blocked = true; }
             Check(blocked, "saved proxy draft blocks unsupported browser startup");
         }
+        await ProxyConfigurationTransferUi(root, profiles, owner, editor, proxyRepository, profile, saved, secret);
         var diagnostics = new FakeProxySavedDiagnostics();
         using (var form = new ProxySettingsForm(editor, profile, saved, _ => true, diagnostics))
         {
@@ -107,6 +108,69 @@ internal static partial class Program
             (row.Tag as DashboardProfile)?.ProxyState == SavedProxyState.BrowserDefaults), "dashboard browser-default status");
         Check(grid.Rows.Cast<DataGridViewRow>().Single(row => (row.Tag as DashboardProfile)?.Slug == profile.Slug).Cells["SavedProxy"].Value as string == "Browser defaults",
             "dashboard refreshes saved proxy status after draft removal");
+    }
+
+    private static async Task ProxyConfigurationTransferUi(string root, ProfileRepository profiles, Form owner,
+        ProxyConfigurationEditor editor, ProxyRepository repository, ProfileDefinition source, ProxyConfiguration saved, Guid sourceSecret)
+    {
+        T Control<T>(Control parent, string name) where T : Control => parent.Controls.Find(name, true).OfType<T>().Single();
+        var transfer = new ProxyConfigurationTransfer(root, repository);
+        var file = Path.Combine(Path.GetTempPath(), "aegis-ui-proxy-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            using (var form = new ProxySettingsForm(editor, source, saved, _ => true, transfer: transfer,
+                chooseExportPath: () => file, chooseImportPath: () => file))
+            {
+                form.Show(owner);
+                Check(Control<Button>(form, "ExportSavedProxy").AccessibleName == "Export saved proxy configuration" &&
+                    Control<Button>(form, "ImportProxyConfiguration").AccessibleName == "Preview and load proxy configuration", "proxy configuration transfer controls are accessible");
+                Control<Button>(form, "ExportSavedProxy").PerformClick();
+                await Wait(() => Control<Label>(form, "ProxyFeedback").Text.Contains("exported", StringComparison.OrdinalIgnoreCase), "saved proxy export");
+                var text = File.ReadAllText(file);
+                Check(!text.Contains("ui-fixture-user", StringComparison.Ordinal) && !text.Contains("ui-fixture-password", StringComparison.Ordinal) &&
+                    !text.Contains(sourceSecret.ToString("D"), StringComparison.OrdinalIgnoreCase), "proxy export contains no source credential or reference");
+                form.Close();
+            }
+            var target = profiles.Create("ui-proxy-import");
+            var allow = false;
+            using (var form = new ProxySettingsForm(editor, target, null, _ => allow, transfer: transfer,
+                chooseExportPath: () => file, chooseImportPath: () => file))
+            {
+                form.Show(owner);
+                Control<ComboBox>(form, "ProxyProtocol").SelectedIndex = (int)ProxyProtocol.Http;
+                Control<TextBox>(form, "ProxyHost").Text = "unsaved.example";
+                Control<Button>(form, "ImportProxyConfiguration").PerformClick();
+                await Wait(() => Control<Label>(form, "ProxyFeedback").Text.Contains("canceled", StringComparison.OrdinalIgnoreCase), "proxy import declined");
+                Check(Control<TextBox>(form, "ProxyHost").Text == "unsaved.example" && editor.Load(target) is null,
+                    "declining proxy import leaves editor input and target unchanged");
+                allow = true;
+                Control<Button>(form, "ImportProxyConfiguration").PerformClick();
+                await Wait(() => Control<Label>(form, "ProxyFeedback").Text.Contains("loaded for review", StringComparison.OrdinalIgnoreCase), "proxy import preview accepted");
+                Check(Control<CheckBox>(form, "ProxyAuthentication").Checked && Control<TextBox>(form, "ProxyUsername").Text.Length == 0 &&
+                    Control<TextBox>(form, "ProxyPassword").Text.Length == 0 && editor.Load(target) is null,
+                    "import preserves authentication requirement without applying settings or importing credentials");
+                Control<Button>(form, "SaveProxyDraft").PerformClick();
+                await Wait(() => Control<Label>(form, "ProxyFeedback").Text.Contains("Enter new credentials", StringComparison.OrdinalIgnoreCase), "imported proxy requires credentials");
+                Check(editor.Load(target) is null, "missing imported credentials leave the target configuration unchanged");
+                Control<TextBox>(form, "ProxyUsername").Text = "import-fixture-user";
+                Control<TextBox>(form, "ProxyPassword").Text = "import-fixture-password";
+                Control<Button>(form, "SaveProxyDraft").PerformClick();
+                await Wait(() => form.IsDisposed || !form.Visible, "imported proxy saved with new credentials");
+            }
+            var imported = editor.Load(target) ?? throw new Exception("Imported proxy did not persist.");
+            var vault = new ProxyCredentialVault(root);
+            Check(imported.Settings.AuthenticationRequired && imported.Settings.CredentialId is Guid importedSecret && importedSecret != sourceSecret &&
+                vault.Read(target.Id, importedSecret).Username == "import-fixture-user" && vault.Read(source.Id, sourceSecret).Username == "ui-fixture-user",
+                "import creates a separate protected credential without sharing the source secret");
+            using (var lease = new ProfileLease(BrowserPolicy.ProfilePath(root, target.Slug)))
+            {
+                var blocked = false;
+                try { repository.EnsureRuntimeReady(target, lease); } catch (IOException) { blocked = true; }
+                Check(blocked, "imported required proxy remains blocked before Chromium startup");
+            }
+            _ = editor.Save(target, new ProxyDraft(ProxyProtocol.Direct, "", 0, false, null, "", false), imported.Revision, null);
+        }
+        finally { if (File.Exists(file)) File.Delete(file); }
     }
 
     private sealed class FakeProxySavedDiagnostics : IProxySavedDiagnostics

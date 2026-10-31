@@ -10,6 +10,8 @@ internal sealed class ProxySettingsForm : Form
     private readonly ProxyConfiguration? original;
     private readonly Func<string, bool> confirm;
     private readonly IProxySavedDiagnostics? diagnostics;
+    private readonly IProxyConfigurationTransfer? transfer;
+    private readonly Func<string?> chooseExportPath, chooseImportPath;
     private readonly ComboBox protocol = new() { Name = "ProxyProtocol", AccessibleName = "Saved proxy mode", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
     private readonly TextBox host = new() { Name = "ProxyHost", AccessibleName = "Proxy hostname or IP address", Dock = DockStyle.Fill };
     private readonly NumericUpDown port = new() { Name = "ProxyPort", AccessibleName = "Proxy port", Minimum = 1, Maximum = 65535, Value = 8080, Dock = DockStyle.Fill };
@@ -22,25 +24,31 @@ internal sealed class ProxySettingsForm : Form
     private readonly Button save = new() { Name = "SaveProxyDraft", Text = "Save", AccessibleName = "Save proxy draft", AutoSize = true };
     private readonly Button cancel = new() { Name = "CancelProxyDraft", Text = "Cancel", AccessibleName = "Cancel proxy editing", AutoSize = true, DialogResult = DialogResult.Cancel };
     private readonly Button clearCredentials = new() { Name = "ClearProxyCredentials", Text = "Clear credentials on save", AccessibleName = "Clear proxy credentials on save", AutoSize = true };
+    private readonly Button export = new() { Name = "ExportSavedProxy", Text = "Export saved proxy", AccessibleName = "Export saved proxy configuration", AutoSize = true };
+    private readonly Button import = new() { Name = "ImportProxyConfiguration", Text = "Import proxy", AccessibleName = "Preview and load proxy configuration", AutoSize = true };
     private readonly TextBox diagnosticEndpoint = new() { Name = "ProxyDiagnosticEndpoint", AccessibleName = "Trusted diagnostic endpoint URL", Dock = DockStyle.Fill, MaxLength = 2048, PlaceholderText = "https://your-trusted-endpoint/ip" };
     private readonly Button test = new() { Name = "TestSavedProxy", Text = "Test saved draft", AccessibleName = "Test saved proxy draft using .NET transport", AutoSize = true };
     private readonly Button cancelTest = new() { Name = "CancelProxyTest", Text = "Cancel test", AccessibleName = "Cancel proxy transport test", AutoSize = true, Enabled = false };
     private readonly Label testResult = new() { Name = "ProxyTestResult", AccessibleName = "Proxy transport test result", AutoSize = true, Dock = DockStyle.Fill };
     private CancellationTokenSource? testCancellation;
-    private bool saving, testing;
+    private bool saving, testing, transferring, importedConfiguration;
     public string? SavedMessage { get; private set; }
 
     public ProxySettingsForm(IProxyConfigurationEditor editor, ProfileDefinition profile, ProxyConfiguration? original,
-        Func<string, bool>? confirm = null, IProxySavedDiagnostics? diagnostics = null)
+        Func<string, bool>? confirm = null, IProxySavedDiagnostics? diagnostics = null,
+        IProxyConfigurationTransfer? transfer = null, Func<string?>? chooseExportPath = null, Func<string?>? chooseImportPath = null)
     {
         this.editor = editor; this.profile = profile; this.original = original;
         this.diagnostics = diagnostics;
+        this.transfer = transfer;
+        this.chooseExportPath = chooseExportPath ?? ChooseExportPath;
+        this.chooseImportPath = chooseImportPath ?? ChooseImportPath;
         this.confirm = confirm ?? (message => MessageBox.Show(this, message, "Proxy settings", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes);
         Text = "Proxy settings — saved draft"; AutoScaleMode = AutoScaleMode.Dpi; StartPosition = FormStartPosition.CenterParent;
         Width = 760; Height = 850; MinimumSize = new Size(550, 570);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 16, Padding = new Padding(16), AutoScroll = true };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 17, Padding = new Padding(16), AutoScroll = true };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (var i = 0; i < 16; i++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (var i = 0; i < 17; i++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var warning = new Label
         {
             Name = "ProxyAvailability", AccessibleName = "Proxy networking availability", Dock = DockStyle.Fill, AutoSize = true,
@@ -59,6 +67,10 @@ internal sealed class ProxySettingsForm : Form
         layout.Controls.Add(credentialHint, 1, 8);
         clearCredentials.Click += (_, _) => { authentication.Checked = false; username.Clear(); password.Clear(); };
         layout.Controls.Add(clearCredentials, 1, 9);
+        var transferButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+        transferButtons.Controls.AddRange([export, import, new Label { AutoSize = true, Text = "Files are unencrypted and exclude credentials; imports only fill this editor." }]);
+        export.Visible = import.Visible = transfer is not null;
+        layout.Controls.Add(transferButtons, 0, 10); layout.SetColumnSpan(transferButtons, 2);
         var diagnosticWarning = new Label
         {
             Name = "ProxyTestWarning", AccessibleName = "Proxy test limitations", Dock = DockStyle.Fill, AutoSize = true,
@@ -66,14 +78,14 @@ internal sealed class ProxySettingsForm : Form
                    "Your chosen endpoint receives a request. HTTP proxy Basic credentials are exposed on the proxy network hop. " +
                    "Close the profile first; it cannot start while the test runs."
         };
-        layout.Controls.Add(diagnosticWarning, 0, 10); layout.SetColumnSpan(diagnosticWarning, 2);
-        Field("Diagnostic URL", diagnosticEndpoint, 11);
+        layout.Controls.Add(diagnosticWarning, 0, 11); layout.SetColumnSpan(diagnosticWarning, 2);
+        Field("Diagnostic URL", diagnosticEndpoint, 12);
         var testButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
-        testButtons.Controls.AddRange([test, cancelTest]); layout.Controls.Add(testButtons, 1, 12);
-        layout.Controls.Add(testResult, 0, 13); layout.SetColumnSpan(testResult, 2);
-        layout.Controls.Add(feedback, 0, 14); layout.SetColumnSpan(feedback, 2);
+        testButtons.Controls.AddRange([test, cancelTest]); layout.Controls.Add(testButtons, 1, 13);
+        layout.Controls.Add(testResult, 0, 14); layout.SetColumnSpan(testResult, 2);
+        layout.Controls.Add(feedback, 0, 15); layout.SetColumnSpan(feedback, 2);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
-        buttons.Controls.AddRange([cancel, save]); layout.Controls.Add(buttons, 0, 15); layout.SetColumnSpan(buttons, 2);
+        buttons.Controls.AddRange([cancel, save]); layout.Controls.Add(buttons, 0, 16); layout.SetColumnSpan(buttons, 2);
         Controls.Add(layout);
         var settings = original?.Settings;
         protocol.SelectedIndex = settings is null ? 0 : (int)settings.Protocol;
@@ -88,9 +100,10 @@ internal sealed class ProxySettingsForm : Form
         protocol.SelectedIndexChanged += (_, _) => UpdateControls(); authentication.CheckedChanged += (_, _) => UpdateControls();
         UpdateControls(); AcceptButton = save; CancelButton = cancel;
         save.Click += async (_, _) => await SaveDraft();
+        export.Click += async (_, _) => await ExportSaved(); import.Click += async (_, _) => await ImportConfiguration();
         test.Click += async (_, _) => await TestSavedDraft();
         cancelTest.Click += (_, _) => testCancellation?.Cancel();
-        FormClosing += (_, e) => { if (saving || testing) { e.Cancel = true; testCancellation?.Cancel(); } };
+        FormClosing += (_, e) => { if (saving || testing || transferring) { e.Cancel = true; testCancellation?.Cancel(); } };
     }
 
     private void UpdateControls()
@@ -98,12 +111,14 @@ internal sealed class ProxySettingsForm : Form
         var proxied = protocol.SelectedIndex > 0;
         host.Enabled = port.Enabled = label.Enabled = authentication.Enabled = proxied;
         username.Enabled = password.Enabled = proxied && authentication.Checked;
-        test.Enabled = diagnostics is not null && original is not null && original.Settings.Protocol != ProxyProtocol.Direct && !saving && !testing;
+        test.Enabled = diagnostics is not null && original is not null && original.Settings.Protocol != ProxyProtocol.Direct && !saving && !testing && !transferring;
+        export.Enabled = transfer is not null && original is not null && original.Settings.Protocol != ProxyProtocol.Direct && !saving && !testing && !transferring;
+        import.Enabled = transfer is not null && !saving && !testing && !transferring;
     }
 
     private async Task SaveDraft()
     {
-        if (saving) return;
+        if (saving || testing || transferring) return;
         try
         {
             var selected = (ProxyProtocol)protocol.SelectedIndex;
@@ -117,6 +132,8 @@ internal sealed class ProxySettingsForm : Form
                 Guid? credential = null;
                 if (authentication.Checked)
                 {
+                    if (importedConfiguration && (username.Text.Length == 0 || password.Text.Length == 0))
+                        throw new ArgumentException("Enter new credentials for the imported proxy configuration.");
                     if (username.Text.Length > 0 || password.Text.Length > 0)
                         replacement = new ProxyCredentials(username.Text, password.Text);
                     else credential = original?.Settings.AuthenticationRequired == true ? original.Settings.CredentialId : null;
@@ -127,6 +144,8 @@ internal sealed class ProxySettingsForm : Form
             var prompt = selected == ProxyProtocol.Direct
                 ? "This removes the saved proxy and allows the profile to start with Chromium's existing system/network defaults. Continue?"
                 : "Proxy networking is not available yet. Saving this draft will block the profile from starting until a supported build is available or you remove the draft. Continue?";
+            if (importedConfiguration && original?.Settings.CredentialId is not null)
+                prompt += " Saving imported settings may replace or remove the current protected credential.";
             if ((selected != ProxyProtocol.Direct || (original is not null && original.Settings.Protocol != ProxyProtocol.Direct)) && !confirm(prompt)) return;
             saving = true; SetBusy(true); feedback.Text = "Saving proxy settings…";
             var result = await Task.Run(() => editor.Save(profile, draft, original?.Revision ?? 0, replacement));
@@ -146,7 +165,7 @@ internal sealed class ProxySettingsForm : Form
 
     private async Task TestSavedDraft()
     {
-        if (testing || saving || original is null || diagnostics is null) return;
+        if (testing || saving || transferring || original is null || diagnostics is null) return;
         try
         {
             var endpoint = diagnosticEndpoint.Text;
@@ -172,10 +191,62 @@ internal sealed class ProxySettingsForm : Form
         }
     }
 
+    private string? ChooseExportPath()
+    {
+        using var dialog = new SaveFileDialog { Title = "Export saved proxy to a new file", Filter = "Aegis proxy configuration (*.json)|*.json",
+            FileName = "aegis-proxy.json", OverwritePrompt = false };
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
+    }
+
+    private string? ChooseImportPath()
+    {
+        using var dialog = new OpenFileDialog { Title = "Preview proxy configuration", Filter = "Aegis proxy configuration (*.json)|*.json" };
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
+    }
+
+    private async Task ExportSaved()
+    {
+        if (saving || testing || transferring || transfer is null || original is null) return;
+        var path = chooseExportPath(); if (path is null) return;
+        try
+        {
+            transferring = true; SetBusy(true); feedback.Text = "Exporting saved proxy…";
+            await Task.Run(() => transfer.Export(path, profile, original));
+            if (!IsDisposed) feedback.Text = "Saved proxy exported without credentials. Existing files were not replaced.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not export saved proxy: " + ex.Message; }
+        finally { transferring = false; if (!IsDisposed) SetBusy(false); }
+    }
+
+    private async Task ImportConfiguration()
+    {
+        if (saving || testing || transferring || transfer is null) return;
+        var path = chooseImportPath(); if (path is null) return;
+        try
+        {
+            transferring = true; SetBusy(true); feedback.Text = "Validating proxy configuration…";
+            var preview = await Task.Run(() => transfer.Preview(path));
+            if (IsDisposed) return;
+            var auth = preview.AuthenticationRequired ? "Authentication is required; enter new credentials before saving." : "No credentials are included.";
+            if (!confirm($"Load {preview.Protocol} proxy {preview.Host}:{preview.Port} into this editor? {auth} " +
+                "Nothing is saved yet. The checksum does not prove who created the file."))
+            { feedback.Text = "Proxy import canceled; no settings changed."; return; }
+            protocol.SelectedIndex = (int)preview.Protocol; host.Text = preview.Host; port.Value = preview.Port; label.Text = preview.Label;
+            authentication.Checked = preview.AuthenticationRequired; username.Clear(); password.Clear(); importedConfiguration = true;
+            credentialHint.Text = "Imported files never contain credentials. Enter new credentials if authentication is required.";
+            feedback.Text = "Imported values loaded for review. Save to apply them; no profile settings changed yet.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not import proxy: " + ex.Message; }
+        finally { transferring = false; if (!IsDisposed) SetBusy(false); }
+    }
+
     private void SetBusy(bool busy)
     {
         protocol.Enabled = !busy; clearCredentials.Enabled = !busy; save.Enabled = cancel.Enabled = !busy;
         diagnosticEndpoint.Enabled = !busy; cancelTest.Enabled = testing;
+        if (busy) export.Enabled = import.Enabled = false;
         if (busy) test.Enabled = false;
         if (busy) host.Enabled = port.Enabled = label.Enabled = authentication.Enabled = username.Enabled = password.Enabled = false;
         else UpdateControls();
