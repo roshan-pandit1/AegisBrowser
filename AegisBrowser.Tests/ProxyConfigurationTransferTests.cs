@@ -41,6 +41,7 @@ internal static class ProxyConfigurationTransferTests
             Check(!preview.ToString().Contains(draft.Host, StringComparison.Ordinal), "portable record string does not expose endpoint data");
             Reject(() => transfer.Export(path, profile, configuration), "existing file is not overwritten");
             Check(File.ReadAllText(path) == file, "existing export remains unchanged");
+            Check(!Directory.EnumerateFiles(workspace, ".aegis-proxy-config-*.tmp").Any(), "failed export removes only its owned temporary file");
             Reject(() => transfer.Export(Path.Combine(root, "inside.json"), profile, configuration), "export inside profile storage rejected");
             Reject(() => transfer.Export(Path.Combine(workspace, "wrong.json"), profile with { Id = Guid.NewGuid() }, configuration), "profile identity mismatch rejected");
             repo.Current = configuration with { Revision = 2 };
