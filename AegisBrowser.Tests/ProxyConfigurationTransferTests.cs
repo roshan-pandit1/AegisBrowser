@@ -70,6 +70,8 @@ internal static class ProxyConfigurationTransferTests
             Reject(() => transfer.Preview(bad), "unsupported SOCKS5 authentication rejected");
             File.WriteAllText(bad, Envelope(preview with { Protocol = (ProxyProtocol)99 }));
             Reject(() => transfer.Preview(bad), "unknown protocol rejected");
+            File.WriteAllText(bad, Envelope(preview with { Protocol = ProxyProtocol.Https, Host = "2001:db8::1", Port = 443 }));
+            Check(transfer.Preview(bad).Host == "2001:db8::1", "IPv6 proxy endpoint round-trips without credentials");
             File.WriteAllText(bad, Envelope(preview with { Protocol = ProxyProtocol.Direct }));
             Reject(() => transfer.Preview(bad), "direct mode rejected");
             File.WriteAllText(bad, Envelope(preview with { Port = 0 }));

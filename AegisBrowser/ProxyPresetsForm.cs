@@ -237,7 +237,8 @@ internal sealed class ProxyPresetsForm : Form
             busy = true; SetBusy(true); feedback.Text = "Validating preset…";
             var preview = await Task.Run(() => transfer.Preview(path));
             if (IsDisposed) return;
-            var prompt = $"Import preset '{preview.Name}' ({preview.Protocol}, {preview.Host}:{preview.Port})? " +
+            var endpoint = preview.Host.Contains(':') ? $"[{preview.Host}]:{preview.Port}" : $"{preview.Host}:{preview.Port}";
+            var prompt = $"Import preset '{preview.Name}' ({preview.Protocol}, {endpoint})? " +
                 "This creates a new inactive preset without credentials. The checksum does not prove who created the file.";
             if (!confirm(prompt)) { feedback.Text = "Preset import canceled."; return; }
             var created = await Task.Run(() => transfer.Import(preview));

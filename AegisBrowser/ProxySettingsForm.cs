@@ -229,7 +229,8 @@ internal sealed class ProxySettingsForm : Form
             var preview = await Task.Run(() => transfer.Preview(path));
             if (IsDisposed) return;
             var auth = preview.AuthenticationRequired ? "Authentication is required; enter new credentials before saving." : "No credentials are included.";
-            if (!confirm($"Load {preview.Protocol} proxy {preview.Host}:{preview.Port} into this editor? {auth} " +
+            var endpoint = preview.Host.Contains(':') ? $"[{preview.Host}]:{preview.Port}" : $"{preview.Host}:{preview.Port}";
+            if (!confirm($"Load {preview.Protocol} proxy {endpoint} into this editor? {auth} " +
                 "Nothing is saved yet. The checksum does not prove who created the file."))
             { feedback.Text = "Proxy import canceled; no settings changed."; return; }
             protocol.SelectedIndex = (int)preview.Protocol; host.Text = preview.Host; port.Value = preview.Port; label.Text = preview.Label;
