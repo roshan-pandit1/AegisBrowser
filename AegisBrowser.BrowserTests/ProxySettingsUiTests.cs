@@ -58,6 +58,33 @@ internal static partial class Program
             try { proxyRepository.EnsureRuntimeReady(profile, lease); } catch (IOException) { blocked = true; }
             Check(blocked, "saved proxy draft blocks unsupported browser startup");
         }
+        var diagnostics = new FakeProxySavedDiagnostics();
+        using (var form = new ProxySettingsForm(editor, profile, saved, _ => true, diagnostics))
+        {
+            form.Show(owner);
+            Check(Control<Label>(form, "ProxyTestWarning").Text.Contains(".NET", StringComparison.Ordinal) &&
+                Control<Label>(form, "ProxyTestWarning").Text.Contains("does not test Chromium", StringComparison.Ordinal),
+                "proxy test explains the transport and browser limitations");
+            var endpoint = Control<TextBox>(form, "ProxyDiagnosticEndpoint");
+            var test = Control<Button>(form, "TestSavedProxy");
+            endpoint.Text = "http://example.invalid/ip";
+            test.PerformClick();
+            Check(diagnostics.Calls == 0 && Control<Label>(form, "ProxyTestResult").Text.Contains("HTTPS", StringComparison.Ordinal),
+                "invalid endpoint does not start a diagnostic");
+            Control<TextBox>(form, "ProxyHost").Text = "unsaved.example";
+            endpoint.Text = "https://example.invalid/ip";
+            test.PerformClick();
+            await Wait(() => test.Enabled && Control<Label>(form, "ProxyTestResult").Text.Contains("203.0.113.42", StringComparison.Ordinal), "saved proxy preflight result");
+            Check(diagnostics.Calls == 1 && diagnostics.LastConfiguration == saved && diagnostics.LastEndpoint == endpoint.Text,
+                "the diagnostic uses the saved revision only after an explicit action");
+            diagnostics.WaitForCancellation = true;
+            test.PerformClick();
+            await Wait(() => diagnostics.Calls == 2 && Control<Button>(form, "CancelProxyTest").Enabled, "proxy diagnostic starts");
+            Control<Button>(form, "CancelProxyTest").PerformClick();
+            await Wait(() => test.Enabled && Control<Label>(form, "ProxyTestResult").Text.Contains("canceled", StringComparison.OrdinalIgnoreCase), "proxy diagnostic cancellation");
+            Check(Control<TextBox>(form, "ProxyHost").Text == "unsaved.example", "canceling a diagnostic preserves unsaved editor input");
+            form.Close();
+        }
         using (var stale = new ProxySettingsForm(editor, profile, saved, _ => true))
         {
             stale.Show(owner);
@@ -80,5 +107,22 @@ internal static partial class Program
             (row.Tag as DashboardProfile)?.ProxyState == SavedProxyState.BrowserDefaults), "dashboard browser-default status");
         Check(grid.Rows.Cast<DataGridViewRow>().Single(row => (row.Tag as DashboardProfile)?.Slug == profile.Slug).Cells["SavedProxy"].Value as string == "Browser defaults",
             "dashboard refreshes saved proxy status after draft removal");
+    }
+
+    private sealed class FakeProxySavedDiagnostics : IProxySavedDiagnostics
+    {
+        private int calls;
+        public int Calls => Volatile.Read(ref calls);
+        public bool WaitForCancellation { get; set; }
+        public ProxyConfiguration? LastConfiguration { get; private set; }
+        public string? LastEndpoint { get; private set; }
+        public async Task<ProxyTransportResult> TestAsync(ProfileDefinition profile, ProxyConfiguration expected, string endpoint, CancellationToken cancellation)
+        {
+            LastConfiguration = expected; LastEndpoint = endpoint;
+            Interlocked.Increment(ref calls);
+            if (WaitForCancellation) await Task.Delay(Timeout.Infinite, cancellation);
+            return new(expected.Settings.Protocol, ProxyTransportOutcome.Connected, DateTimeOffset.UtcNow,
+                TimeSpan.FromMilliseconds(1), "203.0.113.42", "Fixture result.");
+        }
     }
 }
