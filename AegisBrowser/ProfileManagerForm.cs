@@ -17,6 +17,7 @@ public sealed class ProfileManagerForm : Form
     private readonly ProfileSettingsTransactions settingsTransactions;
     private readonly ProfileRepository repository;
     private readonly IProxyConfigurationEditor proxyEditor;
+    private readonly ProxyBulkDrafts proxyBulk;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private readonly TextBox search = new() { Name = "ProfileSearch", AccessibleName = "Search profiles, tags and folders", Width = 220, PlaceholderText = "Search profiles, tags, folders" };
     private readonly ComboBox statusFilter = new() { Name = "StatusFilter", AccessibleName = "Filter by status", DropDownStyle = ComboBoxStyle.DropDownList, Width = 125 };
@@ -50,6 +51,7 @@ public sealed class ProfileManagerForm : Form
         repository = new ProfileRepository(root);
         var proxyRepository = new ProxyRepository(root);
         proxyEditor = new ProxyConfigurationEditor(root, proxyRepository, new ProxyCredentialVault(root));
+        proxyBulk = new ProxyBulkDrafts(proxyEditor);
         dashboard = new ProfileDashboard(root, repository, processes, proxyRepository);
         duplication = new ProfileDuplicationService(root, repository);
         bulk = new ProfileBulkOperations(root, repository, duplication);
@@ -103,6 +105,7 @@ public sealed class ProfileManagerForm : Form
         var clearSelection = new Button { Name = "ClearProfileSelection", Text = "Clear selection", AccessibleName = "Clear profile selection", AutoSize = true };
         var bulkEdit = new Button { Name = "BulkEdit", Text = "Bulk labels", AccessibleName = "Bulk edit tags and folders", AutoSize = true };
         var bulkCopy = new Button { Name = "BulkCopy", Text = "Clean copy selected", AccessibleName = "Clean duplicate selected profiles", AutoSize = true };
+        var bulkProxyButton = new Button { Name = "BulkProxyDrafts", Text = "Bulk proxy drafts", AccessibleName = "Edit selected proxy drafts", AutoSize = true };
         var export = new Button { Name = "ExportProfiles", Text = "Export selected", AccessibleName = "Export selected profiles", AutoSize = true };
         var import = new Button { Name = "ImportProfiles", Text = "Import", AccessibleName = "Import profiles or templates", AutoSize = true };
         var applyTemplate = new Button { Name = "ApplyTemplateSettings", Text = "Apply template settings", AccessibleName = "Apply template settings to selected profiles", AutoSize = true };
@@ -110,11 +113,12 @@ public sealed class ProfileManagerForm : Form
         clearSelection.Click += (_, _) => { selectedIds.Clear(); UpdateSelectionCells(); };
         bulkEdit.Click += (_, _) => RunBulk(false);
         bulkCopy.Click += (_, _) => RunBulk(true);
+        bulkProxyButton.Click += (_, _) => RunProxyBulk();
         export.Click += (_, _) => ExportSelected();
         import.Click += async (_, _) => await ImportProfiles();
         applyTemplate.Click += (_, _) => ApplyTemplateSettings();
         selectionCount.Text = "0 selected";
-        tools.Controls.AddRange([search, statusFilter, folderFilter, sort, clear, selectVisible, clearSelection, bulkEdit, bulkCopy, applyTemplate, export, import, selectionCount]);
+        tools.Controls.AddRange([search, statusFilter, folderFilter, sort, clear, selectVisible, clearSelection, bulkEdit, bulkCopy, bulkProxyButton, applyTemplate, export, import, selectionCount]);
         content.Controls.Add(tools, 0, 1); content.Controls.Add(summary, 0, 2);
         var main = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 8, 0, 0) };
         main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); main.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
@@ -320,6 +324,15 @@ public sealed class ProfileManagerForm : Form
         var targets = allProfiles.Where(p => p.Metadata is not null && selectedIds.Contains(p.Metadata.Id)).Select(p => p.Metadata!).ToArray();
         if (targets.Length == 0 || targets.Length != selectedIds.Count) { feedback.Text = "Select registered profiles and refresh before starting a bulk operation."; return; }
         using var form = new ProfileBulkForm(bulk, targets, duplicate);
+        form.ShowDialog(this);
+        _ = RefreshProfiles(manual: true);
+    }
+
+    private void RunProxyBulk()
+    {
+        var targets = allProfiles.Where(p => p.Metadata is not null && selectedIds.Contains(p.Metadata.Id)).Select(p => p.Metadata!).ToArray();
+        if (targets.Length == 0 || targets.Length != selectedIds.Count) { feedback.Text = "Select registered profiles and refresh before starting a bulk operation."; return; }
+        using var form = new ProxyBulkDraftForm(proxyBulk, targets);
         form.ShowDialog(this);
         _ = RefreshProfiles(manual: true);
     }
