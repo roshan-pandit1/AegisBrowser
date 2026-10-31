@@ -8,6 +8,8 @@ internal sealed class ProxyPresetsForm : Form
     private readonly IProxyPresetRepository repository;
     private readonly bool choose;
     private readonly Func<string, bool> confirm;
+    private readonly IProxyPresetTransfer? transfer;
+    private readonly Func<string?> chooseExportPath, chooseImportPath;
     private readonly TextBox search = new() { Name = "ProxyPresetSearch", AccessibleName = "Search proxy presets", Dock = DockStyle.Fill, PlaceholderText = "Search presets" };
     private readonly ListBox list = new() { Name = "ProxyPresetList", AccessibleName = "Proxy presets", Dock = DockStyle.Fill };
     private readonly TextBox name = new() { Name = "ProxyPresetName", AccessibleName = "Proxy preset name", Dock = DockStyle.Fill, MaxLength = 120 };
@@ -24,15 +26,21 @@ internal sealed class ProxyPresetsForm : Form
     private readonly Button save = new() { Name = "SaveProxyPreset", Text = "Save", AccessibleName = "Save proxy preset", AutoSize = true };
     private readonly Button delete = new() { Name = "DeleteProxyPreset", Text = "Delete selected", AccessibleName = "Delete selected proxy preset", AutoSize = true };
     private readonly Button use = new() { Name = "UseProxyPreset", Text = "Use selected", AccessibleName = "Copy selected proxy preset into bulk draft", AutoSize = true };
+    private readonly Button export = new() { Name = "ExportProxyPreset", Text = "Export selected", AccessibleName = "Export selected proxy preset", AutoSize = true };
+    private readonly Button import = new() { Name = "ImportProxyPreset", Text = "Import preset", AccessibleName = "Preview and import a proxy preset", AutoSize = true };
     private readonly Button close = new() { Text = "Close", AccessibleName = "Close proxy presets", AutoSize = true };
     private IReadOnlyList<ProxyPreset> all = [];
     private ProxyPreset? editing;
     private bool busy;
     public ProxyPreset? Chosen { get; private set; }
 
-    public ProxyPresetsForm(IProxyPresetRepository repository, bool choose, Func<string, bool>? confirm = null)
+    public ProxyPresetsForm(IProxyPresetRepository repository, bool choose, Func<string, bool>? confirm = null,
+        IProxyPresetTransfer? transfer = null, Func<string?>? chooseExportPath = null, Func<string?>? chooseImportPath = null)
     {
         this.repository = repository; this.choose = choose;
+        this.transfer = transfer;
+        this.chooseExportPath = chooseExportPath ?? ChooseExportPath;
+        this.chooseImportPath = chooseImportPath ?? ChooseImportPath;
         this.confirm = confirm ?? (message => MessageBox.Show(this, message, "Proxy presets", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes);
         Text = "Proxy presets — saved drafts"; AutoScaleMode = AutoScaleMode.Dpi; StartPosition = FormStartPosition.CenterParent;
         Width = 800; Height = 680; MinimumSize = new Size(600, 540);
@@ -56,11 +64,12 @@ internal sealed class ProxyPresetsForm : Form
         fields.Controls.Add(feedback, 0, 6); fields.SetColumnSpan(feedback, 2);
         main.Controls.Add(fields, 1, 0); outer.Controls.Add(main, 0, 2);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, WrapContents = true };
-        buttons.Controls.AddRange([close, use, delete, save, duplicate, edit, create, refresh]); outer.Controls.Add(buttons, 0, 3); Controls.Add(outer);
-        use.Visible = choose; search.TextChanged += (_, _) => Filter();
+        buttons.Controls.AddRange([close, use, import, export, delete, save, duplicate, edit, create, refresh]); outer.Controls.Add(buttons, 0, 3); Controls.Add(outer);
+        use.Visible = choose; import.Visible = export.Visible = transfer is not null; search.TextChanged += (_, _) => Filter();
         create.Click += (_, _) => ResetEditor(); edit.Click += (_, _) => EditSelected(); duplicate.Click += (_, _) => DuplicateSelected();
         refresh.Click += async (_, _) => await RefreshList();
         save.Click += async (_, _) => await Save(); delete.Click += async (_, _) => await DeleteSelected();
+        export.Click += async (_, _) => await ExportSelected(); import.Click += async (_, _) => await ImportPreset();
         use.Click += async (_, _) => await UseSelected(); close.Click += (_, _) => Close();
         FormClosing += (_, e) => { if (busy) e.Cancel = true; };
         Shown += async (_, _) => await LoadInitially();
@@ -190,9 +199,59 @@ internal sealed class ProxyPresetsForm : Form
         finally { busy = false; if (!IsDisposed) SetBusy(false); }
     }
 
+    private string? ChooseExportPath()
+    {
+        using var dialog = new SaveFileDialog { Title = "Export proxy preset to a new file", Filter = "Aegis proxy preset (*.json)|*.json",
+            FileName = "aegis-proxy-preset.json", OverwritePrompt = false };
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
+    }
+
+    private string? ChooseImportPath()
+    {
+        using var dialog = new OpenFileDialog { Title = "Preview proxy preset", Filter = "Aegis proxy preset (*.json)|*.json" };
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
+    }
+
+    private async Task ExportSelected()
+    {
+        if (busy || transfer is null || Selected is not { } selected) { if (!busy) feedback.Text = "Select a preset to export."; return; }
+        var path = chooseExportPath(); if (path is null) return;
+        try
+        {
+            busy = true; SetBusy(true); feedback.Text = "Exporting preset…";
+            await Task.Run(() => transfer.Export(path, selected));
+            if (!IsDisposed) feedback.Text = "Preset exported without credentials. Existing files were not replaced.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not export preset: " + ex.Message; }
+        finally { busy = false; if (!IsDisposed) SetBusy(false); }
+    }
+
+    private async Task ImportPreset()
+    {
+        if (busy || transfer is null) return;
+        var path = chooseImportPath(); if (path is null) return;
+        try
+        {
+            busy = true; SetBusy(true); feedback.Text = "Validating preset…";
+            var preview = await Task.Run(() => transfer.Preview(path));
+            if (IsDisposed) return;
+            var prompt = $"Import preset '{preview.Name}' ({preview.Protocol}, {preview.Host}:{preview.Port})? " +
+                "This creates a new inactive preset without credentials. The checksum does not prove who created the file.";
+            if (!confirm(prompt)) { feedback.Text = "Preset import canceled."; return; }
+            var created = await Task.Run(() => transfer.Import(preview));
+            if (IsDisposed) return;
+            await Reload(created.Id); feedback.Text = "Preset imported with a new ID. No profile was changed.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not import preset: " + ex.Message; }
+        finally { busy = false; if (!IsDisposed) SetBusy(false); }
+    }
+
     private void SetBusy(bool value)
     {
         search.Enabled = list.Enabled = name.Enabled = description.Enabled = protocol.Enabled = host.Enabled = port.Enabled = label.Enabled = !value;
         create.Enabled = edit.Enabled = duplicate.Enabled = refresh.Enabled = save.Enabled = delete.Enabled = use.Enabled = close.Enabled = !value;
+        import.Enabled = export.Enabled = !value && transfer is not null;
     }
 }
