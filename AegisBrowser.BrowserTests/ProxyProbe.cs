@@ -109,6 +109,7 @@ internal static partial class Program
                         Check(!origin.Saw("/offline"), "offline proxy did not fall back to the local HTTP origin in this fixture");
                     }
                     finally { browser.LoadError -= onError; }
+                    await ObserveHttpsThroughProxy(browser, context);
                     Console.WriteLine($"PASS: {checks} CEF proxy probe checks");
                 }
                 catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
