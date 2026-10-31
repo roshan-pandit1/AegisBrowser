@@ -34,6 +34,8 @@ The routing probe also attempts to gather a WebRTC ICE candidate using a short-l
 
 On 2026-10-30, [Windows CI run 41057825104](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41057825104), testing commit `b7e6cb403a267d5e8c1b39bd7f20a5fe25ec27ac`, observed a direct STUN UDP packet at that local listener while the controlled HTTP request used the proxy fixture. This shows the tested proxy preference alone did not contain all traffic in that environment; it does not characterize every WebRTC path or a public-network leak. The authentication fixture also received the synthetic `aegis-auth.invalid` target hostname as an HTTP proxy request. Neither observation monitors all DNS requests or establishes DNS isolation. Production proxy-required profiles remain blocked pending a design and independent tests for these paths.
 
+The test process additionally checks whether CEF allows the `webrtc.ip_handling_policy` preference to be set to `disable_non_proxied_udp`, and, if so, repeats the local STUN observation. This does not change production settings or prove that other paths are contained. [Chromium's policy description](https://chromium.googlesource.com/chromium/src/+/376fc41e87a058f7a7b300b0ec3a4982b4ec0960/components/policy/resources/templates/policy_definitions/Miscellaneous/WebRtcIPHandling.yaml) describes limits on non-proxied UDP while allowing TCP behavior; supported behavior must be verified on the pinned runtime.
+
 ## Manual Windows verification still required
 
 - On a test account, verify credential replacement and loss of access after moving protected data to a different Windows user.
