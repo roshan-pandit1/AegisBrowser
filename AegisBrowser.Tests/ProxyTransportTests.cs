@@ -100,6 +100,23 @@ internal static class ProxyTransportTests
             Check(result.Outcome == ProxyTransportOutcome.Connected && socks.Handshakes > 0 && origin.Requests == 0,
                 "SOCKS5 .NET preflight uses the controlled proxy");
         }
+        using (var tunnel = new HttpTunnelProxyFixture())
+        {
+            var draft = Draft(tunnel.Port) with { AuthenticationRequired = true, CredentialId = Guid.NewGuid() };
+            var result = await tester.TestAsync(draft, new ProxyCredentials("transport-fixture-user", "transport-fixture-password"),
+                "https://diagnostic.invalid/ip", CancellationToken.None);
+            Check(tunnel.ValidAuthentication > 0 && tunnel.TlsAttempts > 0 && result.Outcome == ProxyTransportOutcome.TlsFailed,
+                $"HTTPS target uses an authenticated proxy CONNECT and rejects its untrusted TLS endpoint (outcome: {result.Outcome})");
+        }
+        using (var tunnel = new HttpTunnelProxyFixture())
+        {
+            var draft = Draft(tunnel.Port) with { AuthenticationRequired = true, CredentialId = Guid.NewGuid() };
+            var result = await tester.TestAsync(draft, new ProxyCredentials("transport-fixture-user", "incorrect"),
+                "https://diagnostic.invalid/ip", CancellationToken.None);
+            Check(tunnel.InvalidAuthentication > 0 && tunnel.TlsAttempts == 0 &&
+                result.Outcome is ProxyTransportOutcome.AuthenticationFailed or ProxyTransportOutcome.EndpointOrProxyFailed,
+                $"rejected proxy CONNECT credentials do not start endpoint TLS (outcome: {result.Outcome})");
+        }
         var unsupported = await tester.TestAsync(Draft(1) with { Protocol = ProxyProtocol.Socks5, AuthenticationRequired = true, CredentialId = Guid.NewGuid() },
             null, endpoint, CancellationToken.None);
         Check(unsupported.Outcome == ProxyTransportOutcome.Unsupported, "SOCKS5 authentication is not advertised");
@@ -318,6 +335,51 @@ internal static class ProxyTransportTests
         {
             Interlocked.Increment(ref connections);
             using var tls = new SslStream(client.GetStream());
+            await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate }, token);
+        }
+        public override void Dispose() { base.Dispose(); certificate.Dispose(); }
+    }
+
+    private sealed class HttpTunnelProxyFixture : LoopbackFixture
+    {
+        private static readonly string Expected = "Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes("transport-fixture-user:transport-fixture-password"));
+        private readonly X509Certificate2 certificate;
+        private int validAuthentication, invalidAuthentication, tlsAttempts;
+        public int ValidAuthentication => Volatile.Read(ref validAuthentication);
+        public int InvalidAuthentication => Volatile.Read(ref invalidAuthentication);
+        public int TlsAttempts => Volatile.Read(ref tlsAttempts);
+        public HttpTunnelProxyFixture()
+        {
+            using var key = RSA.Create(2048);
+            var request = new CertificateRequest("CN=diagnostic.invalid", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(10));
+            certificate = new X509Certificate2(generated.Export(X509ContentType.Pfx), (string?)null, X509KeyStorageFlags.EphemeralKeySet);
+        }
+        protected override async Task Serve(TcpClient client, CancellationToken token)
+        {
+            using var stream = client.GetStream();
+            using var reader = new StreamReader(stream, Encoding.ASCII, false, 4096, leaveOpen: true);
+            var first = await reader.ReadLineAsync(token);
+            if (first != "CONNECT diagnostic.invalid:443 HTTP/1.1") return;
+            string? proxyAuthorization = null;
+            for (var i = 0; i < 100; i++)
+            {
+                var line = await reader.ReadLineAsync(token); if (string.IsNullOrEmpty(line)) break;
+                if (line.Length > 8192) throw new IOException("Fixture request headers are too large.");
+                var colon = line.IndexOf(':');
+                if (colon > 0 && line[..colon].Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase))
+                    proxyAuthorization = line[(colon + 1)..].Trim();
+            }
+            if (proxyAuthorization != Expected)
+            {
+                if (proxyAuthorization is not null) Interlocked.Increment(ref invalidAuthentication);
+                await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"AegisTunnelFixture\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), token);
+                return;
+            }
+            Interlocked.Increment(ref validAuthentication);
+            await stream.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), token);
+            Interlocked.Increment(ref tlsAttempts);
+            using var tls = new SslStream(stream);
             await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate }, token);
         }
         public override void Dispose() { base.Dispose(); certificate.Dispose(); }
