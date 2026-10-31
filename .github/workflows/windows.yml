@@ -71,6 +71,9 @@ jobs:
       - name: Concurrent independent CEF proxy probes
         timeout-minutes: 5
         run: ./tests/acceptance/concurrent-proxy-probes.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Observe synthetic CEF process identities
+        timeout-minutes: 5
+        run: ./tests/acceptance/observe-cef-process-identity.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Build Chromium filtering tests
         if: ${{ !cancelled() }}
         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true

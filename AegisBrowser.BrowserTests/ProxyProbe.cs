@@ -58,6 +58,7 @@ internal static partial class Program
                     browser.RequestHandler = new SafeRequests(Console.WriteLine);
                     Observe(browser); host.Controls.Add(browser); await Ready(browser);
                     await AwaitConcurrentProxyProbe(root);
+                    await AwaitProcessObservation();
                     var baseUrl = "http://127.0.0.1:" + origin.Port;
                     await LoadReady(browser, baseUrl + "/default-bypass");
                     await Wait(() => origin.Saw("/default-bypass"), "direct loopback observation");
