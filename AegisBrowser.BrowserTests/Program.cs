@@ -259,6 +259,7 @@ internal static partial class Program
             Check(choices.Items[0]!.ToString()!.Contains("Settings template"), "native template application shows settings-capable templates");
             applyForm.Close();
         }
+        await ProxySettingsUi(profilesRoot, repository, manager);
         manager.Close();
     }
 

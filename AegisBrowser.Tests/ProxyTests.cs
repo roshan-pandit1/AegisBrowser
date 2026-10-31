@@ -78,6 +78,18 @@ internal static class ProxyTests
             Check(wins == 1 && conflicts == 1, "concurrent updates enforce revision");
 
             var current = repo.Get(first, firstLease)!;
+            var editorProfile = profiles.Create("editor-test");
+            var editorPath = BrowserPolicy.ProfilePath(root, editorProfile.Slug);
+            var editor = new ProxyConfigurationEditor(root, repo, new ProxyCredentialVault(root));
+            Check(editor.Load(editorProfile) is null, "editor loads an unconfigured profile");
+            var editorSaved = editor.Save(editorProfile, direct, 0, null);
+            Check(editor.Load(editorProfile)?.Revision == editorSaved.Configuration.Revision, "editor persists a revision-checked setting");
+            Reject(() => editor.Save(editorProfile, direct, 0, null), "editor rejects a stale proxy revision");
+            using (var held = new ProfileLease(editorPath))
+                Reject(() => editor.Load(editorProfile), "editor rejects a profile held by another browser");
+            var editorChanged = profiles.Update(editorProfile with { DisplayName = "Changed elsewhere" }, editorProfile.Revision);
+            Reject(() => editor.Save(editorProfile, direct, editorSaved.Configuration.Revision, null), "editor rejects stale profile metadata");
+            Check(editor.Load(editorChanged)?.Revision == editorSaved.Configuration.Revision, "stale editor leaves settings unchanged");
             if (OperatingSystem.IsWindows())
             {
                 var vault = new ProxyCredentialVault(root);
@@ -103,6 +115,9 @@ internal static class ProxyTests
                 Reject(() => service.Save(second, secondLease, auth with { CredentialId = firstId }, 0), "cross-profile credential assignment rejected");
                 Reject(() => service.Save(first, firstLease, auth, current.Revision, credentials), "stale credential replacement rejected");
                 Check(vault.Read(first.Id, firstId).Password == credentials.Password, "stale replacement preserves old credential");
+                Reject(() => service.Save(first, firstLease, auth with { Host = "different.example", CredentialId = firstId }, firstResult.Configuration.Revision),
+                    "changing proxy endpoint requires fresh credential entry");
+                Check(repo.Get(first, firstLease) == firstResult.Configuration, "rejected endpoint change preserves proxy configuration");
                 var replacement = new ProxyCredentials("fixture-user-2", "fixture-password-2");
                 var replaced = service.Save(first, firstLease, auth, firstResult.Configuration.Revision, replacement);
                 var secondId = replaced.Configuration.Settings.CredentialId!.Value;

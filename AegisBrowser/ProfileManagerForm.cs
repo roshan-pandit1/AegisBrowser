@@ -16,6 +16,7 @@ public sealed class ProfileManagerForm : Form
     private readonly ProfileBackupService backups;
     private readonly ProfileSettingsTransactions settingsTransactions;
     private readonly ProfileRepository repository;
+    private readonly IProxyConfigurationEditor proxyEditor;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
     private readonly TextBox search = new() { Name = "ProfileSearch", AccessibleName = "Search profiles, tags and folders", Width = 220, PlaceholderText = "Search profiles, tags, folders" };
     private readonly ComboBox statusFilter = new() { Name = "StatusFilter", AccessibleName = "Filter by status", DropDownStyle = ComboBoxStyle.DropDownList, Width = 125 };
@@ -33,6 +34,7 @@ public sealed class ProfileManagerForm : Form
     private readonly TextBox details = new() { Name = "ProfileDetails", AccessibleName = "Selected profile details", Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.FixedSingle };
     private readonly Button openDetails = new() { Text = "Launch", AccessibleName = "Launch selected profile", AutoSize = true };
     private readonly Button editDetails = new() { Text = "Edit metadata", AccessibleName = "Edit selected profile", AutoSize = true };
+    private readonly Button proxyDetails = new() { Name = "EditProxyDraft", Text = "Proxy draft", AccessibleName = "Edit saved proxy draft", AutoSize = true };
     private readonly ContextMenuStrip actions = new();
     private IReadOnlyList<DashboardProfile> allProfiles = [];
     private readonly HashSet<Guid> selectedIds = [];
@@ -46,6 +48,7 @@ public sealed class ProfileManagerForm : Form
         processes = new ProfileProcessSupervisor(new ProfileLeaseProbe(root),
             new ProfileChildStarter(executable, typeof(ProfileManagerForm).Assembly.Location, AppContext.BaseDirectory));
         repository = new ProfileRepository(root);
+        proxyEditor = new ProxyConfigurationEditor(root, new ProxyRepository(root), new ProxyCredentialVault(root));
         dashboard = new ProfileDashboard(root, repository, processes);
         duplication = new ProfileDuplicationService(root, repository);
         bulk = new ProfileBulkOperations(root, repository, duplication);
@@ -132,11 +135,12 @@ public sealed class ProfileManagerForm : Form
         detailPanel.Controls.Add(new Label { Text = "Profile details", Font = new Font(Font, FontStyle.Bold), AutoSize = true }, 0, 0);
         detailPanel.Controls.Add(details, 0, 1);
         var detailButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
-        detailButtons.Controls.AddRange([openDetails, editDetails]); detailPanel.Controls.Add(detailButtons, 0, 2);
+        detailButtons.Controls.AddRange([openDetails, editDetails, proxyDetails]); detailPanel.Controls.Add(detailButtons, 0, 2);
         main.Controls.Add(detailPanel, 1, 0); content.Controls.Add(main, 0, 3); content.Controls.Add(feedback, 0, 4);
         shell.Controls.Add(sidebar, 0, 0); shell.Controls.Add(content, 1, 0); Controls.Add(shell);
         actions.Items.Add("Launch", null, async (_, _) => await LaunchSelected());
         actions.Items.Add("Edit metadata", null, async (_, _) => await EditSelected());
+        actions.Items.Add("Proxy draft", null, async (_, _) => await EditProxyDraft());
         actions.Items.Add("Duplicate clean profile", null, async (_, _) => await DuplicateSelected());
         actions.Items.Add("Save as template", null, async (_, _) => await SaveTemplate());
         actions.Items.Add("Recover interrupted settings", null, async (_, _) => await RecoverSettings());
@@ -181,6 +185,7 @@ public sealed class ProfileManagerForm : Form
         grid.CellMouseDown += (_, e) => { if (e.Button == MouseButtons.Right && e.RowIndex >= 0) { grid.ClearSelection(); grid.Rows[e.RowIndex].Selected = true; actions.Show(Cursor.Position); } };
         openDetails.Click += async (_, _) => await LaunchSelected();
         editDetails.Click += async (_, _) => await EditSelected();
+        proxyDetails.Click += async (_, _) => await EditProxyDraft();
         refreshTimer.Tick += async (_, _) => await RefreshProfiles();
         KeyDown += async (_, e) =>
         {
@@ -356,6 +361,25 @@ public sealed class ProfileManagerForm : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         { if (!IsDisposed) feedback.Text = "Could not edit profile: " + ex.Message; }
+    }
+
+    private async Task EditProxyDraft()
+    {
+        var selected = Selected; if (selected is null) return;
+        try
+        {
+            var definition = await Task.Run(() => dashboard.PrepareEdit(selected.Slug));
+            var saved = await Task.Run(() => proxyEditor.Load(definition));
+            if (IsDisposed) return;
+            using var dialog = new ProxySettingsForm(proxyEditor, definition, saved);
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                await RefreshProfiles(definition.Slug, true);
+                if (!IsDisposed) feedback.Text = dialog.SavedMessage ?? "Proxy settings saved.";
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        { if (!IsDisposed) feedback.Text = "Could not edit proxy settings: " + ex.Message; }
     }
 
     private async Task LaunchSelected()

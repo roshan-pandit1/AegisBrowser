@@ -276,5 +276,5 @@ manual pass from the automated suites.
 
 # Proxy configuration
 
-The initial proxy configuration and user-protected credential foundation is described in [proxy-configuration.md](proxy-configuration.md). Proxy routing and proxy controls are not enabled in this slice; configured required proxies block profile startup until supported networking is available.
+The [proxy configuration guide](proxy-configuration.md) describes the dashboard's saved-draft editor and user-protected credentials. Proxy routing and connection tests are not available yet; the editor warns that saving a required proxy blocks profile startup until supported networking is available or the draft is removed.
 
