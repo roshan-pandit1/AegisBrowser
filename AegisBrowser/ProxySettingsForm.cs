@@ -9,6 +9,7 @@ internal sealed class ProxySettingsForm : Form
     private readonly ProfileDefinition profile;
     private readonly ProxyConfiguration? original;
     private readonly Func<string, bool> confirm;
+    private readonly IProxySavedDiagnostics? diagnostics;
     private readonly ComboBox protocol = new() { Name = "ProxyProtocol", AccessibleName = "Saved proxy mode", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
     private readonly TextBox host = new() { Name = "ProxyHost", AccessibleName = "Proxy hostname or IP address", Dock = DockStyle.Fill };
     private readonly NumericUpDown port = new() { Name = "ProxyPort", AccessibleName = "Proxy port", Minimum = 1, Maximum = 65535, Value = 8080, Dock = DockStyle.Fill };
@@ -21,24 +22,30 @@ internal sealed class ProxySettingsForm : Form
     private readonly Button save = new() { Name = "SaveProxyDraft", Text = "Save", AccessibleName = "Save proxy draft", AutoSize = true };
     private readonly Button cancel = new() { Name = "CancelProxyDraft", Text = "Cancel", AccessibleName = "Cancel proxy editing", AutoSize = true, DialogResult = DialogResult.Cancel };
     private readonly Button clearCredentials = new() { Name = "ClearProxyCredentials", Text = "Clear credentials on save", AccessibleName = "Clear proxy credentials on save", AutoSize = true };
-    private bool saving;
+    private readonly TextBox diagnosticEndpoint = new() { Name = "ProxyDiagnosticEndpoint", AccessibleName = "Trusted diagnostic endpoint URL", Dock = DockStyle.Fill, MaxLength = 2048, PlaceholderText = "https://your-trusted-endpoint/ip" };
+    private readonly Button test = new() { Name = "TestSavedProxy", Text = "Test saved draft", AccessibleName = "Test saved proxy draft using .NET transport", AutoSize = true };
+    private readonly Button cancelTest = new() { Name = "CancelProxyTest", Text = "Cancel test", AccessibleName = "Cancel proxy transport test", AutoSize = true, Enabled = false };
+    private readonly Label testResult = new() { Name = "ProxyTestResult", AccessibleName = "Proxy transport test result", AutoSize = true, Dock = DockStyle.Fill };
+    private CancellationTokenSource? testCancellation;
+    private bool saving, testing;
     public string? SavedMessage { get; private set; }
 
     public ProxySettingsForm(IProxyConfigurationEditor editor, ProfileDefinition profile, ProxyConfiguration? original,
-        Func<string, bool>? confirm = null)
+        Func<string, bool>? confirm = null, IProxySavedDiagnostics? diagnostics = null)
     {
         this.editor = editor; this.profile = profile; this.original = original;
+        this.diagnostics = diagnostics;
         this.confirm = confirm ?? (message => MessageBox.Show(this, message, "Proxy settings", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes);
         Text = "Proxy settings — saved draft"; AutoScaleMode = AutoScaleMode.Dpi; StartPosition = FormStartPosition.CenterParent;
-        Width = 720; Height = 690; MinimumSize = new Size(550, 570);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 12, Padding = new Padding(16), AutoScroll = true };
+        Width = 760; Height = 850; MinimumSize = new Size(550, 570);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 16, Padding = new Padding(16), AutoScroll = true };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (var i = 0; i < 12; i++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (var i = 0; i < 16; i++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var warning = new Label
         {
             Name = "ProxyAvailability", AccessibleName = "Proxy networking availability", Dock = DockStyle.Fill, AutoSize = true,
             Text = "Proxy networking is not available in this build. A saved proxy draft blocks this profile from starting. " +
-                   "No connection test or active proxy is available yet."
+                   "The optional transport test below does not activate a browser proxy."
         };
         layout.Controls.Add(warning, 0, 0); layout.SetColumnSpan(warning, 2);
         void Field(string text, Control control, int row)
@@ -52,9 +59,21 @@ internal sealed class ProxySettingsForm : Form
         layout.Controls.Add(credentialHint, 1, 8);
         clearCredentials.Click += (_, _) => { authentication.Checked = false; username.Clear(); password.Clear(); };
         layout.Controls.Add(clearCredentials, 1, 9);
-        layout.Controls.Add(feedback, 0, 10); layout.SetColumnSpan(feedback, 2);
+        var diagnosticWarning = new Label
+        {
+            Name = "ProxyTestWarning", AccessibleName = "Proxy test limitations", Dock = DockStyle.Fill, AutoSize = true,
+            Text = "Test the saved revision with .NET transport only; unsaved edits are ignored. This does not test Chromium, DNS or WebRTC or prove isolation. " +
+                   "Your chosen endpoint receives a request. HTTP proxy Basic credentials are exposed on the proxy network hop. " +
+                   "Close the profile first; it cannot start while the test runs."
+        };
+        layout.Controls.Add(diagnosticWarning, 0, 10); layout.SetColumnSpan(diagnosticWarning, 2);
+        Field("Diagnostic URL", diagnosticEndpoint, 11);
+        var testButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
+        testButtons.Controls.AddRange([test, cancelTest]); layout.Controls.Add(testButtons, 1, 12);
+        layout.Controls.Add(testResult, 0, 13); layout.SetColumnSpan(testResult, 2);
+        layout.Controls.Add(feedback, 0, 14); layout.SetColumnSpan(feedback, 2);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
-        buttons.Controls.AddRange([cancel, save]); layout.Controls.Add(buttons, 0, 11); layout.SetColumnSpan(buttons, 2);
+        buttons.Controls.AddRange([cancel, save]); layout.Controls.Add(buttons, 0, 15); layout.SetColumnSpan(buttons, 2);
         Controls.Add(layout);
         var settings = original?.Settings;
         protocol.SelectedIndex = settings is null ? 0 : (int)settings.Protocol;
@@ -69,7 +88,9 @@ internal sealed class ProxySettingsForm : Form
         protocol.SelectedIndexChanged += (_, _) => UpdateControls(); authentication.CheckedChanged += (_, _) => UpdateControls();
         UpdateControls(); AcceptButton = save; CancelButton = cancel;
         save.Click += async (_, _) => await SaveDraft();
-        FormClosing += (_, e) => { if (saving) e.Cancel = true; };
+        test.Click += async (_, _) => await TestSavedDraft();
+        cancelTest.Click += (_, _) => testCancellation?.Cancel();
+        FormClosing += (_, e) => { if (saving || testing) { e.Cancel = true; testCancellation?.Cancel(); } };
     }
 
     private void UpdateControls()
@@ -77,6 +98,7 @@ internal sealed class ProxySettingsForm : Form
         var proxied = protocol.SelectedIndex > 0;
         host.Enabled = port.Enabled = label.Enabled = authentication.Enabled = proxied;
         username.Enabled = password.Enabled = proxied && authentication.Checked;
+        test.Enabled = diagnostics is not null && original is not null && original.Settings.Protocol != ProxyProtocol.Direct && !saving && !testing;
     }
 
     private async Task SaveDraft()
@@ -122,9 +144,39 @@ internal sealed class ProxySettingsForm : Form
         finally { saving = false; if (!IsDisposed) SetBusy(false); }
     }
 
+    private async Task TestSavedDraft()
+    {
+        if (testing || saving || original is null || diagnostics is null) return;
+        try
+        {
+            var endpoint = diagnosticEndpoint.Text;
+            _ = ProxyTransportTester.ValidateEndpoint(endpoint);
+            using var cancellation = new CancellationTokenSource();
+            testCancellation = cancellation; testing = true; SetBusy(true);
+            testResult.Text = "Testing the saved draft using .NET transport…";
+            var result = await Task.Run(() => diagnostics.TestAsync(profile, original, endpoint, cancellation.Token));
+            if (IsDisposed) return;
+            var ip = result.ReportedIp is null ? "" : " Endpoint-reported IP: " + result.ReportedIp + ".";
+            testResult.Text = $"{result.Outcome} ({result.Protocol}, {result.Elapsed.TotalMilliseconds:0} ms). {result.Detail}{ip}";
+        }
+        catch (OperationCanceledException) { if (!IsDisposed) testResult.Text = "The transport test was canceled."; }
+        catch (ArgumentException ex) { if (!IsDisposed) testResult.Text = ex.Message; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            if (!IsDisposed) testResult.Text = "Could not test the saved draft. Close the profile, reopen proxy settings, and check its saved configuration.";
+        }
+        finally
+        {
+            testing = false; testCancellation = null;
+            if (!IsDisposed) SetBusy(false);
+        }
+    }
+
     private void SetBusy(bool busy)
     {
         protocol.Enabled = !busy; clearCredentials.Enabled = !busy; save.Enabled = cancel.Enabled = !busy;
+        diagnosticEndpoint.Enabled = !busy; cancelTest.Enabled = testing;
+        if (busy) test.Enabled = false;
         if (busy) host.Enabled = port.Enabled = label.Enabled = authentication.Enabled = username.Enabled = password.Enabled = false;
         else UpdateControls();
     }

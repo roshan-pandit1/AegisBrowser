@@ -17,6 +17,7 @@ public sealed class ProfileManagerForm : Form
     private readonly ProfileSettingsTransactions settingsTransactions;
     private readonly ProfileRepository repository;
     private readonly IProxyConfigurationEditor proxyEditor;
+    private readonly IProxySavedDiagnostics proxyDiagnostics;
     private readonly ProxyBulkDrafts proxyBulk;
     private readonly IProxyPresetRepository proxyPresets;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 3000 };
@@ -51,7 +52,9 @@ public sealed class ProfileManagerForm : Form
             new ProfileChildStarter(executable, typeof(ProfileManagerForm).Assembly.Location, AppContext.BaseDirectory));
         repository = new ProfileRepository(root);
         var proxyRepository = new ProxyRepository(root);
-        proxyEditor = new ProxyConfigurationEditor(root, proxyRepository, new ProxyCredentialVault(root));
+        var proxyVault = new ProxyCredentialVault(root);
+        proxyEditor = new ProxyConfigurationEditor(root, proxyRepository, proxyVault);
+        proxyDiagnostics = new ProxySavedDiagnostics(root, proxyRepository, proxyVault, new ProxyTransportTester());
         proxyBulk = new ProxyBulkDrafts(proxyEditor);
         proxyPresets = new ProxyPresetRepository(root);
         dashboard = new ProfileDashboard(root, repository, processes, proxyRepository);
@@ -404,7 +407,7 @@ public sealed class ProfileManagerForm : Form
             var definition = await Task.Run(() => dashboard.PrepareEdit(selected.Slug));
             var saved = await Task.Run(() => proxyEditor.Load(definition));
             if (IsDisposed) return;
-            using var dialog = new ProxySettingsForm(proxyEditor, definition, saved);
+            using var dialog = new ProxySettingsForm(proxyEditor, definition, saved, diagnostics: proxyDiagnostics);
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 await RefreshProfiles(definition.Slug, true);
