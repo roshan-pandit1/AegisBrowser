@@ -58,6 +58,7 @@ internal static class ProxyPresetTransferTests
             Check(successes == 1 && conflicts == 1 && raceRepo.List().Count == 1, "concurrent imports cannot both claim the same preset name");
             Reject(() => transfer.Export(output, original), "existing export is not overwritten");
             Check(File.ReadAllText(output) == exported, "existing export remains unchanged");
+            Check(!Directory.EnumerateFiles(workspace, ".aegis-proxy-preset-*.tmp").Any(), "failed export removes only its owned temporary file");
             Reject(() => transfer.Export(Path.Combine(root, "inside.json"), original), "export inside profile root rejected");
             var blockedParent = Path.Combine(workspace, "not-a-directory"); File.WriteAllText(blockedParent, "retain");
             Reject(() => transfer.Export(Path.Combine(blockedParent, "out.json"), original), "filesystem failure is reported");

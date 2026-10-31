@@ -18,6 +18,7 @@ public sealed class ProfileManagerForm : Form
     private readonly ProfileRepository repository;
     private readonly IProxyConfigurationEditor proxyEditor;
     private readonly IProxySavedDiagnostics proxyDiagnostics;
+    private readonly IProxyConfigurationTransfer proxyConfigurationTransfer;
     private readonly ProxyBulkDrafts proxyBulk;
     private readonly IProxyPresetRepository proxyPresets;
     private readonly IProxyPresetTransfer proxyPresetTransfer;
@@ -56,6 +57,7 @@ public sealed class ProfileManagerForm : Form
         var proxyVault = new ProxyCredentialVault(root);
         proxyEditor = new ProxyConfigurationEditor(root, proxyRepository, proxyVault);
         proxyDiagnostics = new ProxySavedDiagnostics(root, proxyRepository, proxyVault, new ProxyTransportTester());
+        proxyConfigurationTransfer = new ProxyConfigurationTransfer(root, proxyRepository);
         proxyBulk = new ProxyBulkDrafts(proxyEditor);
         proxyPresets = new ProxyPresetRepository(root);
         proxyPresetTransfer = new ProxyPresetTransfer(root, proxyPresets);
@@ -409,7 +411,7 @@ public sealed class ProfileManagerForm : Form
             var definition = await Task.Run(() => dashboard.PrepareEdit(selected.Slug));
             var saved = await Task.Run(() => proxyEditor.Load(definition));
             if (IsDisposed) return;
-            using var dialog = new ProxySettingsForm(proxyEditor, definition, saved, diagnostics: proxyDiagnostics);
+            using var dialog = new ProxySettingsForm(proxyEditor, definition, saved, diagnostics: proxyDiagnostics, transfer: proxyConfigurationTransfer);
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 await RefreshProfiles(definition.Slug, true);
