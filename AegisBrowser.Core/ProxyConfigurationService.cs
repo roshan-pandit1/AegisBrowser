@@ -21,6 +21,10 @@ public sealed class ProxyConfigurationService(IProxyRepository repository, IProx
         }
         else if (draft.AuthenticationRequired)
         {
+            if (current is null || current.Settings.CredentialId != draft.CredentialId ||
+                current.Settings.Protocol != draft.Protocol || current.Settings.Port != draft.Port ||
+                !string.Equals(current.Settings.Host, draft.Host, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Enter credentials again when changing the proxy endpoint or credential reference.");
             // A reference from another profile, or a missing/corrupt secret, cannot be applied.
             _ = vault.Read(profile.Id, draft.CredentialId!.Value);
         }

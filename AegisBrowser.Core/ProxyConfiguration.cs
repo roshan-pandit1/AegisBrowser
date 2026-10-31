@@ -18,6 +18,13 @@ public interface IProxyRepository
     ProxyConfiguration Save(ProfileDefinition profile, ProfileLease lease, ProxyDraft draft, long expectedRevision);
 }
 
+public enum SavedProxyState { NotInspected, BrowserDefaults, RequiredDraft, NeedsRepair }
+
+public interface IProxyStatusProvider
+{
+    IReadOnlyDictionary<Guid, SavedProxyState> Inspect(IReadOnlyList<ProfileDefinition> profiles);
+}
+
 public static class ProxyValidation
 {
     public static void Validate(ProxyDraft draft)

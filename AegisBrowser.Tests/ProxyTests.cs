@@ -38,12 +38,18 @@ internal static class ProxyTests
             using var firstLease = new ProfileLease(firstPath);
             using var secondLease = new ProfileLease(BrowserPolicy.ProfilePath(root, second.Slug));
             Check(repo.Get(first, firstLease) is null && !File.Exists(dbPath), "legacy profile starts without creating proxy database");
+            var initialStates = repo.Inspect([first, second]);
+            Check(initialStates[first.Id] == SavedProxyState.BrowserDefaults && initialStates[second.Id] == SavedProxyState.BrowserDefaults,
+                "dashboard sees saved browser defaults without claiming an active route");
             repo.EnsureRuntimeReady(first, firstLease); count++;
             Reject(() => repo.Get(first, secondLease), "wrong profile lease rejected");
             var saved = repo.Save(first, firstLease, http, 0);
             Check(saved.ProfileId == first.Id && saved.Id != Guid.Empty && saved.Revision == 1 &&
                 new ProxyRepository(root).Get(first, firstLease) == saved, "configuration and GUID persist");
             Check(repo.Get(second, secondLease) is null, "configuration isolated by profile GUID");
+            var configuredStates = repo.Inspect([first, second]);
+            Check(configuredStates[first.Id] == SavedProxyState.RequiredDraft && configuredStates[second.Id] == SavedProxyState.BrowserDefaults,
+                "dashboard observes per-profile blocked drafts while leases are held");
             repo.EnsureRuntimeReady(second, secondLease); count++;
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "configured proxy blocks unsupported runtime");
             Reject(() => repo.Save(first, firstLease, http, 0), "stale proxy revision rejected");
@@ -51,16 +57,19 @@ internal static class ProxyTests
             var movedDb = Path.Combine(testRoot, "held.sqlite3"); File.Move(dbPath, movedDb);
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "guard blocks launch when configuration database is missing");
             Reject(() => repo.Save(first, firstLease, direct, 0), "missing guarded database cannot be replaced as a new configuration");
+            Check(repo.Inspect([first, second])[first.Id] == SavedProxyState.NeedsRepair, "missing guarded database is shown as needing repair");
             File.Move(movedDb, dbPath);
             var explicitDirect = repo.Save(first, firstLease, direct, saved.Revision);
             Check(explicitDirect.Id == saved.Id && explicitDirect.Revision == 2 && !File.Exists(Path.Combine(firstPath, ProxyRepository.RequiredMarkerName)),
                 "explicit direct update removes marker after commit");
+            Check(repo.Inspect([first])[first.Id] == SavedProxyState.BrowserDefaults, "dashboard refreshes after explicitly removing the draft");
             repo.EnsureRuntimeReady(first, firstLease); count++;
             Check(File.ReadAllText(sentinel) == "browser-data-unchanged", "proxy changes preserve browser data");
 
             // A marker left by interruption cannot be interpreted as direct.
             File.WriteAllText(Path.Combine(firstPath, ProxyRepository.RequiredMarkerName), "interrupted");
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "interrupted direct transition blocks startup");
+            Check(repo.Inspect([first])[first.Id] == SavedProxyState.NeedsRepair, "interrupted proxy transition is shown as needing repair");
             explicitDirect = repo.Save(first, firstLease, direct, explicitDirect.Revision);
             repo.EnsureRuntimeReady(first, firstLease); count++;
             var revisedProfile = profiles.Update(first with { Notes = "changed" }, first.Revision);
@@ -78,6 +87,18 @@ internal static class ProxyTests
             Check(wins == 1 && conflicts == 1, "concurrent updates enforce revision");
 
             var current = repo.Get(first, firstLease)!;
+            var editorProfile = profiles.Create("editor-test");
+            var editorPath = BrowserPolicy.ProfilePath(root, editorProfile.Slug);
+            var editor = new ProxyConfigurationEditor(root, repo, new ProxyCredentialVault(root));
+            Check(editor.Load(editorProfile) is null, "editor loads an unconfigured profile");
+            var editorSaved = editor.Save(editorProfile, direct, 0, null);
+            Check(editor.Load(editorProfile)?.Revision == editorSaved.Configuration.Revision, "editor persists a revision-checked setting");
+            Reject(() => editor.Save(editorProfile, direct, 0, null), "editor rejects a stale proxy revision");
+            using (var held = new ProfileLease(editorPath))
+                Reject(() => editor.Load(editorProfile), "editor rejects a profile held by another browser");
+            var editorChanged = profiles.Update(editorProfile with { DisplayName = "Changed elsewhere" }, editorProfile.Revision);
+            Reject(() => editor.Save(editorProfile, direct, editorSaved.Configuration.Revision, null), "editor rejects stale profile metadata");
+            Check(editor.Load(editorChanged)?.Revision == editorSaved.Configuration.Revision, "stale editor leaves settings unchanged");
             if (OperatingSystem.IsWindows())
             {
                 var vault = new ProxyCredentialVault(root);
@@ -103,6 +124,9 @@ internal static class ProxyTests
                 Reject(() => service.Save(second, secondLease, auth with { CredentialId = firstId }, 0), "cross-profile credential assignment rejected");
                 Reject(() => service.Save(first, firstLease, auth, current.Revision, credentials), "stale credential replacement rejected");
                 Check(vault.Read(first.Id, firstId).Password == credentials.Password, "stale replacement preserves old credential");
+                Reject(() => service.Save(first, firstLease, auth with { Host = "different.example", CredentialId = firstId }, firstResult.Configuration.Revision),
+                    "changing proxy endpoint requires fresh credential entry");
+                Check(repo.Get(first, firstLease) == firstResult.Configuration, "rejected endpoint change preserves proxy configuration");
                 var replacement = new ProxyCredentials("fixture-user-2", "fixture-password-2");
                 var replaced = service.Save(first, firstLease, auth, firstResult.Configuration.Revision, replacement);
                 var secondId = replaced.Configuration.Settings.CredentialId!.Value;
@@ -151,6 +175,7 @@ internal static class ProxyTests
                 command.CommandText = "PRAGMA user_version=99"; command.ExecuteNonQuery();
             }
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "future database version blocks startup");
+            Check(repo.Inspect([first, second]).Values.All(state => state == SavedProxyState.NeedsRepair), "unsupported database fails closed in dashboard status");
             Check(File.Exists(dbPath), "unsupported database preserved");
         }
         finally { if (Directory.Exists(testRoot)) Directory.Delete(testRoot, true); }
