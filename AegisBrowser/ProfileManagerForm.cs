@@ -48,8 +48,9 @@ public sealed class ProfileManagerForm : Form
         processes = new ProfileProcessSupervisor(new ProfileLeaseProbe(root),
             new ProfileChildStarter(executable, typeof(ProfileManagerForm).Assembly.Location, AppContext.BaseDirectory));
         repository = new ProfileRepository(root);
-        proxyEditor = new ProxyConfigurationEditor(root, new ProxyRepository(root), new ProxyCredentialVault(root));
-        dashboard = new ProfileDashboard(root, repository, processes);
+        var proxyRepository = new ProxyRepository(root);
+        proxyEditor = new ProxyConfigurationEditor(root, proxyRepository, new ProxyCredentialVault(root));
+        dashboard = new ProfileDashboard(root, repository, processes, proxyRepository);
         duplication = new ProfileDuplicationService(root, repository);
         bulk = new ProfileBulkOperations(root, repository, duplication);
         templateRepository = new ProfileTemplateRepository(root);
@@ -125,6 +126,7 @@ public sealed class ProfileManagerForm : Form
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Folders", HeaderText = "Folders", Width = 140 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Updated", HeaderText = "Updated", Width = 150 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 110 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "SavedProxy", HeaderText = "Saved proxy", Width = 165 });
         grid.Columns.Add(new DataGridViewButtonColumn { Name = "Launch", HeaderText = "", Text = "Launch", UseColumnTextForButtonValue = true, Width = 75 });
         grid.Columns.Add(new DataGridViewButtonColumn { Name = "Edit", HeaderText = "", Text = "Edit", UseColumnTextForButtonValue = true, Width = 60 });
         grid.Columns.Add(new DataGridViewButtonColumn { Name = "Actions", HeaderText = "", Text = "Actions", UseColumnTextForButtonValue = true, Width = 75 });
@@ -267,7 +269,7 @@ public sealed class ProfileManagerForm : Form
         {
             var old = grid.Rows[index].Tag as DashboardProfile;
             return old is not null && old.Slug == profile.Slug && old.Metadata?.Revision == profile.Metadata?.Revision &&
-                old.Metadata?.Id == profile.Metadata?.Id && old.Status == profile.Status;
+                old.Metadata?.Id == profile.Metadata?.Id && old.Status == profile.Status && old.ProxyState == profile.ProxyState;
         }).All(equal => equal);
         if (unchanged && (select is null || Selected?.Slug == select))
         {
@@ -288,7 +290,7 @@ public sealed class ProfileManagerForm : Form
                 var metadata = profile.Metadata;
                 var index = grid.Rows.Add(metadata is not null && selectedIds.Contains(metadata.Id), profile.DisplayName, metadata?.Id.ToString("D") ?? "Not registered", profile.Slug,
                     metadata is null ? "" : string.Join(", ", metadata.Tags), metadata is null ? "" : string.Join(", ", metadata.Folders),
-                    metadata?.UpdatedUtc.ToLocalTime().ToString("g") ?? "—", StatusText(profile.Status.Activity));
+                    metadata?.UpdatedUtc.ToLocalTime().ToString("g") ?? "—", StatusText(profile.Status.Activity), ProxyStateText(profile.ProxyState));
                 grid.Rows[index].Tag = profile;
                 grid.Rows[index].Cells["SelectProfile"].ReadOnly = metadata is null;
             }
@@ -328,13 +330,21 @@ public sealed class ProfileManagerForm : Form
         _ => state.ToString()
     };
 
+    private static string ProxyStateText(SavedProxyState state) => state switch
+    {
+        SavedProxyState.BrowserDefaults => "Browser defaults",
+        SavedProxyState.RequiredDraft => "Draft · launch blocked",
+        SavedProxyState.NeedsRepair => "Needs repair · blocked",
+        _ => "Not inspected"
+    };
+
     private void ShowDetails()
     {
         var p = Selected;
-        openDetails.Enabled = p?.CanLaunch == true; editDetails.Enabled = p is not null;
+        openDetails.Enabled = p?.CanLaunch == true; editDetails.Enabled = proxyDetails.Enabled = p is not null;
         if (p is null) { details.Text = "Select a profile to view its details."; return; }
         var m = p.Metadata;
-        details.Text = $"{p.DisplayName}\r\n\r\nStatus: {StatusText(p.Status.Activity)}\r\n{p.Status.Detail}\r\n\r\n" +
+        details.Text = $"{p.DisplayName}\r\n\r\nStatus: {StatusText(p.Status.Activity)}\r\n{p.Status.Detail}\r\nSaved proxy: {ProxyStateText(p.ProxyState)}\r\n\r\n" +
             $"Profile ID: {m?.Id.ToString("D") ?? "Not registered"}\r\nStorage slug: {p.Slug}\r\n" +
             $"Metadata version: {m?.MetadataVersion.ToString() ?? "—"}\r\nRevision: {m?.Revision.ToString() ?? "—"}\r\n" +
             $"Created: {m?.MetadataCreatedUtc.ToLocalTime().ToString("g") ?? "—"}\r\nUpdated: {m?.UpdatedUtc.ToLocalTime().ToString("g") ?? "—"}\r\n\r\n" +

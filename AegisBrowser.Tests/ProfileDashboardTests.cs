@@ -60,6 +60,19 @@ internal static class ProfileDashboardTests
                 list.Single(p => p.Slug == "alpha") with { Metadata = saved with { UpdatedUtc = DateTimeOffset.UtcNow } } };
             Check(ProfileDashboard.Filter(dates, "", DashboardStatusFilter.All, null, DashboardSort.Updated)[0].Slug == "alpha", "sort by newest metadata");
             Check(repository.GetBySlug("alpha")!.Revision == saved.Revision, "search and filtering do not write metadata");
+            var proxyRepository = new ProxyRepository(root);
+            var proxyDashboard = new ProfileDashboard(root, repository, supervisor, proxyRepository);
+            var betaPath = BrowserPolicy.ProfilePath(root, "beta");
+            ProxyConfiguration betaProxy;
+            using (var lease = new ProfileLease(betaPath))
+                betaProxy = proxyRepository.Save(b, lease, new ProxyDraft(ProxyProtocol.Http, "proxy.example", 8080, false, null, "", true), 0);
+            var blockedRow = proxyDashboard.Load().Single(p => p.Slug == "beta");
+            Check(blockedRow.ProxyState == SavedProxyState.RequiredDraft && !blockedRow.CanLaunch, "saved proxy draft is visible and blocks dashboard launch");
+            Reject(() => proxyDashboard.Launch(blockedRow), "dashboard rechecks saved proxy state before launch");
+            using (var lease = new ProfileLease(betaPath))
+                proxyRepository.Save(b, lease, new ProxyDraft(ProxyProtocol.Direct, "", 0, false, null, "", false), betaProxy.Revision);
+            Check(proxyDashboard.Load().Single(p => p.Slug == "beta").ProxyState == SavedProxyState.BrowserDefaults,
+                "dashboard shows browser defaults after explicit draft removal");
             Reject(() => dashboard.Launch(list.Single(p => p.Slug == "alpha")), "external held lease prevents launch");
             fakeProbe.Status["unknown"] = new(ProfileActivity.Unknown, "No access to lock");
             Reject(() => supervisor.Launch("unknown"), "unknown lock status prevents launch");

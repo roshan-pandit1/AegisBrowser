@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 namespace AegisBrowser.Core;
 
 /// <summary>Independent, versioned application metadata; never opens Chromium databases.</summary>
-public sealed class ProxyRepository : IProxyRepository
+public sealed class ProxyRepository : IProxyRepository, IProxyStatusProvider
 {
     public const string DatabaseFileName = "proxy-config.sqlite3";
     public const string RequiredMarkerName = ".aegis-proxy-required";
@@ -23,6 +23,41 @@ public sealed class ProxyRepository : IProxyRepository
     {
         CheckLease(profile, lease);
         return profiles.WithExpectedProfile(profile, () => WithStore(false, db => db is null ? null : Read(db, profile.Id)));
+    }
+
+    // Observational dashboard state only. Actions and browser startup still recheck
+    // their own metadata, profile lease, database and guard under the normal locks.
+    public IReadOnlyDictionary<Guid, SavedProxyState> Inspect(IReadOnlyList<ProfileDefinition> profilesToInspect)
+    {
+        ArgumentNullException.ThrowIfNull(profilesToInspect);
+        if (profilesToInspect.Count == 0) return new Dictionary<Guid, SavedProxyState>();
+        try
+        {
+            return WithStore(false, db =>
+            {
+                var states = new Dictionary<Guid, SavedProxyState>();
+                foreach (var profile in profilesToInspect)
+                {
+                    try
+                    {
+                        ProfileRepository.CheckSafeProfilePath(root, profile.Slug);
+                        if (!Directory.Exists(BrowserPolicy.ProfilePath(root, profile.Slug)))
+                        { states[profile.Id] = SavedProxyState.NeedsRepair; continue; }
+                        var marker = Marker(profile); RejectLink(marker);
+                        var guarded = Exists(marker);
+                        var saved = db is null ? null : Read(db, profile.Id);
+                        states[profile.Id] = saved is not null && saved.Settings.Protocol != ProxyProtocol.Direct
+                            ? SavedProxyState.RequiredDraft
+                            : guarded ? SavedProxyState.NeedsRepair : SavedProxyState.BrowserDefaults;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+                    { states[profile.Id] = SavedProxyState.NeedsRepair; }
+                }
+                return (IReadOnlyDictionary<Guid, SavedProxyState>)states;
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        { return profilesToInspect.ToDictionary(profile => profile.Id, _ => SavedProxyState.NeedsRepair); }
     }
 
     // expectedRevision is zero only for the first configuration. A held lease prevents a

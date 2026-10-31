@@ -1,9 +1,10 @@
 namespace AegisBrowser.Core;
 
-public sealed record DashboardProfile(string Slug, ProfileDefinition? Metadata, ProfileStatus Status)
+public sealed record DashboardProfile(string Slug, ProfileDefinition? Metadata, ProfileStatus Status, SavedProxyState ProxyState = SavedProxyState.NotInspected)
 {
     public string DisplayName => Metadata?.DisplayName ?? Slug;
-    public bool CanLaunch => !Status.IsActive && Status.Activity != ProfileActivity.Unknown &&
+    public bool CanLaunch => ProxyState is not (SavedProxyState.RequiredDraft or SavedProxyState.NeedsRepair) &&
+        !Status.IsActive && Status.Activity != ProfileActivity.Unknown &&
         (Status.Activity != ProfileActivity.Missing || (Metadata is null && Slug == "default"));
 }
 
@@ -11,15 +12,21 @@ public enum DashboardStatusFilter { All, Running, Stopped }
 public enum DashboardSort { Name, Updated }
 
 /// <summary>Combines directory discovery and metadata without modifying either during listing.</summary>
-public sealed class ProfileDashboard(string root, IProfileRepository repository, ProfileProcessSupervisor processes)
+public sealed class ProfileDashboard(string root, IProfileRepository repository, ProfileProcessSupervisor processes, IProxyStatusProvider? proxyStatus = null)
 {
     private readonly ProfileCatalog catalog = new(root);
 
     public IReadOnlyList<DashboardProfile> Load()
     {
         var metadata = repository.List().ToDictionary(p => p.Slug, StringComparer.OrdinalIgnoreCase);
+        var proxyStates = proxyStatus?.Inspect(metadata.Values.ToArray());
         var slugs = catalog.List().Concat(metadata.Keys).Append("default").Distinct(StringComparer.OrdinalIgnoreCase);
-        return slugs.Select(slug => new DashboardProfile(slug, metadata.GetValueOrDefault(slug), processes.GetStatus(slug))).ToArray();
+        return slugs.Select(slug =>
+        {
+            var profile = metadata.GetValueOrDefault(slug);
+            var state = profile is not null && proxyStates is not null ? proxyStates.GetValueOrDefault(profile.Id, SavedProxyState.NeedsRepair) : SavedProxyState.NotInspected;
+            return new DashboardProfile(slug, profile, processes.GetStatus(slug), state);
+        }).ToArray();
     }
 
     public ProfileDefinition Create(ProfileDraft draft) => repository.Create(draft);
@@ -41,7 +48,12 @@ public sealed class ProfileDashboard(string root, IProfileRepository repository,
     {
         ProfileSettingsTransactions.EnsureNoPending(root, profile.Slug);
         // Recheck the actual filesystem and lease; the displayed row may be stale.
-        var current = new DashboardProfile(profile.Slug, profile.Metadata, processes.GetStatus(profile.Slug));
+        var state = profile.Metadata is not null && proxyStatus is not null
+            ? proxyStatus.Inspect([profile.Metadata]).GetValueOrDefault(profile.Metadata.Id, SavedProxyState.NeedsRepair)
+            : SavedProxyState.NotInspected;
+        if (state is SavedProxyState.RequiredDraft or SavedProxyState.NeedsRepair)
+            throw new IOException("This profile has a required or damaged proxy draft. Edit or repair the draft before launching.");
+        var current = new DashboardProfile(profile.Slug, profile.Metadata, processes.GetStatus(profile.Slug), state);
         if (current.Status.Activity == ProfileActivity.Missing && repository.GetBySlug(profile.Slug) is not null)
             throw new IOException("The registered profile directory is missing. Restore it before launching.");
         if (!current.CanLaunch) throw new IOException(current.Status.Detail.Length > 0 ? current.Status.Detail : "This profile cannot be launched.");

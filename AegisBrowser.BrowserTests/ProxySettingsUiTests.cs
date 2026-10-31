@@ -46,6 +46,12 @@ internal static partial class Program
         var secret = saved.Settings.CredentialId ?? throw new Exception("Proxy credential reference is missing.");
         Check(saved.Settings.Protocol == ProxyProtocol.Http && saved.Settings.AuthenticationRequired,
             "native proxy editor saves a protected, profile-scoped draft");
+        var grid = Control<DataGridView>(owner, "ProfileGrid");
+        await Wait(() => grid.Rows.Cast<DataGridViewRow>().Any(row => (row.Tag as DashboardProfile)?.Slug == profile.Slug &&
+            (row.Tag as DashboardProfile)?.ProxyState == SavedProxyState.RequiredDraft), "dashboard proxy draft status");
+        var blockedRow = grid.Rows.Cast<DataGridViewRow>().Single(row => (row.Tag as DashboardProfile)?.Slug == profile.Slug);
+        Check((blockedRow.Cells["SavedProxy"].Value as string)?.Contains("blocked", StringComparison.OrdinalIgnoreCase) == true &&
+            (blockedRow.Tag as DashboardProfile)?.CanLaunch == false, "dashboard renders the blocked proxy draft without claiming an active route");
         using (var lease = new ProfileLease(BrowserPolicy.ProfilePath(root, profile.Slug)))
         {
             var blocked = false;
@@ -70,5 +76,9 @@ internal static partial class Program
             proxyRepository.EnsureRuntimeReady(profile, lease);
             Check(proxyRepository.Get(profile, lease)?.Settings.Protocol == ProxyProtocol.Direct, "explicit browser defaults restore startup readiness");
         }
+        await Wait(() => grid.Rows.Cast<DataGridViewRow>().Any(row => (row.Tag as DashboardProfile)?.Slug == profile.Slug &&
+            (row.Tag as DashboardProfile)?.ProxyState == SavedProxyState.BrowserDefaults), "dashboard browser-default status");
+        Check(grid.Rows.Cast<DataGridViewRow>().Single(row => (row.Tag as DashboardProfile)?.Slug == profile.Slug).Cells["SavedProxy"].Value as string == "Browser defaults",
+            "dashboard refreshes saved proxy status after draft removal");
     }
 }

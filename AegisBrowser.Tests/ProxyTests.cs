@@ -38,12 +38,18 @@ internal static class ProxyTests
             using var firstLease = new ProfileLease(firstPath);
             using var secondLease = new ProfileLease(BrowserPolicy.ProfilePath(root, second.Slug));
             Check(repo.Get(first, firstLease) is null && !File.Exists(dbPath), "legacy profile starts without creating proxy database");
+            var initialStates = repo.Inspect([first, second]);
+            Check(initialStates[first.Id] == SavedProxyState.BrowserDefaults && initialStates[second.Id] == SavedProxyState.BrowserDefaults,
+                "dashboard sees saved browser defaults without claiming an active route");
             repo.EnsureRuntimeReady(first, firstLease); count++;
             Reject(() => repo.Get(first, secondLease), "wrong profile lease rejected");
             var saved = repo.Save(first, firstLease, http, 0);
             Check(saved.ProfileId == first.Id && saved.Id != Guid.Empty && saved.Revision == 1 &&
                 new ProxyRepository(root).Get(first, firstLease) == saved, "configuration and GUID persist");
             Check(repo.Get(second, secondLease) is null, "configuration isolated by profile GUID");
+            var configuredStates = repo.Inspect([first, second]);
+            Check(configuredStates[first.Id] == SavedProxyState.RequiredDraft && configuredStates[second.Id] == SavedProxyState.BrowserDefaults,
+                "dashboard observes per-profile blocked drafts while leases are held");
             repo.EnsureRuntimeReady(second, secondLease); count++;
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "configured proxy blocks unsupported runtime");
             Reject(() => repo.Save(first, firstLease, http, 0), "stale proxy revision rejected");
@@ -51,16 +57,19 @@ internal static class ProxyTests
             var movedDb = Path.Combine(testRoot, "held.sqlite3"); File.Move(dbPath, movedDb);
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "guard blocks launch when configuration database is missing");
             Reject(() => repo.Save(first, firstLease, direct, 0), "missing guarded database cannot be replaced as a new configuration");
+            Check(repo.Inspect([first, second])[first.Id] == SavedProxyState.NeedsRepair, "missing guarded database is shown as needing repair");
             File.Move(movedDb, dbPath);
             var explicitDirect = repo.Save(first, firstLease, direct, saved.Revision);
             Check(explicitDirect.Id == saved.Id && explicitDirect.Revision == 2 && !File.Exists(Path.Combine(firstPath, ProxyRepository.RequiredMarkerName)),
                 "explicit direct update removes marker after commit");
+            Check(repo.Inspect([first])[first.Id] == SavedProxyState.BrowserDefaults, "dashboard refreshes after explicitly removing the draft");
             repo.EnsureRuntimeReady(first, firstLease); count++;
             Check(File.ReadAllText(sentinel) == "browser-data-unchanged", "proxy changes preserve browser data");
 
             // A marker left by interruption cannot be interpreted as direct.
             File.WriteAllText(Path.Combine(firstPath, ProxyRepository.RequiredMarkerName), "interrupted");
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "interrupted direct transition blocks startup");
+            Check(repo.Inspect([first])[first.Id] == SavedProxyState.NeedsRepair, "interrupted proxy transition is shown as needing repair");
             explicitDirect = repo.Save(first, firstLease, direct, explicitDirect.Revision);
             repo.EnsureRuntimeReady(first, firstLease); count++;
             var revisedProfile = profiles.Update(first with { Notes = "changed" }, first.Revision);
@@ -166,6 +175,7 @@ internal static class ProxyTests
                 command.CommandText = "PRAGMA user_version=99"; command.ExecuteNonQuery();
             }
             Reject(() => repo.EnsureRuntimeReady(first, firstLease), "future database version blocks startup");
+            Check(repo.Inspect([first, second]).Values.All(state => state == SavedProxyState.NeedsRepair), "unsupported database fails closed in dashboard status");
             Check(File.Exists(dbPath), "unsupported database preserved");
         }
         finally { if (Directory.Exists(testRoot)) Directory.Delete(testRoot, true); }
