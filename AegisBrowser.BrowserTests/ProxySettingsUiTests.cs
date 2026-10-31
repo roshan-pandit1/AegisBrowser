@@ -129,6 +129,11 @@ internal static partial class Program
                 var text = File.ReadAllText(file);
                 Check(!text.Contains("ui-fixture-user", StringComparison.Ordinal) && !text.Contains("ui-fixture-password", StringComparison.Ordinal) &&
                     !text.Contains(sourceSecret.ToString("D"), StringComparison.OrdinalIgnoreCase), "proxy export contains no source credential or reference");
+                Control<Button>(form, "ImportProxyConfiguration").PerformClick();
+                await Wait(() => Control<Label>(form, "ProxyFeedback").Text.Contains("loaded for review", StringComparison.OrdinalIgnoreCase), "same-profile proxy import preview");
+                Control<Button>(form, "SaveProxyDraft").PerformClick();
+                await Wait(() => Control<Label>(form, "ProxyFeedback").Text.Contains("Enter new credentials", StringComparison.OrdinalIgnoreCase), "same-profile imported credentials required");
+                Check(editor.Load(source) == saved, "imported settings never silently reuse an existing credential even for the same profile");
                 form.Close();
             }
             var target = profiles.Create("ui-proxy-import");
