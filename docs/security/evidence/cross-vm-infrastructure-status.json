@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "recordedUtc": "2026-11-01T14:30:56Z",
+  "status": "INFRASTRUCTURE_UNAVAILABLE",
+  "reviewedBaseCommit": "1224c245d835b9968215930f43d542b20c187c4e",
+  "developmentHost": { "operatingSystem": "Windows", "architecture": "ARM64" },
+  "blockers": [
+    "No authorized disposable Windows x64 VM pair was supplied or verified.",
+    "No isolated private network, authorized peer addresses or listener port were supplied or verified.",
+    "No VM disposal plan was supplied or verified."
+  ],
+  "ordinaryCrossVmControl": "NOT_EXECUTED",
+  "appContainerCrossVmControl": "NOT_EXECUTED",
+  "wfpPacketEnforcement": "NOT_EXECUTED",
+  "networkPolicyChanged": false
+}

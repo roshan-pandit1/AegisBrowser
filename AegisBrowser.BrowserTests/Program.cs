@@ -2,6 +2,7 @@ using AegisBrowser;
 using AegisBrowser.Core;
 using CefSharp;
 using CefSharp.WinForms;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.Security;
@@ -11,7 +12,7 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace AegisBrowser.BrowserTests;
 
-internal static class Program
+internal static partial class Program
 {
     private const string Origin = "https://browser-tests.invalid/";
     private static int checks;
@@ -19,6 +20,15 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "dashboard-launch") return DashboardApplication(args[1]);
+        if (args.Length == 2 && args[0] == "appcontainer-probe") return AppContainerCefProbe(args[1]);
+        if (args.Length == 2 && args[0] == "appcontainer-observer") return AppContainerCefProbe(args[1], true);
+        if (args.Length == 2 && args[0] == "packet-control-client") return PacketControlProbe(args[1]);
+        if (args.Length == 2 && args[0] == "private-network-control-client") return PrivateNetworkControlProbe(args[1]);
+        if (args.Length == 2 && args[0] == "proxy-probe") return ProxyProbe(args[1]);
+        if (args.Length == 2 && args[0] == "external-egress-probe") return ExternalEgressProbe(args[1]);
+        if (args.Length == 2 && args[0] == "hwnd-repro") return NativeWindowRepro(args[1]);
+        if (args.Length == 2 && args[0] == "proxy-auth-probe") return ProxyAuthProbe(args[1]);
         if (args.Length != 2 || args[0] is not ("write" or "read")) return 2;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -26,8 +36,28 @@ internal static class Program
         Directory.CreateDirectory(root);
         var initialized = false;
         var result = 0;
+        ProfileLease? leaseA = null, leaseB = null;
         try
         {
+            if (args[0] == "read")
+            {
+                // The write process created these CEF profiles without metadata. Adopt them
+                // before CEF starts, then verify their real cookie/localStorage data below.
+                var pathA = BrowserPolicy.ProfilePath(root, "a");
+                var pathB = BrowserPolicy.ProfilePath(root, "b");
+                Check(Directory.Exists(pathA) && Directory.Exists(pathB), "legacy CEF profiles exist before migration");
+                ProfileRepository.CheckSafeProfilePath(root, "a");
+                ProfileRepository.CheckSafeProfilePath(root, "b");
+                leaseA = new ProfileLease(pathA);
+                leaseB = new ProfileLease(pathB);
+                var repository = new ProfileRepository(root);
+                var a = repository.GetOrMigrate("a", leaseA);
+                var b = repository.GetOrMigrate("b", leaseB);
+                var idsPath = Path.Combine(root, "metadata-test-ids.txt");
+                var ids = a.Id.ToString("D") + "\n" + b.Id.ToString("D");
+                if (File.Exists(idsPath)) Check(File.ReadAllText(idsPath) == ids, "profile metadata IDs survive process restart");
+                else { Check(a.Id != Guid.Empty && b.Id != Guid.Empty && a.Id != b.Id, "legacy CEF profiles receive distinct IDs"); File.WriteAllText(idsPath, ids); }
+            }
             foreach (var dependency in new[] { "CefSharp.BrowserSubprocess.exe", "CefSharp.BrowserSubprocess.runtimeconfig.json", "CefSharp.BrowserSubprocess.Core.dll" })
             {
                 var dependencyPath = Path.Combine(AppContext.BaseDirectory, dependency);
@@ -52,7 +82,7 @@ internal static class Program
             {
                 try
                 {
-                    if (args[0] == "write") await TabsAndRenderer();
+                    if (args[0] == "write") { await TabsAndRenderer(); await DashboardUi(root); }
                     await Storage(host, root, args[0]);
                     if (args[0] == "write") await RejectUntrustedTls(host);
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
@@ -73,7 +103,11 @@ internal static class Program
             Application.Run(host);
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
-        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
+        finally
+        {
+            if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); }
+            leaseB?.Dispose(); leaseA?.Dispose();
+        }
         if (result == 0) Console.WriteLine("PASS: CEF shutdown completed (" + args[0] + ")");
         return result;
     }
@@ -92,6 +126,209 @@ internal static class Program
         {
             if (DateTime.UtcNow > deadline) throw new TimeoutException(name);
             await Task.Delay(100);
+        }
+    }
+
+    private static async Task DashboardUi(string root)
+    {
+        var profilesRoot = Path.Combine(root, "dashboard-data");
+        var repository = new ProfileRepository(profilesRoot);
+        var original = repository.Create(new ProfileDraft("ui-test", "Dashboard sample", "old note", ["blue"], ["Work"]));
+        using var manager = new ProfileManagerForm(profilesRoot);
+        manager.Show();
+        T Control<T>(Control parent, string name) where T : Control =>
+            parent.Controls.Find(name, true).OfType<T>().Single();
+        var grid = Control<DataGridView>(manager, "ProfileGrid");
+        await Wait(() => grid.Rows.Cast<DataGridViewRow>().Any(r => (string?)r.Cells["Slug"].Value == "ui-test"), "dashboard rows loaded");
+        var row = grid.Rows.Cast<DataGridViewRow>().Single(r => (string?)r.Cells["Slug"].Value == "ui-test");
+        Check((string?)row.Cells["DisplayName"].Value == "Dashboard sample" && (string?)row.Cells["ProfileId"].Value == original.Id.ToString("D") &&
+            (string?)row.Cells["Tags"].Value == "blue" && (string?)row.Cells["Folders"].Value == "Work", "dashboard renders real metadata");
+        grid.ClearSelection(); row.Selected = true;
+        Check(Control<TextBox>(manager, "ProfileDetails").Text.Contains(original.Id.ToString("D")) &&
+            Control<TextBox>(manager, "ProfileDetails").Text.Contains("old note"), "dashboard shows selected profile details");
+        var search = Control<TextBox>(manager, "ProfileSearch");
+        search.Text = "BLUE";
+        Check(grid.Rows.Count == 1 && (string?)grid.Rows[0].Cells["Slug"].Value == "ui-test", "dashboard search filters rendered rows");
+        search.Clear();
+
+        using var supervisor = new ProfileProcessSupervisor(new ProfileLeaseProbe(profilesRoot),
+            new ProfileChildStarter(Environment.ProcessPath!, typeof(ProfileManagerForm).Assembly.Location, AppContext.BaseDirectory));
+        var dashboard = new ProfileDashboard(profilesRoot, repository, supervisor);
+        using (var editor = new ProfileEditorForm(dashboard, original))
+        {
+            editor.Show(manager);
+            Control<TextBox>(editor, "EditDisplayName").Text = "Updated display";
+            Control<TextBox>(editor, "EditNotes").Text = "updated note";
+            Control<TextBox>(editor, "EditTags").Text = "blue\r\nqa";
+            Control<TextBox>(editor, "EditFolders").Text = "Work\r\nClients";
+            Control<Button>(editor, "SaveProfile").PerformClick();
+            await Wait(() => editor.IsDisposed || !editor.Visible, "dashboard editor save");
+        }
+        var saved = repository.GetBySlug("ui-test")!;
+        Check(saved.Id == original.Id && saved.DisplayName == "Updated display" && saved.Notes == "updated note" &&
+            saved.Tags.Contains("qa") && saved.Folders.Contains("Clients"), "native editor persists profile metadata");
+        await Wait(() => grid.Rows.Cast<DataGridViewRow>().Any(r => (string?)r.Cells["DisplayName"].Value == "Updated display"), "dashboard refresh after editor save");
+        using (var editor = new ProfileEditorForm(dashboard, saved))
+        {
+            editor.Show(manager);
+            repository.Update(saved with { Notes = "changed elsewhere" }, saved.Revision);
+            Control<TextBox>(editor, "EditNotes").Text = "stale edit";
+            Control<Button>(editor, "SaveProfile").PerformClick();
+            await Wait(() => Control<Label>(editor, "EditorFeedback").Text.Contains("changed", StringComparison.OrdinalIgnoreCase), "stale editor warning");
+            Check(editor.Visible && Control<TextBox>(editor, "EditNotes").Text == "stale edit" && repository.GetBySlug("ui-test")!.Notes == "changed elsewhere",
+                "native editor retains stale input without overwriting");
+            editor.Close();
+        }
+        var latest = repository.GetBySlug("ui-test")!;
+        var duplicator = new ProfileDuplicationService(profilesRoot, repository);
+        using (var copy = new ProfileCopyForm("Duplicate profile", "UI copy", true,
+            (slug, name, notes, privacy, searchSetting) => duplicator.DuplicateClean(latest, slug, name, notes, privacy, searchSetting)))
+        {
+            copy.Show(manager);
+            Control<TextBox>(copy, "CopySlug").Text = "ui-copy";
+            Control<Button>(copy, "CopySave").PerformClick();
+            await Wait(() => copy.IsDisposed || !copy.Visible, "clean copy dialog");
+        }
+        var copied = repository.GetBySlug("ui-copy");
+        Check(copied is not null && copied.Id != latest.Id &&
+            !Directory.Exists(Path.Combine(BrowserPolicy.ProfilePath(profilesRoot, "ui-copy"), "Cache")), "native clean-copy dialog creates fresh storage");
+        var templateRepository = new ProfileTemplateRepository(profilesRoot);
+        var templateService = new ProfileTemplateService(profilesRoot, repository, templateRepository);
+        using (var capture = new TemplateCaptureForm(templateService, latest))
+        {
+            capture.Show(manager);
+            Control<TextBox>(capture, "TemplateName").Text = "UI template";
+            Control<Button>(capture, "SaveTemplate").PerformClick();
+            await Wait(() => capture.IsDisposed || !capture.Visible, "template capture dialog");
+        }
+        Check(templateRepository.List().Single().Name == "UI template", "native template dialog persists template");
+        using (var templates = new ProfileTemplatesForm(templateRepository, templateService,
+            new ProfileTransfer(profilesRoot, repository, templateRepository)))
+        {
+            templates.Show(manager);
+            var templateList = Control<ListBox>(templates, "TemplateList");
+            await Wait(() => templateList.Items.Count == 1, "template manager load");
+            Control<TextBox>(templates, "TemplateSearch").Text = "no matching template";
+            Check(templateList.Items.Count == 0, "native template search filters results");
+            templates.Close();
+        }
+        await Wait(() => grid.Rows.Cast<DataGridViewRow>().Any(r => (string?)r.Cells["Slug"].Value == "ui-copy"), "dashboard refresh after copy");
+        Control<Button>(manager, "SelectVisible").PerformClick();
+        Check(Control<Label>(manager, "SelectedProfileCount").Text == "2 selected", "dashboard selects registered visible profiles");
+        search.Text = "ui-copy";
+        Check(grid.Rows.Count == 1 && Control<Label>(manager, "SelectedProfileCount").Text == "2 selected", "profile selection survives filtering");
+        search.Clear();
+        var selected = new[] { repository.GetBySlug("ui-test")!, repository.GetBySlug("ui-copy")! };
+        var bulkService = new ProfileBulkOperations(profilesRoot, repository, duplicator);
+        using (var bulk = new ProfileBulkForm(bulkService, selected, false))
+        {
+            bulk.Show(manager);
+            Control<TextBox>(bulk, "BulkLabels").Text = "shared";
+            Control<Button>(bulk, "StartBulk").PerformClick();
+            await Wait(() => Control<TextBox>(bulk, "BulkResults").Text.Contains("Succeeded", StringComparison.Ordinal), "bulk result display");
+            Check(repository.GetBySlug("ui-test")!.Tags.Contains("shared") && repository.GetBySlug("ui-copy")!.Tags.Contains("shared"),
+                "native bulk dialog updates selected profiles");
+            bulk.Close();
+        }
+        var transfer = new ProfileTransfer(profilesRoot, repository, templateRepository);
+        var exportPath = Path.Combine(root, "dashboard-export.json");
+        transfer.Export(exportPath, [repository.GetBySlug("ui-test")!], [], false, false, false);
+        var preview = transfer.Preview(exportPath);
+        using (var import = new ProfileImportForm(transfer, preview))
+        {
+            import.Show(manager);
+            Check(Control<TextBox>(import, "ImportPreview").Text.Contains(preview.Profiles[0].DestinationSlug), "native import displays destination preview");
+            Control<Button>(import, "ConfirmImport").PerformClick();
+            await Wait(() => Control<TextBox>(import, "ImportPreview").Text.Contains("Succeeded", StringComparison.Ordinal), "native import result");
+            Check(repository.GetBySlug(preview.Profiles[0].DestinationSlug) is not null, "native import creates previewed profile");
+            import.Close();
+        }
+        var backupService = new ProfileBackupService(profilesRoot, repository);
+        using (var backupForm = new ProfileBackupsForm(backupService, repository, repository.GetBySlug("ui-test")!))
+        {
+            backupForm.Show(manager);
+            var backupDetails = Control<TextBox>(backupForm, "BackupDetails");
+            await Wait(() => backupDetails.Text.Contains("No manual backups"), "backup manager load");
+            Control<Button>(backupForm, "CreateBackup").PerformClick();
+            var backupList = Control<ListBox>(backupForm, "BackupList");
+            await Wait(() => backupList.Items.Count == 1 && backupDetails.Text.Contains("ui-test"), "backup creation and preview");
+            Check(backupService.List().Single().Valid, "native backup manager creates and previews a verified snapshot");
+            backupForm.Close();
+        }
+        templateRepository.Create("Settings template", "", [], [], new(null, new SearchSettings("google")));
+        var transactionService = new ProfileSettingsTransactions(profilesRoot, repository, templateRepository);
+        using (var applyForm = new ProfileTemplateApplyForm(templateRepository, transactionService, [repository.GetBySlug("ui-test")!]))
+        {
+            applyForm.Show(manager);
+            var choices = Control<ListBox>(applyForm, "ApplyTemplateList");
+            await Wait(() => choices.Items.Count == 1, "template settings choices load");
+            Check(choices.Items[0]!.ToString()!.Contains("Settings template"), "native template application shows settings-capable templates");
+            applyForm.Close();
+        }
+        await ProxySettingsUi(profilesRoot, repository, manager);
+        await ProxyBulkUi(profilesRoot, repository, manager);
+        await ProxyPresetUi(profilesRoot, repository, manager);
+        manager.Close();
+    }
+
+    private static int DashboardApplication(string executable)
+    {
+        var root = ProfileCatalog.DefaultRoot;
+        var slug = "dash-" + Guid.NewGuid().ToString("N");
+        var path = BrowserPolicy.ProfilePath(root, slug);
+        var targetTitle = "Aegis Browser — " + slug;
+        var repository = new ProfileRepository(root);
+        using var supervisor = new ProfileProcessSupervisor(new ProfileLeaseProbe(root),
+            new ProfileChildStarter(Path.GetFullPath(executable), "", Path.GetDirectoryName(Path.GetFullPath(executable))!));
+        var dashboard = new ProfileDashboard(root, repository, supervisor);
+        Process? browser = null;
+        try
+        {
+            var created = dashboard.Create(new ProfileDraft(slug, "Dashboard launch test", "", [], []));
+            for (var round = 0; round < 2; round++)
+            {
+                var row = dashboard.Load().Single(p => p.Slug == slug);
+                dashboard.Launch(row);
+                var rejected = false;
+                try { dashboard.Launch(row); } catch (IOException) { rejected = true; }
+                Check(rejected, "dashboard rejects duplicate actual browser launch");
+                var deadline = DateTime.UtcNow.AddSeconds(45);
+                while (browser is null && DateTime.UtcNow < deadline)
+                {
+                    foreach (var process in Process.GetProcessesByName("AegisBrowser"))
+                    {
+                        process.Refresh();
+                        if (process.MainWindowTitle == targetTitle && browser is null) browser = process;
+                        else process.Dispose();
+                    }
+                    if (browser is null) Thread.Sleep(250);
+                }
+                if (browser is null) throw new TimeoutException("Published browser window did not start.");
+                Thread.Sleep(2000);
+                browser.Refresh();
+                if (browser.HasExited) throw new Exception("Published browser exited immediately after startup.");
+                Check(supervisor.GetStatus(slug).Activity == ProfileActivity.Running && Directory.Exists(Path.Combine(path, "Cache")),
+                    "published browser holds the profile lease and creates its cache");
+                // This window was found by enumeration; the supervisor owns the process
+                // handle and reports a nonzero exit as Failed below.
+                if (!browser.CloseMainWindow() || !browser.WaitForExit(15000))
+                    throw new Exception("Published browser did not close normally.");
+                browser.Dispose(); browser = null;
+                Check(supervisor.GetStatus(slug).Activity == ProfileActivity.Stopped && repository.GetBySlug(slug)?.Id == created.Id,
+                    "normal shutdown releases the lease and preserves profile identity");
+            }
+            Console.WriteLine($"PASS: {checks} dashboard application checks");
+            return 0;
+        }
+        catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        finally
+        {
+            if (browser is not null)
+            {
+                if (!browser.HasExited) { browser.CloseMainWindow(); browser.WaitForExit(15000); }
+                browser.Dispose();
+            }
+            Console.WriteLine("Dashboard test profile: " + path);
         }
     }
 

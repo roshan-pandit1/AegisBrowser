@@ -1,6 +1,7 @@
 using AegisBrowser.Core;
 using System.Diagnostics;
 using System.Reflection;
+using Microsoft.Data.Sqlite;
 
 // A child process proves that the OS lease is exclusive beyond this process.
 if (args.Length == 2 && args[0] == "--probe-lock")
@@ -10,9 +11,65 @@ if (args.Length == 2 && args[0] == "--probe-lock")
     return;
 }
 
+if (args.Length == 2 && args[0] == "--dashboard-lease-child")
+{
+    using var lease = new ProfileLease(args[1]);
+    Console.WriteLine("READY"); Console.Out.Flush();
+    Environment.ExitCode = Console.ReadLine() == "fail" ? 7 : 0;
+    return;
+}
+
+if (args.Length == 4 && args[0] == "--settings-apply-child")
+{
+    var repository = new ProfileRepository(args[1]);
+    var templates = new ProfileTemplateRepository(args[1]);
+    var profile = repository.GetBySlug(args[2]) ?? throw new Exception("Missing test profile.");
+    var template = templates.List().Single(t => t.Id == Guid.Parse(args[3]));
+    var service = new ProfileSettingsTransactions(args[1], repository, templates, () =>
+    { Console.WriteLine("READY"); Console.Out.Flush(); Thread.Sleep(Timeout.Infinite); });
+    _ = service.Apply([profile], template, CancellationToken.None);
+    return;
+}
+
+// Hold an uncommitted write until the parent kills this process to test SQLite recovery.
+if (args.Length == 2 && args[0] == "--hold-metadata-transaction")
+{
+    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = args[1], Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
+    connection.Open();
+    using var transaction = connection.BeginTransaction();
+    using var command = connection.CreateCommand();
+    command.Transaction = transaction;
+    command.CommandText = """
+        UPDATE profiles SET notes='uncommitted crash write';
+        INSERT INTO profiles (id,slug,display_name,notes,metadata_version,revision,created_utc,updated_utc)
+        VALUES ('10000000-0000-0000-0000-000000000001','interrupted','interrupted','',1,1,
+                '2026-01-01T00:00:00.0000000+00:00','2026-01-01T00:00:00.0000000+00:00');
+        """;
+    command.ExecuteNonQuery();
+    Console.WriteLine("READY");
+    Console.Out.Flush();
+    Thread.Sleep(Timeout.Infinite);
+    return;
+}
+
 PrivacyTests.Run();
 AddressTests.Run();
 ProfileCatalogTests.Run();
+ProfileRepositoryTests.Run();
+ProfileDashboardTests.Run();
+ProfileOperationsTests.Run();
+ProfileBulkTests.Run();
+ProfileTransferTests.Run();
+ProfileBackupTests.Run();
+ProfileSettingsTransactionTests.Run();
+ProxyTests.Run();
+ProxyAuthenticationTests.Run();
+ProxyBulkTests.Run();
+ProxyPresetTests.Run();
+ProxyPresetTransferTests.Run();
+ProxyConfigurationTransferTests.Run();
+ProxyTransportTests.Run();
 var count = 0;
 void Check(bool condition, string name)
 {

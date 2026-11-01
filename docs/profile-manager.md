@@ -1,19 +1,234 @@
-# Local profile manager (first milestone)
+# Local profile manager and metadata
 
-Use the new **Profiles** button from an open browser, or start the manager without a Chromium instance:
+Use the **Profiles** button from an open browser, or start the manager without a Chromium instance:
 
     AegisBrowser.exe --profiles
 
-The window lists existing profile directories, offers a Create action for a new profile,
-and launches a selected profile as a separate AegisBrowser process. Double-click opens
-the selected profile. The default profile is always available to launch.
+The dashboard lists profiles in a table, including name, GUID, storage slug, tags,
+folders, metadata update time and observed status. Select a row for details or use
+its Launch, Edit and Actions buttons. **New profile** creates a storage slug and
+metadata together. Editing changes the display name, notes, tags and folders without
+renaming the storage directory. Enter one tag or folder per line. The editor checks
+the original metadata revision when saving: if another manager has changed it,
+your text remains in the editor and you must reopen the profile to reload it.
+
+Search matches display name, slug, tags and folders; status and folder filters and
+name/update-time sorting only change the view. Use Ctrl+F for search, Ctrl+N for a
+new profile, F5 to refresh, and Enter on a table row to launch (or activate its
+focused Edit or Actions cell). Clear
+filters restores the full list. The table scrolls horizontally when necessary.
+The running filter includes Starting, Running and In use; the stopped filter includes
+Stopped and Failed. Missing and Unknown profiles remain visible under All statuses.
+
+The dashboard reads profile status and metadata in the background and refreshes
+approximately every three seconds. **Running** means a manager-launched child is
+alive and the lease is held; the lease owner is not independently verified. **In
+use** means the lease is held without a child tracked by this manager. **Starting**
+means a launched process has not yet been observed with the lease, not that CEF is
+ready; check for a browser startup dialog if it persists. **Unknown** means the lock
+could not be inspected, so launch is disabled. **Failed** reports a nonzero exit
+from a child this manager launched. An unheld lock file means stopped; the file is
+never removed by the dashboard. External processes are recognized by their lease,
+not by PID or window enumeration.
+
+The manager rejects duplicate starts it observes. Two managers can race between
+checking a lease and starting children; the browser's exclusive lease remains the
+final arbiter and prevents both from opening the same profile. The manager never
+force-stops a process. Close the browser normally to release its lease. Closing the
+dashboard leaves browser processes running.
+
+## Clean duplication and templates
+
+Select a profile and choose **Actions → Duplicate clean profile**. Enter a new slug
+and display name. Tags and folders are copied; notes and the privacy/search settings
+are separate opt-in choices. A new GUID is assigned. The new profile has fresh
+Chromium storage: cookies, history, credentials, local storage and caches are never
+copied. Metadata-only duplication can use a running source. To copy privacy or search
+settings, close the source first; the operation holds its profile lease while reading
+those settings. Invalid, linked or unreadable settings are rejected.
+
+Choose **Actions → Save as template** to save metadata labels and optionally the
+profile's privacy/search settings. **Templates** in the sidebar can search, edit,
+duplicate and delete templates or create new profiles from them. Deletion asks for
+confirmation and does not remove profiles. Template edits and deletion check their
+revision, and a template cannot replace an existing profile. Templates use versioned
+JSON files under `Profiles\templates`, with a separate interprocess lock and atomic
+file replacement. They contain no Chromium profile data. Their descriptions, tags,
+folders and optional privacy rules can contain personal information; protect the
+files using the Windows account. No template encryption is provided.
+
+Full browser-data duplication is **unavailable**. A closed profile copy has not been
+validated across CefSharp/Chromium versions, Windows account boundaries or credential
+encryption. Windows DPAPI data is typically tied to the user and machine
+([Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata));
+Chrome also documents application-bound cookie encryption on Windows
+([Google](https://security.googleblog.com/2024/07/improving-security-of-chrome-cookies-on.html)).
+Those Chrome details do not establish which protection this CefSharp build uses.
+Do not copy or attempt to decrypt Chromium databases as a workaround.
+
+New profiles are prepared in a `.creating-<id>` directory before publication. If an
+operation fails after writing staged settings, that clearly named directory may remain
+for inspection; it is not listed as a profile. If publication succeeds but the metadata
+commit fails, the profile directory is retained and can be adopted on a later launch.
+Do not remove an existing `profile-*` directory as cleanup. Back up and inspect any
+leftover staging directory before manually removing it.
+
+## Bulk labels and clean copies
+
+Use the Select checkbox beside registered profiles, **Select visible**, or **Clear
+selection**. Selection is tracked by profile GUID and remains selected when filters
+or periodic refresh change the visible rows. Directory-only profiles must first be
+opened or edited so they have metadata. **Bulk labels** adds or removes tags or folder
+assignments; enter one label per line. **Clean copy selected** generates a distinct
+`-copy` slug for each source and excludes notes, settings and Chromium storage.
+
+Each selected profile is updated independently with its original revision. Results
+show success, failure or cancellation for each profile; a conflict leaves that profile
+unchanged and requires refresh before retrying. Cancel stops work before the next
+profile and does not undo changes already committed. The operation does not delete
+profiles or stop browsers.
+
+**Apply template settings** applies the selected template's saved privacy and/or
+search settings to selected profiles, after confirmation. Each profile must be closed,
+its metadata revision must still match, and each settings file to be replaced must
+already exist and be valid. Save the corresponding settings once in the browser first
+if a file is absent. Notes, tags and folders are unchanged. Results are reported per
+profile and cancellation stops before the next profile.
+
+Before replacing settings, Aegis writes a checked recovery record and copies the old
+application settings to an owned `.settings-work-<id>` directory. If application is
+interrupted, the current build refuses to open that profile until **Actions → Recover
+interrupted settings** restores the old files. Recovery checks that current files
+still match either the old or proposed values; unexpected external edits are preserved
+and require manual repair. Keep the recovery marker and staging directory for inspection
+if recovery reports an error. A failure before publication can leave an unlisted
+staging directory; completed operations remove only their own known temporary files.
+These temporary files can contain private rules and should be protected like profile
+data. Older Aegis builds do not recognize the recovery marker: do not use them to open
+a profile with an interrupted operation. This feature does not modify Chromium caches
+or security policies.
+
+## Metadata export and import
+
+Select registered profiles and choose **Export selected**, or export a template from
+the Templates window. JSON and ZIP exports use format version 1 and contain profile
+metadata, tags, folders and selected Aegis settings; template exports include their
+saved settings. Profile privacy/search settings are opt-in and require closed source
+profiles. Cookies, browser caches, sessions, passwords and extensions are excluded.
+Exports are unencrypted and can contain notes and private rules: store and share them
+accordingly. Exports are written to a new file outside profile storage and never
+replace an existing file. The SHA-256 checksum detects corruption; it does not prove
+who created the file.
+
+**Import** validates the version, checksum, size, identities and fields before showing
+a preview. ZIP files must contain only the expected JSON entry and are never extracted
+to disk. Confirm the preview to create profiles and templates with new IDs; profile
+slugs get an available `-copy` suffix. Existing profiles are never replaced. Each
+result is reported separately; cancellation stops before the next item and leaves
+already imported profiles in place. If a destination is created between preview and
+import, that item fails safely and can be retried after a new preview.
+
+## Manual metadata backups and recovery
+
+Select a registered profile and open **Backups**. A manual backup uses SQLite's
+online backup API to capture the complete application metadata database, including
+committed WAL data. The manifest identifies the selected profile and may additionally
+include its privacy/search settings if explicitly selected; those settings require the
+profile to be closed. Backups contain no Chromium cookies, sessions, cache or history.
+They are stored unencrypted in `Profiles\manual-backups\backup-<id>` and can contain
+private notes and rules. Protect them with the Windows account.
+
+The list validates each backup's version, manifest and database checksums, SQLite
+integrity and selected profile identity. Checksums detect accidental corruption, not
+the origin or authenticity of a backup. Invalid backups remain in place and cannot be
+restored. The retention reminder threshold is saved with a revision check; it only
+warns when the count is reached and never deletes backups automatically.
+
+**Restore metadata** previews and, after confirmation, restores the backed-up name,
+notes, tags and folders to the same profile ID and slug. The profile must be closed.
+The current revision is checked again, and a validated SQLite safety snapshot of the
+current database is created under `Profiles\metadata-backups` before the transactional
+update. Chromium files and existing privacy/search settings are not changed by this
+operation. **Restore as new profile** creates a fresh GUID, slug and Chromium storage,
+and applies the settings captured in the backup. It never overwrites an existing profile.
+The UI does not replace the entire live SQLite database or overwrite settings in an
+existing profile. To recover the pre-restore metadata snapshot, follow the rollback
+instructions below after closing all browsers and managers.
+
+An interrupted backup can leave a `.creating-backup-<id>` directory. It is not listed
+as a completed backup and is not deleted automatically. Inspect and back it up before
+any manual removal; do not remove `profile-*` directories as cleanup. A failed safety
+backup or a revision conflict stops metadata restoration. SQLite transaction recovery
+protects the metadata update if the process exits during the write.
+
+Directory-only profiles remain visible as **Not registered** until opened or edited.
+Editing one first requires its profile lease and creates the same validated metadata
+backup used during migration. If it is already in use, close it before editing. The
+default profile can be launched before its directory exists. A registered profile
+whose directory has gone missing cannot be launched into a new empty directory;
+restore its directory first.
 
 Names follow the existing 1–40 ASCII character policy (letters, digits, hyphens,
 underscores), case-insensitively. The manager uses the existing
-`%LOCALAPPDATA%\\AegisBrowser\\Profiles\\profile-<name>` layout and does not migrate,
-clone, rename, delete or modify Chromium caches. New directories are staged and moved
-into place rather than overwriting existing data. The browser's existing exclusive
-per-profile lock still rejects concurrent launches of the same profile.
+`%LOCALAPPDATA%\AegisBrowser\Profiles\profile-<name>` layout. New directories are
+staged and moved into place rather than overwriting existing data. The browser's
+exclusive per-profile lock still rejects concurrent launches of the same profile.
+Profile metadata migration does not move, clone, rename, delete or directly edit
+Chromium caches or the existing privacy and search settings.
+
+## Metadata and migration
+
+The manager stores application-owned metadata in `profile-metadata.sqlite3` under
+`%LOCALAPPDATA%\AegisBrowser\Profiles`, separate from every Chromium profile folder.
+The database uses SQLite WAL and schema version 1. Each registered profile has a
+stable GUID, its existing case-insensitive ASCII directory slug, a separate display
+name, notes, tags, folders, timestamps for the metadata, and a revision. Display
+names may coincide; IDs and slugs distinguish profiles. The repository validates
+updates and rejects stale revisions. Notes are shown in the selected-profile details
+and editor but are not included in search or diagnostic output.
+The timestamps describe metadata creation and update, not the unknown creation time
+of a legacy Chromium profile.
+
+The manager still discovers old `profile-<name>` folders without changing them.
+When an old profile is opened, the browser acquires its existing exclusive profile
+lease, validates the paths, and registers that folder in the metadata database
+before initializing CEF. Creating a profile in the manager creates its metadata as
+part of the operation. A missing default profile is registered on first launch.
+Older application versions continue to use the same directories and ignore the new
+database. Slugs remain subject to the existing name policy and are not renamed here.
+Linked profile folders, profile lock files and database paths are rejected; protect the profile
+root with the Windows account's normal permissions. These path checks are not a
+defense against an attacker who can concurrently replace files in that account.
+
+Before each legacy folder is registered, Aegis creates a consistent SQLite backup
+in `Profiles\metadata-backups` and checks its schema, integrity, relationships and
+profile count. A failed backup or transaction leaves the legacy directory available
+for a later retry and does not register a partial record. If a newly created folder
+was published but its metadata commit failed, it is deliberately retained and can
+be adopted on a later launch. A corrupt, unrecognized, or newer-version database is
+preserved and startup fails with an error instead of replacing it. Unfinished
+temporary files are not treated as profiles or as authoritative metadata.
+
+Backups contain metadata, including private notes and labels; protect them like the
+profile data. No automatic backup retention or encryption is provided. The first
+backup for an installation with only directory-based profiles contains an empty v1
+metadata database because the previous version had no metadata database to copy.
+The browser files themselves are not backed up by this migration.
+
+### Rollback and recovery
+
+Close **all** Aegis Browser windows and profile managers before handling metadata.
+Keep a separate copy of the whole `Profiles` directory, including any
+`profile-metadata.sqlite3-wal` and `profile-metadata.sqlite3-shm` files left after a
+crash. To roll back metadata, move the current database and any WAL/SHM sidecars to
+that safe backup location, then copy the selected `metadata-backups\*.sqlite3` file
+to `Profiles\profile-metadata.sqlite3`. Reopen Aegis Browser and verify the profiles.
+This restores only the metadata state captured before that migration: later metadata
+edits and IDs assigned after the snapshot will be lost, and still-unregistered folders
+will be adopted again on opening. Chromium profile folders remain in place. Keep the
+original corrupt or newer database and sidecars for repair; do not replace them with
+an empty database if their metadata is needed. If file permissions prevent a backup
+or database write, restore access and retry rather than removing a profile folder.
 
 This is an initial **local** profile manager, not GoLogin fingerprint compatibility.
 It does not implement proxies, fingerprint modifications, cloud sync or team sharing.
@@ -33,6 +248,33 @@ that opening the same profile a second time is rejected by the existing lease.
 Confirm previously existing profile folders remain intact. In the installed browser,
 select Profiles on the toolbar and confirm the manager launches separate processes.
 
-The console test covers empty listings, name normalization, duplicate rejection,
-invalid/traversal names, temporary/invalid directories and existing data preservation.
-The normal browser integration suite and manual Windows GUI acceptance remain necessary.
+The console suite covers directory-only migration, metadata round trips and revision
+conflicts, backup restoration, failed migration and retry, duplicate and concurrent
+creation, invalid paths, Windows junctions and a read-only database, corrupt/newer
+databases, and recovery from a killed process with an uncommitted SQLite transaction.
+Dashboard tests also cover creating and editing metadata, stale revisions, search,
+filtering, sorting, duplicate launches, and a separate helper process acquiring and
+releasing the actual OS profile lease. It also retains existing directory/lease checks.
+The Windows native browser suite exercises the dashboard and editor controls, including
+an edit conflict. The lease helper is not a Chromium process. After publishing, CI also
+launches the actual browser through the dashboard service, rejects a duplicate, requests
+normal window closure, confirms lease release and reopens the same profile. The separate CEF suite
+creates two CEF profiles without metadata, migrates them before restarting CEF, and
+checks their cookie/localStorage isolation, persistence and stable IDs over repeated
+process restarts. The workflow also runs filtering, publish, smoke and packaging checks.
+
+Manual Windows acceptance remains necessary: use the dashboard with keyboard-only
+navigation and 100/150/200% scaling; launch, close and reopen multiple profiles and
+check external launches and duplicate-start messages; terminate a disposable browser
+unexpectedly and verify status and lock recovery. Upgrade a copy of an existing default
+and named profile containing cookies, IndexedDB, local storage and privacy/search
+settings; verify login and settings after restart and rollback; try a locked profile,
+unwritable metadata/backup location and recovery from a corrupt database; check
+manager keyboard operation and 100/150/200% scaling; and close multiple active
+profiles normally while verifying that their locks are released. Do not infer a
+manual pass from the automated suites.
+
+# Proxy configuration
+
+The [proxy configuration guide](proxy-configuration.md) describes individual and bulk saved-draft editing, non-secret preset and proxy-configuration JSON transfer, user-protected credentials and an opt-in .NET transport preflight. Imported proxy configurations are only applied after review and save; credentials must be entered again. The preflight does not test Chromium or establish network isolation. Browser proxy routing is not available yet; the dashboard warns that saving a required proxy blocks profile startup until supported networking is available or the draft is removed. Bulk operations skip profiles with protected credentials.
+

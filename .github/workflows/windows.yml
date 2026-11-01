@@ -48,6 +48,50 @@ jobs:
               throw "Browser $phase phase did not complete CEF shutdown"
             }
           }
+      - name: Controlled CEF proxy routing and bypass probe
+        timeout-minutes: 3
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-proxy-probe-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-probe $profileRoot 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy probe checks')) { throw 'CEF proxy probe failed or incomplete' }
+          if (!(($output -join "`n") -match 'PASS: CEF proxy probe shutdown completed')) { throw 'CEF proxy probe did not complete native shutdown' }
+      - name: Controlled CEF proxy authentication probe
+        timeout-minutes: 3
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-proxy-auth-probe-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-auth-probe $profileRoot 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy authentication probe checks')) { throw 'CEF proxy authentication probe failed or incomplete' }
+          if (!(($output -join "`n") -match 'PASS: CEF proxy authentication probe shutdown completed')) { throw 'CEF authentication probe did not complete native shutdown' }
+      - name: Concurrent independent CEF proxy probes
+        timeout-minutes: 5
+        run: ./tests/acceptance/concurrent-proxy-probes.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Observe synthetic CEF process identities
+        timeout-minutes: 5
+        run: ./tests/acceptance/observe-cef-process-identity.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Observe CEF traffic from external loopback fixtures
+        timeout-minutes: 5
+        run: ./tests/acceptance/observe-external-egress.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Research suspended synthetic AppContainer identities
+        timeout-minutes: 2
+        run: ./tests/acceptance/research-appcontainer-launch.ps1 -RegisterOnDisposableRunner
+      - name: Exercise native window creation and close sequence
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-window-repro-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe hwnd-repro $profileRoot 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -and (Test-Path (Join-Path $profileRoot 'cef-window-repro.log'))) {
+            Get-Content (Join-Path $profileRoot 'cef-window-repro.log') | Write-Output
+          }
+          if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: native window candidate reproduction completed and CEF shut down')) { throw 'Native window reproduction did not complete.' }
       - name: Build Chromium filtering tests
         if: ${{ !cancelled() }}
         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
@@ -80,6 +124,14 @@ jobs:
           foreach ($file in @('AegisBrowser.exe', 'CefSharp.BrowserSubprocess.exe', 'libcef.dll', 'coreclr.dll')) {
             if (!(Get-ChildItem artifacts/win-x64 -Recurse -Filter $file)) { throw "Missing $file" }
           }
+      - name: Dashboard launches and reopens published browser
+        timeout-minutes: 3
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe dashboard-launch ./artifacts/win-x64/AegisBrowser.exe 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ dashboard application checks')) { throw 'Dashboard application launch test failed or incomplete' }
       - name: Smoke test published Windows application
         run: ./tests/acceptance/windows-smoke.ps1 -PublishDirectory artifacts/win-x64
       - name: Upload complete publish directory

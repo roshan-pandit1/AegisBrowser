@@ -1,0 +1,41 @@
+name: Scoped WFP isolated research opt-in
+on:
+  push:
+    branches:
+      - ci/wfp-explicit-7c4d9a82
+permissions:
+  contents: read
+jobs:
+  scoped-objects:
+    if: github.repository == 'roshan-pandit1/AegisBrowser' && github.ref == 'refs/heads/ci/wfp-explicit-7c4d9a82' && github.event.created == false && github.event.head_commit.message == 'WFP-RESEARCH-7c4d9a82'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify reviewed parent and isolated opt-in commit
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'A disposable GitHub-hosted runner is required.' }
+          $parent = & git rev-parse HEAD^
+          if ($LASTEXITCODE -ne 0 -or $parent -ne 'bcce2aae5f7933c74c7f70a348050b753708dcab') { throw 'Unexpected parent revision.' }
+          $changed = @(& git diff --name-only HEAD^ HEAD)
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -ne '.github/workflows/wfp-isolated-once.yml') { throw 'Unexpected opt-in commit contents.' }
+      - name: Build and execute explicitly scoped WFP object experiment
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+          if (-not $installation) { throw 'MSVC x64 tools were not found.' }
+          $vcvars = Join-Path $installation 'VC\Auxiliary\Build\vcvars64.bat'
+          $lines = & $env:ComSpec /d /c ('call "{0}" >nul && set' -f $vcvars)
+          if ($LASTEXITCODE -ne 0) { throw 'MSVC environment initialization failed.' }
+          foreach ($line in $lines) {
+            $position = $line.IndexOf('=')
+            if ($position -gt 0) { [Environment]::SetEnvironmentVariable($line.Substring(0, $position), $line.Substring($position + 1), 'Process') }
+          }
+          ./tests/acceptance/research-wfp-scoped-objects.ps1 -RunOnDisposableRunner
