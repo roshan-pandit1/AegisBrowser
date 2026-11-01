@@ -63,8 +63,17 @@ internal static partial class Program
                         Trace("MainForm", form, "replacement-ready", form.IsHandleCreated ? form.Handle : IntPtr.Zero);
                         for (var tab = 0; tab < 4; tab++) Button("+").PerformClick();
                         Trace("MainForm", form, "rapid-tabs-created", form.IsHandleCreated ? form.Handle : IntPtr.Zero);
+                        var owners = tabs.TabPages.Cast<TabPage>()
+                            .SelectMany(page => page.Controls.OfType<ChromiumWebBrowser>())
+                            .Select(browser => (SafePopups)browser.LifeSpanHandler).ToArray();
+                        var removedBeforeNativeClose = false;
+                        tabs.ControlRemoved += (_, _) =>
+                        {
+                            if (owners.Any(owner => !owner.OwnerClosed.IsCompleted)) removedBeforeNativeClose = true;
+                        };
                         form.Close(); form.Close();
                         await Wait(() => form.IsDisposed, "window repro normal asynchronous shutdown");
+                        Check(!removedBeforeNativeClose, "window retains tab parents until all native browser owners close");
                         Console.WriteLine($"PASS: native window candidate reproduction cycle {number} closed normally");
                     }
                 }
