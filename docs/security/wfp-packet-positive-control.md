@@ -1,0 +1,13 @@
+# Independent TCP positive-control research
+
+This test-only fixture is not WFP enforcement. An independent parent process owns an IPv4 loopback listener, registers random synthetic transaction identifiers, and records only matching bounded messages. A separate ordinary synthetic client must reach it first; an unavailable receiver or failed positive control is a fixture failure. The listener does not capture every interface, identify packet owners through Windows, or prove packet absence.
+
+The second client is the same fixed test executable launched suspended using a fresh per-user AppContainer SID. The retained process handle's token must match before resume. The client is restricted in code to TCP on `127.0.0.1` and reads only an owned synthetic control file; it does not initialize CEF. This test requests no AppContainer network capabilities and installs no loopback exemption, firewall rule, WFP filter, service, or driver. The controlled loopback attempt may fail because of AppContainer capability or loopback policy, access permissions, or fixture failure. No observed packet is **inconclusive** and is not a verified block.
+
+An independently received matching transaction with a successful client exit is reported as `ALLOWED_AND_INDEPENDENTLY_OBSERVED`, with process-to-packet identity attribution explicitly marked unverified. Correlation does not substitute for an independently captured process/network event. The output includes a versioned JSON record with the synthetic SID, process creation time, transaction, endpoint, normal-client positive control, observation count, cleanup status and `wfpFilter: null`. Results such as missing identity, unavailable environment or fixture failure are separate from observed delivery. Neither outcome establishes profile-specific containment.
+
+To run only on an explicitly opted-in disposable GitHub-hosted Windows runner after building the native x64 test executable:
+
+    ./tests/acceptance/observe-appcontainer-tcp-control.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
+
+The script uses unique test roots and SIDs, rejects linked source paths, grants access only within its new synthetic root, and leaves its identity and files for disposal with the runner. It does not touch real browser profiles or existing Windows networking settings. If a synthetic client hangs, only its own retained process is stopped. Actual AppContainer execution and all WFP behavior remain untested until a Windows runner executes the script. The existing startup guard continues to block required-proxy profiles.

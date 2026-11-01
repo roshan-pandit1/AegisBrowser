@@ -58,6 +58,9 @@ jobs:
           }
       - name: Build browser integration tests
         run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Observe synthetic AppContainer TCP positive control
+        timeout-minutes: 3
+        run: ./tests/acceptance/observe-appcontainer-tcp-control.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
       - name: Research actual CEF under an AppContainer identity
         timeout-minutes: 4
         run: ./tests/acceptance/observe-appcontainer-cef.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner

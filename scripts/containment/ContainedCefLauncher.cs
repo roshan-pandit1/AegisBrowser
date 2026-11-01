@@ -51,6 +51,10 @@ namespace AegisContainmentResearch
         public static ContainedCefLauncher StartObserver(string identity, string executable, string syntheticRoot)
         { return StartMode(identity, executable, syntheticRoot, "appcontainer-observer"); }
 
+        // Fixed synthetic TCP client. It does not initialize CEF or choose a non-loopback destination.
+        public static ContainedCefLauncher StartPacketControl(string identity, string executable, string syntheticRoot)
+        { return StartMode(identity, executable, syntheticRoot, "packet-control-client"); }
+
         private static ContainedCefLauncher StartMode(string identity, string executable, string syntheticRoot, string mode)
         {
             executable = Path.GetFullPath(executable);
