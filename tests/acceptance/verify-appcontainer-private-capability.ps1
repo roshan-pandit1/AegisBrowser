@@ -10,6 +10,10 @@ function Assert-NoLink([string] $Path) {
         if ($item -is [IO.FileInfo]) { $item = $item.Directory } else { $item = $item.Parent }
     }
 }
+function Is-ExpectedFailure([Exception] $Failure, [Type] $ExpectedType) {
+    while ($null -ne $Failure.InnerException) { $Failure = $Failure.InnerException }
+    return $ExpectedType.IsInstanceOfType($Failure)
+}
 if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { throw 'RUNNER_TEMP is required.' }
 Assert-NoLink $env:RUNNER_TEMP
 $source = [IO.Path]::GetFullPath($BrowserTestsExe)
@@ -45,33 +49,50 @@ $child = $null
 try {
     $badRootRejected = $false
     $unexpectedChild = $null
-    try { $unexpectedChild = [AegisContainmentResearch.ContainedCefLauncher]::StartPrivateNetworkControl($name, $exe, $fixture) } catch { $badRootRejected = $true }
+    try { $unexpectedChild = [AegisContainmentResearch.ContainedCefLauncher]::StartPrivateNetworkControl($name, $exe, $fixture) }
+    catch { if (Is-ExpectedFailure $_.Exception ([ArgumentException])) { $badRootRejected = $true } else { throw } }
     if ($null -ne $unexpectedChild) { $unexpectedChild.Dispose() }
     if (-not $badRootRejected) { throw 'Mismatched synthetic root was accepted.' }
     $badExeRejected = $false
     $unexpectedChild = $null
-    try { $unexpectedChild = [AegisContainmentResearch.ContainedCefLauncher]::StartPrivateNetworkControl($name, $source, $client) } catch { $badExeRejected = $true }
+    try { $unexpectedChild = [AegisContainmentResearch.ContainedCefLauncher]::StartPrivateNetworkControl($name, $source, $client) }
+    catch { if (Is-ExpectedFailure $_.Exception ([ArgumentException])) { $badExeRejected = $true } else { throw } }
     if ($null -ne $unexpectedChild) { $unexpectedChild.Dispose() }
     if (-not $badExeRejected) { throw 'Executable outside the owned fixture was accepted.' }
+    $junction = Join-Path $root 'junction'
+    $null = New-Item -ItemType Junction -Path $junction -Target $env:RUNNER_TEMP
+    $junctionParent = Join-Path $junction ('aegis-private-' + $id)
+    $junctionClient = Join-Path $junctionParent ('client-' + $id)
+    $junctionExe = Join-Path (Join-Path $junctionParent 'fixture') 'AegisBrowser.BrowserTests.exe'
+    $linkRejected = $false
+    $unexpectedChild = $null
+    try { $unexpectedChild = [AegisContainmentResearch.ContainedCefLauncher]::StartPrivateNetworkControl($name, $junctionExe, $junctionClient) }
+    catch { if (Is-ExpectedFailure $_.Exception ([ArgumentException])) { $linkRejected = $true } else { throw } }
+    if ($null -ne $unexpectedChild) { $unexpectedChild.Dispose() }
+    if (-not $linkRejected) { throw 'A synthetic fixture reached through a junction was accepted.' }
     $child = [AegisContainmentResearch.ContainedCefLauncher]::StartPrivateNetworkControl($name, $exe, $client)
     if ($child.ExpectedCapabilitySid -ne 'S-1-15-3-3') { throw 'Unexpected private-network capability SID.' }
     $wrongRejected = $false
-    try { $null = $child.Verify($sid + '-wrong') } catch { $wrongRejected = $true }
+    try { $null = $child.Verify($sid + '-wrong') }
+    catch { if (Is-ExpectedFailure $_.Exception ([InvalidOperationException])) { $wrongRejected = $true } else { throw } }
     if (-not $wrongRejected) { throw 'Wrong expected identity was accepted.' }
     $resumeRejected = $false
-    try { $child.Resume() } catch { $resumeRejected = $true }
+    try { $child.Resume() }
+    catch { if (Is-ExpectedFailure $_.Exception ([InvalidOperationException])) { $resumeRejected = $true } else { throw } }
     if (-not $resumeRejected) { throw 'Unverified suspended process was resumed.' }
     $observed = $child.Verify($sid)
     if ($observed -ne $sid) { throw 'Observed package SID differs.' }
     Write-Output ("PASS: suspended synthetic PID={0} package SID={1} and sole enabled capability SID={2} verified" -f $child.Id, $observed, $child.ExpectedCapabilitySid)
     # Re-verification failure must revoke permission to resume.
     $wrongRejected = $false
-    try { $null = $child.Verify($sid + '-wrong') } catch { $wrongRejected = $true }
+    try { $null = $child.Verify($sid + '-wrong') }
+    catch { if (Is-ExpectedFailure $_.Exception ([InvalidOperationException])) { $wrongRejected = $true } else { throw } }
     if (-not $wrongRejected) { throw 'Wrong re-verification was accepted.' }
     $resumeRejected = $false
-    try { $child.Resume() } catch { $resumeRejected = $true }
+    try { $child.Resume() }
+    catch { if (Is-ExpectedFailure $_.Exception ([InvalidOperationException])) { $resumeRejected = $true } else { throw } }
     if (-not $resumeRejected) { throw 'Failed re-verification did not revoke resume permission.' }
-    Write-Output 'PASS: invalid paths and identities rejected; unverified or revoked process cannot resume'
+    Write-Output 'PASS: invalid paths, junctions and identities rejected; unverified or revoked process cannot resume'
     Write-Output 'INCONCLUSIVE: token verification did not attempt a connection or prove network containment.'
 } finally {
     if ($null -ne $child) { $child.Dispose() }
