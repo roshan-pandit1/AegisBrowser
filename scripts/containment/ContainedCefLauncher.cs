@@ -11,8 +11,10 @@ namespace AegisContainmentResearch
     {
         private IntPtr process, thread;
         private bool resumed, verified;
+        private bool verifyPrivateNetworkCapability;
         public uint Id { get; private set; }
         public string ExpectedSid { get; private set; }
+        public string ExpectedCapabilitySid { get; private set; }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct StartupInfo
@@ -25,6 +27,8 @@ namespace AegisContainmentResearch
         }
         [StructLayout(LayoutKind.Sequential)] private struct StartupInfoEx { public StartupInfo Startup; public IntPtr Attributes; }
         [StructLayout(LayoutKind.Sequential)] private struct SecurityCapabilities { public IntPtr Sid, Capabilities; public uint Count, Reserved; }
+        [StructLayout(LayoutKind.Sequential)] private struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+        [StructLayout(LayoutKind.Sequential)] private struct TokenGroupsFirst { public uint Count; public SidAndAttributes First; }
         [StructLayout(LayoutKind.Sequential)] private struct ProcessInformation { public IntPtr Process, Thread; public uint Id, ThreadId; }
 
         [DllImport("userenv.dll", CharSet = CharSet.Unicode)] private static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
@@ -32,6 +36,9 @@ namespace AegisContainmentResearch
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true)] private static extern bool ConvertSidToStringSidW(IntPtr sid, out IntPtr text);
         [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
         [DllImport("advapi32.dll", SetLastError = true)] private static extern bool GetTokenInformation(IntPtr token, int type, IntPtr data, int size, out int returned);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool CreateWellKnownSid(int type, IntPtr domainSid, IntPtr sid, ref uint size);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool IsValidSid(IntPtr sid);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool EqualSid(IntPtr first, IntPtr second);
         [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr value);
         [DllImport("kernel32.dll", SetLastError = true)] private static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref IntPtr size);
         [DllImport("kernel32.dll", SetLastError = true)] private static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, IntPtr attribute, IntPtr value, IntPtr size, IntPtr previous, IntPtr returned);
@@ -55,6 +62,41 @@ namespace AegisContainmentResearch
         public static ContainedCefLauncher StartPacketControl(string identity, string executable, string syntheticRoot)
         { return StartMode(identity, executable, syntheticRoot, "packet-control-client"); }
 
+        // The only capability-enabled mode is a fixed synthetic client. Caller controls
+        // the isolated network; this method does not configure the firewall or WFP.
+        public static ContainedCefLauncher StartPrivateNetworkControl(string identity, string executable, string syntheticRoot)
+        {
+            const string prefix = "AegisPrivateNetworkResearch.";
+            Guid id;
+            if (identity == null || !identity.StartsWith(prefix, StringComparison.Ordinal) ||
+                !Guid.TryParseExact(identity.Substring(prefix.Length), "N", out id))
+                throw new ArgumentException("A matching synthetic private-network identity and client root are required.");
+            string client = Path.GetFullPath(syntheticRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var parent = Directory.GetParent(client);
+            string suffix = id.ToString("N");
+            if (parent == null || !String.Equals(Path.GetFileName(client), "client-" + suffix, StringComparison.OrdinalIgnoreCase) ||
+                !String.Equals(parent.Name, "aegis-private-" + suffix, StringComparison.OrdinalIgnoreCase) ||
+                !String.Equals(Path.GetFullPath(executable), Path.Combine(parent.FullName, "fixture", "AegisBrowser.BrowserTests.exe"), StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("The executable and client root must belong to the same owned synthetic fixture.");
+            RejectLinks(client);
+            RejectLinks(Path.GetFullPath(executable));
+            return StartMode(identity, executable, syntheticRoot, "private-network-control-client");
+        }
+
+        private static void RejectLinks(string path)
+        {
+            // Research on a disposable runner only. This rejects existing reparse
+            // points; it does not establish a race-proof local-attacker boundary.
+            FileSystemInfo current = File.Exists(path) ? (FileSystemInfo)new FileInfo(path) : new DirectoryInfo(path);
+            while (current != null)
+            {
+                current.Refresh();
+                if (!current.Exists || (current.Attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new ArgumentException("Reparse points are not allowed in a synthetic fixture path.");
+                current = current is FileInfo ? ((FileInfo)current).Directory : ((DirectoryInfo)current).Parent;
+            }
+        }
+
         private static ContainedCefLauncher StartMode(string identity, string executable, string syntheticRoot, string mode)
         {
             executable = Path.GetFullPath(executable);
@@ -63,6 +105,7 @@ namespace AegisContainmentResearch
                 !File.Exists(executable) || !Directory.Exists(syntheticRoot))
                 throw new ArgumentException("An existing synthetic CEF fixture and root are required.");
             IntPtr sid = IntPtr.Zero, attributes = IntPtr.Zero, caps = IntPtr.Zero, text = IntPtr.Zero, environment = IntPtr.Zero;
+            IntPtr capabilitySid = IntPtr.Zero, capabilityEntry = IntPtr.Zero, capabilityText = IntPtr.Zero;
             bool initialized = false;
             try
             {
@@ -76,7 +119,18 @@ namespace AegisContainmentResearch
                 attributes = Marshal.AllocHGlobal(size);
                 if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref size)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot initialize process attributes.");
                 initialized = true;
-                var capability = new SecurityCapabilities { Sid = sid, Capabilities = IntPtr.Zero, Count = 0, Reserved = 0 };
+                bool privateNetwork = mode == "private-network-control-client";
+                string expectedCapability = null;
+                if (privateNetwork)
+                {
+                    capabilitySid = CreatePrivateNetworkCapabilitySid();
+                    if (!ConvertSidToStringSidW(capabilitySid, out capabilityText))
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot format private network capability SID.");
+                    expectedCapability = Marshal.PtrToStringUni(capabilityText);
+                    capabilityEntry = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SidAndAttributes)));
+                    Marshal.StructureToPtr(new SidAndAttributes { Sid = capabilitySid, Attributes = 0x00000004 }, capabilityEntry, false);
+                }
+                var capability = new SecurityCapabilities { Sid = sid, Capabilities = capabilityEntry, Count = privateNetwork ? 1u : 0u, Reserved = 0 };
                 caps = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SecurityCapabilities)));
                 Marshal.StructureToPtr(capability, caps, false);
                 if (!UpdateProcThreadAttribute(attributes, 0, (IntPtr)0x00020009, caps, (IntPtr)Marshal.SizeOf(typeof(SecurityCapabilities)), IntPtr.Zero, IntPtr.Zero))
@@ -92,16 +146,65 @@ namespace AegisContainmentResearch
                 const uint flags = 0x00000004 | 0x00080000 | 0x08000000 | 0x00000400;
                 if (!CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, false, flags, environment, Path.GetDirectoryName(executable), ref startup, out info))
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create suspended CEF fixture.");
-                return new ContainedCefLauncher { process = info.Process, thread = info.Thread, Id = info.Id, ExpectedSid = expected };
+                return new ContainedCefLauncher { process = info.Process, thread = info.Thread, Id = info.Id, ExpectedSid = expected,
+                    verifyPrivateNetworkCapability = privateNetwork, ExpectedCapabilitySid = expectedCapability };
             }
             finally
             {
                 if (initialized) DeleteProcThreadAttributeList(attributes);
                 if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
                 if (caps != IntPtr.Zero) Marshal.FreeHGlobal(caps);
+                if (capabilityEntry != IntPtr.Zero) Marshal.FreeHGlobal(capabilityEntry);
+                if (capabilitySid != IntPtr.Zero) Marshal.FreeHGlobal(capabilitySid);
+                if (capabilityText != IntPtr.Zero) LocalFree(capabilityText);
                 if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
                 if (text != IntPtr.Zero) LocalFree(text);
                 if (sid != IntPtr.Zero) FreeSid(sid);
+            }
+        }
+
+        private static IntPtr CreatePrivateNetworkCapabilitySid()
+        {
+            // SECURITY_MAX_SID_SIZE, WinCapabilityPrivateNetworkClientServerSid (87).
+            uint size = 68;
+            IntPtr capabilitySid = Marshal.AllocHGlobal((int)size);
+            if (!CreateWellKnownSid(87, IntPtr.Zero, capabilitySid, ref size))
+            {
+                int error = Marshal.GetLastWin32Error();
+                Marshal.FreeHGlobal(capabilitySid);
+                throw new Win32Exception(error, "Cannot create private network capability SID.");
+            }
+            return capabilitySid;
+        }
+
+        private static void VerifyPrivateNetworkCapability(IntPtr token)
+        {
+            int length;
+            bool sized = GetTokenInformation(token, 30, IntPtr.Zero, 0, out length); // TokenCapabilities
+            int sizeError = Marshal.GetLastWin32Error();
+            if (sized || sizeError != 122)
+                throw new Win32Exception(sizeError, "Cannot size suspended token capabilities.");
+            int offset = Marshal.OffsetOf(typeof(TokenGroupsFirst), "First").ToInt32();
+            int entrySize = Marshal.SizeOf(typeof(SidAndAttributes));
+            if (length < offset + entrySize || length > 65536) throw new InvalidOperationException("Token capability information has an invalid size.");
+            IntPtr info = Marshal.AllocHGlobal(length), expected = IntPtr.Zero;
+            try
+            {
+                int returned;
+                if (!GetTokenInformation(token, 30, info, length, out returned))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot query suspended token capabilities.");
+                if (returned < offset + entrySize || Marshal.ReadInt32(info) != 1)
+                    throw new InvalidOperationException("Suspended token must have exactly one capability.");
+                var actual = (SidAndAttributes)Marshal.PtrToStructure(IntPtr.Add(info, offset), typeof(SidAndAttributes));
+                expected = CreatePrivateNetworkCapabilitySid();
+                if (actual.Sid == IntPtr.Zero || !IsValidSid(actual.Sid) || !EqualSid(actual.Sid, expected) ||
+                    (actual.Attributes & 0x00000004) == 0 || (actual.Attributes & 0x00000010) != 0)
+                    throw new InvalidOperationException("Suspended token private-network capability is missing, disabled, or unexpected.");
+            }
+            finally
+            {
+                if (expected != IntPtr.Zero) Marshal.FreeHGlobal(expected);
+                Marshal.FreeHGlobal(info);
             }
         }
 
@@ -135,6 +238,7 @@ namespace AegisContainmentResearch
                     if (!String.Equals(observed, ExpectedSid, StringComparison.Ordinal)) throw new InvalidOperationException("Suspended CEF token SID does not match the requested identity.");
                 }
                 finally { if (sidText != IntPtr.Zero) LocalFree(sidText); Marshal.FreeHGlobal(info); }
+                if (verifyPrivateNetworkCapability) VerifyPrivateNetworkCapability(token);
             }
             finally { if (!CloseHandle(token)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot close token handle."); }
             verified = true;
