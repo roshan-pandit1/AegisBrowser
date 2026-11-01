@@ -1,4 +1,11 @@
 # Offline validation of trusted-operator-transferred synthetic receiver evidence.
+# Windows PowerShell and PowerShell 7 deserialize JSON integers as Int32 and
+# Int64 respectively. Accept only those integral types; never coerce strings,
+# booleans or fractional numbers from untrusted evidence.
+function Test-JsonInteger($Value) {
+    return ($Value -is [int] -or $Value -is [long])
+}
+
 function Assert-OrdinaryReceiverEvidence {
     param(
         [Parameter(Mandatory = $true)] $Evidence,
@@ -18,15 +25,15 @@ function Assert-OrdinaryReceiverEvidence {
     } elseif ($Evidence.observedUtc -is [DateTimeOffset]) {
         $utcValid = $Evidence.observedUtc.Offset -eq [TimeSpan]::Zero
     }
-    if ($Evidence.formatVersion -isnot [int] -or $Evidence.formatVersion -ne 2 -or
+    if (-not (Test-JsonInteger $Evidence.formatVersion) -or $Evidence.formatVersion -ne 2 -or
         $Evidence.runId -isnot [string] -or $Evidence.runId -cne $RunId.ToString('N') -or
         $Evidence.overallStatus -cne 'INCONCLUSIVE' -or $Evidence.classification -cne 'ALLOWED_AND_INDEPENDENTLY_OBSERVED' -or
         $Evidence.transactionId -cne $Nonce.ToString('N') -or
-        $Evidence.receiverAddress -cne $ReceiverAddress -or $Evidence.receiverPort -isnot [int] -or $Evidence.receiverPort -ne $Port -or
-        $Evidence.remoteAddress -cne $ClientAddress -or $Evidence.remotePort -isnot [int] -or $Evidence.remotePort -lt 1 -or $Evidence.remotePort -gt 65535 -or
+        $Evidence.receiverAddress -cne $ReceiverAddress -or -not (Test-JsonInteger $Evidence.receiverPort) -or $Evidence.receiverPort -ne $Port -or
+        $Evidence.remoteAddress -cne $ClientAddress -or -not (Test-JsonInteger $Evidence.remotePort) -or $Evidence.remotePort -lt 1 -or $Evidence.remotePort -gt 65535 -or
         -not $utcValid -or
-        $Evidence.transport -cne 'IPv4/TCP' -or $Evidence.observedMatches -isnot [int] -or $Evidence.observedMatches -ne 1 -or
-        $Evidence.duplicateObservationWindowSeconds -isnot [int] -or $Evidence.duplicateObservationWindowSeconds -ne 2 -or
+        $Evidence.transport -cne 'IPv4/TCP' -or -not (Test-JsonInteger $Evidence.observedMatches) -or $Evidence.observedMatches -ne 1 -or
+        -not (Test-JsonInteger $Evidence.duplicateObservationWindowSeconds) -or $Evidence.duplicateObservationWindowSeconds -ne 2 -or
         $Evidence.duplicateCoverage -cne 'bounded-window-only' -or $Evidence.processAttribution -cne 'unverified' -or $Evidence.wfpDecision -cne 'not-observed') {
         throw 'Ordinary control evidence does not match this run.'
     }

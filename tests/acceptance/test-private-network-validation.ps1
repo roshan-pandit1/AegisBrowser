@@ -22,8 +22,29 @@ $evidence = [ordered]@{
 }
 $valid = ($evidence | ConvertTo-Json -Compress | ConvertFrom-Json)
 Assert-OrdinaryReceiverEvidence -Evidence $valid -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123
+# Exercise the JSON integral representations used by both Windows PowerShell
+# and PowerShell 7 regardless of which runtime runs this suite.
+$int64Evidence = ($evidence | ConvertTo-Json -Compress | ConvertFrom-Json)
+foreach ($field in @('formatVersion', 'receiverPort', 'remotePort', 'observedMatches', 'duplicateObservationWindowSeconds')) {
+    $int64Evidence.$field = [long] $int64Evidence.$field
+}
+Assert-OrdinaryReceiverEvidence -Evidence $int64Evidence -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123
+$int32Evidence = ($evidence | ConvertTo-Json -Compress | ConvertFrom-Json)
+foreach ($field in @('formatVersion', 'receiverPort', 'remotePort', 'observedMatches', 'duplicateObservationWindowSeconds')) {
+    $int32Evidence.$field = [int] $int32Evidence.$field
+}
+Assert-OrdinaryReceiverEvidence -Evidence $int32Evidence -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123
+foreach ($validInteger in @([int] 0, [long] 0, [int] 47123, [long] 47123)) {
+    if (-not (Test-JsonInteger $validInteger)) { throw 'Valid JSON integer representation rejected.' }
+}
+foreach ($invalidInteger in @('0', [double] 0, $true, $null)) {
+    if (Test-JsonInteger $invalidInteger) { throw 'Non-integer JSON value accepted.' }
+}
 $badCases = @(
     @{ field = 'formatVersion'; value = 1 },
+    @{ field = 'formatVersion'; value = '2' },
+    @{ field = 'receiverPort'; value = [double] 47123 },
+    @{ field = 'observedMatches'; value = $true },
     @{ field = 'runId'; value = [guid]::NewGuid().ToString('N') },
     @{ field = 'transactionId'; value = [guid]::NewGuid().ToString('N') },
     @{ field = 'remotePort'; value = 0 },

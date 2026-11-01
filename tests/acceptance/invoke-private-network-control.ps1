@@ -116,9 +116,9 @@ $ordinaryClient = Join-Path $root 'ordinary-client.json'
 Assert-NoLink $ordinaryClient
 if ((Get-Item -LiteralPath $ordinaryClient).Length -gt 4096) { throw 'Ordinary client evidence is oversized.' }
 $ordinaryRecord = Get-Content -LiteralPath $ordinaryClient -Raw | ConvertFrom-Json
-if ($ordinaryRecord.formatVersion -isnot [int] -or $ordinaryRecord.formatVersion -ne 2 -or $ordinaryRecord.runId -cne $id -or $ordinaryRecord.overallStatus -cne 'INCONCLUSIVE' -or $ordinaryRecord.stage -cne 'Ordinary' -or $ordinaryRecord.transactionId -cne $NormalNonce.ToString('N') -or
-    $ordinaryRecord.receiverAddress -cne $ReceiverAddress -or $ordinaryRecord.receiverPort -isnot [int] -or $ordinaryRecord.receiverPort -ne $Port -or $ordinaryRecord.clientAddress -cne $ClientAddress -or
-    $ordinaryRecord.exitCode -isnot [int] -or $ordinaryRecord.exitCode -ne 0 -or $ordinaryRecord.clientResult -cne 'sent' -or $ordinaryRecord.timedOut -isnot [bool] -or $ordinaryRecord.timedOut) {
+if (-not (Test-JsonInteger $ordinaryRecord.formatVersion) -or $ordinaryRecord.formatVersion -ne 2 -or $ordinaryRecord.runId -cne $id -or $ordinaryRecord.overallStatus -cne 'INCONCLUSIVE' -or $ordinaryRecord.stage -cne 'Ordinary' -or $ordinaryRecord.transactionId -cne $NormalNonce.ToString('N') -or
+    $ordinaryRecord.receiverAddress -cne $ReceiverAddress -or -not (Test-JsonInteger $ordinaryRecord.receiverPort) -or $ordinaryRecord.receiverPort -ne $Port -or $ordinaryRecord.clientAddress -cne $ClientAddress -or
+    -not (Test-JsonInteger $ordinaryRecord.exitCode) -or $ordinaryRecord.exitCode -ne 0 -or $ordinaryRecord.clientResult -cne 'sent' -or $ordinaryRecord.timedOut -isnot [bool] -or $ordinaryRecord.timedOut) {
     throw 'Ordinary client did not complete successfully for this run.'
 }
 Write-NewFile (Join-Path $clientRoot 'private-network-control.txt') ($ReceiverAddress + "`n" + $Port + "`n" + $ContainedNonce.ToString('N') + "`n")
