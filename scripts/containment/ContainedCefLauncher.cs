@@ -46,6 +46,12 @@ namespace AegisContainmentResearch
         [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);
 
         public static ContainedCefLauncher Start(string identity, string executable, string syntheticRoot)
+        { return StartMode(identity, executable, syntheticRoot, "appcontainer-probe"); }
+
+        public static ContainedCefLauncher StartObserver(string identity, string executable, string syntheticRoot)
+        { return StartMode(identity, executable, syntheticRoot, "appcontainer-observer"); }
+
+        private static ContainedCefLauncher StartMode(string identity, string executable, string syntheticRoot, string mode)
         {
             executable = Path.GetFullPath(executable);
             syntheticRoot = Path.GetFullPath(syntheticRoot);
@@ -72,7 +78,7 @@ namespace AegisContainmentResearch
                 if (!UpdateProcThreadAttribute(attributes, 0, (IntPtr)0x00020009, caps, (IntPtr)Marshal.SizeOf(typeof(SecurityCapabilities)), IntPtr.Zero, IntPtr.Zero))
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot apply AppContainer security capabilities.");
                 var startup = new StartupInfoEx { Startup = new StartupInfo { Size = Marshal.SizeOf(typeof(StartupInfoEx)) }, Attributes = attributes };
-                var command = new StringBuilder("\"" + executable + "\" appcontainer-probe \"" + syntheticRoot + "\"");
+                var command = new StringBuilder("\"" + executable + "\" " + mode + " \"" + syntheticRoot + "\"");
                 ProcessInformation info;
                 // Do not inherit CI secrets or the real user profile. These paths are synthetic.
                 string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);

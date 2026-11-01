@@ -1,0 +1,17 @@
+# Concurrent CEF AppContainer identity observation
+
+Research only. The opt-in disposable-runner harness stages two separate copies of the synthetic CEF test fixture and two distinct cache roots, registers two distinct per-user AppContainer identities, and verifies both suspended browser-process tokens before either is resumed. The browser fixtures pause after loading the application-owned diagnostics scheme while an independent observer samples descendants three times. It records process ID, snapshot parent, creation time, available executable path, raw IsWow64Process2 values, AppContainer status and SID. A CIM command line is inspected only to extract synthetic Chromium process-role switches; its full contents are not logged. Role attribution requires matching the sampled parent and creation time. An inaccessible token, path or role is explicitly inconclusive.
+
+Each synthetic process also attempts to read a known control file from the other synthetic profile after proving it can read its own. An access-denied result covers only that file and those token/ACL conditions, not Chromium's full cache, cookie, IndexedDB or storage isolation. Successful cross-read is a failure of that attempted separation. A missing file or other I/O error is inconclusive. The profile directories, fixture copies and test identities are retained until the hosted runner is discarded; no existing browser profile, ACL, firewall rule or credential is modified.
+
+An observed child with a different SID is reported, and a detected network-role mismatch makes package-SID-only containment unverified. A process snapshot can miss transient, reparented or brokered processes and cannot prove that all network-capable subprocesses are covered. It also cannot prove WFP enforcement or lack of network egress. PID associations and image/role data are observations, not durable policy identities. The primary process handle is retained until cleanup; only owned synthetic processes are stopped on timeout or failure. Descendants can outlive the root until the disposable runner is discarded.
+
+Run only with explicit opt-in on a disposable GitHub-hosted runner after building the native x64 browser tests:
+
+    ./tests/acceptance/observe-appcontainer-cef-children.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
+
+No WFP objects, loopback exemption, system-wide networking change or production containment service is installed. This test grants no network capabilities and that does not independently establish a network boundary. Actual Windows results must be reported separately from this plan; required-proxy profiles remain blocked.
+
+## Initial Windows x64 observation
+
+In [Windows run 41286466008](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41286466008), commit `2c2097ec1b36a451f5041b39a9250145cfa13984`, both synthetic CEF processes reached the barrier concurrently under distinct verified parent SIDs and exited with their native-shutdown markers. Three snapshots observed GPU, renderer, storage-service and provisionally identified network-service children using the corresponding parent SID. Each process read its own synthetic control file and was denied the other's. These are observations from one run and those test files, not proof of complete subprocess coverage, actual Chromium storage isolation, WFP enforcement or restricted egress.
