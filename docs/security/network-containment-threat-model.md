@@ -30,3 +30,7 @@ The target is to prevent unintended network paths from a proxy-required profile,
 At the baseline, a controlled local test observed STUN UDP at a direct loopback listener while HTTP used a proxy ([run 41057825104](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41057825104)). It does not measure public traffic or all WebRTC behavior. A later accepted WebRTC preference with no single observed packet was inconclusive. The baseline also has separate-process HTTP fixtures and a stopped-proxy load error, not independent proof of complete egress control. See [test plan](network-egress-test-plan.md).
 
 Production activation requires independently verified profile identity and all relevant subprocesses, policy active before execution, correct TCP/UDP/IPv4/IPv6/DNS/WebRTC behavior, proxy outage and service/BFE failure behavior, crash recovery, safe cleanup, and supported platform coverage. Missing, skipped or inconclusive security tests block activation. There is no production service, driver, WFP rule or filter installed by this research.
+
+## CEF identity research update
+
+Two synthetic CEF roots and sampled network-service children used distinct profile-associated AppContainer SIDs in one controlled run; snapshots do not cover all possible subprocesses. See [process observations](cef-appcontainer-process-observation.md). No WFP egress enforcement or service-failure safety is established.

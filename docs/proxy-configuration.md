@@ -72,3 +72,7 @@ On 2026-10-31, [Windows CI run 41156105515](https://github.com/roshan-pandit1/Ae
 - On a test account, verify credential replacement and loss of access after moving protected data to a different Windows user.
 - Test interrupted writes, corrupt/missing database, explicit Direct recovery and rollback to an older build using disposable profiles.
 - Verify real proxy routing and failure transitions only after a browser integration PR provides controlled native network tests.
+
+## AppContainer research update
+
+The [CEF AppContainer experiment](security/cef-appcontainer-experiment.md) and [concurrent process observations](security/cef-appcontainer-process-observation.md) are research only. The [scoped WFP object fixture](security/wfp-scoped-object-research.md) does not establish packet enforcement. Required-proxy profiles remain blocked before CEF initialization.

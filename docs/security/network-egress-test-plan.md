@@ -32,3 +32,7 @@ At the baseline, Windows x64 CI observed a direct loopback STUN packet while its
 `tests/acceptance/observe-external-egress.ps1` runs a separate-process, IPv4 loopback-only proxy, origin and STUN listener against a synthetic CEF process. The fixture has positive TCP/UDP controls, permits only one synthetic HTTP request and does not forward traffic. It also stops the proxy and observes its local origin trap. These limited receiver observations provide no system-wide packet capture, process attribution, DNS or IPv6 coverage and cannot prove a negative or fail-closed containment. No STUN packet remains inconclusive. It installs no WFP rules and does not touch the production browser guard.
 
 Manual release acceptance: repeat the approved matrix with authorized HTTP/SOCKS proxies, controlled DNS and STUN endpoints, public and private network transitions, real IPv4/IPv6, sleep/wake, proxy restart, Windows x64 and Windows 11 ARM64 under x64 emulation. Record environment and evidence, keeping credentials and session content out of artifacts. Do not enable production proxy routing until all activation gates in the [threat model](network-containment-threat-model.md) pass.
+
+## AppContainer and WFP test scope
+
+The [concurrent CEF identity experiment](cef-appcontainer-process-observation.md) observes tokens, not egress. The [WFP object fixture](wfp-scoped-object-research.md) only constructs scoped test objects when explicitly opted in; it has not established an allow/deny packet result. IPv6, DNS, UDP, proxy failure and service-loss enforcement remain open.
