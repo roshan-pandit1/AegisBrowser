@@ -135,7 +135,10 @@ static void AddFilter(HANDLE engine, const GUID& provider, const GUID& sublayer,
 static bool ExactScope(const FWPM_FILTER0* filter, const GUID& provider, const GUID& sublayer, const Fixture& fixture)
 {
     bool sid = false, address = false, port = false, protocol = false;
-    bool header = filter && IsEqualGUID(filter->filterKey, fixture.filter) && filter->flags == 0 &&
+    // BFE may return INDEXED for lookup acceleration. Reject every other flag,
+    // including DISABLED and anything that could change the filter's action.
+    bool header = filter && IsEqualGUID(filter->filterKey, fixture.filter) &&
+        (filter->flags & ~static_cast<UINT32>(FWPM_FILTER_FLAG_INDEXED)) == 0 &&
         filter->providerKey && IsEqualGUID(*filter->providerKey, provider) &&
         IsEqualGUID(filter->subLayerKey, sublayer) && IsEqualGUID(filter->layerKey, FWPM_LAYER_ALE_AUTH_CONNECT_V4) &&
         filter->action.type == FWP_ACTION_BLOCK && filter->numFilterConditions == 4;
