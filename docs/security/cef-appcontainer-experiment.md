@@ -17,3 +17,7 @@ To reproduce, build the Windows x64 browser tests and run on a disposable GitHub
     ./tests/acceptance/observe-appcontainer-cef.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
 
 No kernel driver, firewall modification, persistent service, loopback exemption or host networking change is installed. Recovery is to discard the disposable runner; do not delete real browser profiles or reset firewall settings.
+
+## Initial Windows x64 observation
+
+In [Windows run 41265475417](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41265475417), commit `540beb61936ecf2c9d0a22c248750a85c3616d78`, the actual suspended CEF test executable had the requested AppContainer SID. Wrong-SID verification and resume without a current successful verification were rejected. After resume, the process initialized CEF, created a browser, loaded the owned diagnostic handler and reached its shutdown marker with exit code 0. This is one controlled compatibility observation, not evidence of child-token coverage, policy enforcement or network isolation. The test requests no network capabilities but does not independently enforce or observe all egress.
