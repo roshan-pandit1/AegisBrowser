@@ -173,10 +173,17 @@ public sealed class MainForm : Form
             try { await browser.ReleaseNativeHostAsync(); }
             catch (TimeoutException) { Report("Browser shutdown timed out; close the window to retry."); return; }
             retiring.Remove(page);
+            if (closing)
+            {
+                // Keep all tab parents alive during window shutdown. Removing one page
+                // can select another still-closing tab and recreate its browser HWND.
+                // The form disposes the pages after every native owner has closed.
+                if (retiring.Count == 0) { closeComplete = true; Close(); }
+                return;
+            }
             tabs.TabPages.Remove(page);
             page.Dispose();
-            if (closing && retiring.Count == 0) { closeComplete = true; Close(); }
-            else if (!closing && tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
+            if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
         }));
         browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
         {
