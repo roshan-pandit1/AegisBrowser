@@ -77,6 +77,18 @@ jobs:
       - name: Observe CEF traffic from external loopback fixtures
         timeout-minutes: 5
         run: ./tests/acceptance/observe-external-egress.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Exercise native window creation and close sequence
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-window-repro-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe hwnd-repro $profileRoot 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -and (Test-Path (Join-Path $profileRoot 'cef-window-repro.log'))) {
+            Get-Content (Join-Path $profileRoot 'cef-window-repro.log') | Write-Output
+          }
+          if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: native window candidate reproduction completed and CEF shut down')) { throw 'Native window reproduction did not complete.' }
       - name: Build Chromium filtering tests
         if: ${{ !cancelled() }}
         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
