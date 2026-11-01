@@ -11,3 +11,7 @@ Run only with explicit opt-in on a disposable GitHub-hosted runner after buildin
     ./tests/acceptance/observe-appcontainer-cef-children.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
 
 No WFP objects, loopback exemption, system-wide networking change or production containment service is installed. This test grants no network capabilities and that does not independently establish a network boundary. Actual Windows results must be reported separately from this plan; required-proxy profiles remain blocked.
+
+## Initial Windows x64 observation
+
+In [Windows run 41286466008](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41286466008), commit `2c2097ec1b36a451f5041b39a9250145cfa13984`, both synthetic CEF processes reached the barrier concurrently under distinct verified parent SIDs and exited with their native-shutdown markers. Three snapshots observed GPU, renderer, storage-service and provisionally identified network-service children using the corresponding parent SID. Each process read its own synthetic control file and was denied the other's. These are observations from one run and those test files, not proof of complete subprocess coverage, actual Chromium storage isolation, WFP enforcement or restricted egress.
