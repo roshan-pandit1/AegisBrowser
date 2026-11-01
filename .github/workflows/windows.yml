@@ -33,6 +33,9 @@ jobs:
       - name: Research actual CEF under an AppContainer identity
         timeout-minutes: 4
         run: ./tests/acceptance/observe-appcontainer-cef.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
+      - name: Observe two CEF AppContainer process trees
+        timeout-minutes: 6
+        run: ./tests/acceptance/observe-appcontainer-cef-children.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
       - name: Browser storage, OAuth, tab and renderer tests
         timeout-minutes: 5
         run: |

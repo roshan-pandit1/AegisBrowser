@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace AegisContainmentResearch
@@ -23,6 +24,8 @@ namespace AegisContainmentResearch
         public ushort ProcessMachine { get; set; }
         public ushort NativeMachine { get; set; }
         public string Error { get; set; }
+        public string ExecutablePath { get; set; }
+        public string PathError { get; set; }
     }
 
     public static class ProcessIdentityReader
@@ -57,6 +60,8 @@ namespace AegisContainmentResearch
             out long kernel, out long user);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool IsWow64Process2(SafeProcessHandle process, out ushort processMachine, out ushort nativeMachine);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool QueryFullProcessImageName(SafeProcessHandle process, int flags, StringBuilder path, ref int size);
         [DllImport("advapi32.dll", SetLastError = true)]
         private static extern bool OpenProcessToken(SafeProcessHandle process, uint access, out SafeAccessTokenHandle token);
         [DllImport("advapi32.dll", SetLastError = true)]
@@ -95,7 +100,7 @@ namespace AegisContainmentResearch
 
         public static IdentityObservation Observe(uint id)
         {
-            var result = new IdentityObservation { Id = id, CreationUtc = "", PackageSid = "", Error = "" };
+            var result = new IdentityObservation { Id = id, CreationUtc = "", PackageSid = "", Error = "", ExecutablePath = "", PathError = "" };
             using (var process = OpenProcess(QueryLimitedInformation, false, id))
             {
                 if (process.IsInvalid) { result.Error = "OpenProcess: " + Marshal.GetLastWin32Error(); return result; }
@@ -103,6 +108,10 @@ namespace AegisContainmentResearch
                 if (!GetProcessTimes(process, out creation, out exit, out kernel, out user))
                 { result.Error = "GetProcessTimes: " + Marshal.GetLastWin32Error(); return result; }
                 result.CreationUtc = DateTime.FromFileTimeUtc(creation).ToString("O");
+                var path = new StringBuilder(32768);
+                int pathSize = path.Capacity;
+                if (QueryFullProcessImageName(process, 0, path, ref pathSize)) result.ExecutablePath = path.ToString();
+                else result.PathError = "QueryFullProcessImageName: " + Marshal.GetLastWin32Error();
                 ushort processMachine, nativeMachine;
                 if (!IsWow64Process2(process, out processMachine, out nativeMachine))
                 { result.Error = "IsWow64Process2: " + Marshal.GetLastWin32Error(); return result; }

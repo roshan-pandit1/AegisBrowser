@@ -7,7 +7,7 @@ namespace AegisBrowser.BrowserTests;
 internal static partial class Program
 {
     // Test process only. It never reads a production profile or configures a proxy.
-    private static int AppContainerCefProbe(string profileRoot)
+    private static int AppContainerCefProbe(string profileRoot, bool waitForObserver = false)
     {
         var root = Path.GetFullPath(profileRoot);
         void Mark(string name) => File.WriteAllText(Path.Combine(root, name), "observed");
@@ -45,6 +45,38 @@ internal static partial class Program
                     if (!(await Js(browser, "document.title")).Contains("diagnostics", StringComparison.OrdinalIgnoreCase))
                         throw new IOException("The controlled diagnostic page did not load.");
                     Mark("navigated");
+                    if (waitForObserver)
+                    {
+                        Mark("observer-ready");
+                        var deadline = DateTime.UtcNow.AddSeconds(60);
+                        while (!File.Exists(Path.Combine(root, "cross-check")) && !File.Exists(Path.Combine(root, "observer-release")))
+                        {
+                            if (DateTime.UtcNow >= deadline) throw new TimeoutException("Independent cross-profile check was not requested.");
+                            await Task.Delay(100);
+                        }
+                        if (File.Exists(Path.Combine(root, "cross-check")))
+                        {
+                            var ownRole = Directory.GetParent(root)?.Name;
+                            if (ownRole is not ("A" or "B")) throw new IOException("Unexpected synthetic profile role.");
+                            var pairRoot = Directory.GetParent(Directory.GetParent(root)!.FullName)!.FullName;
+                            if (File.ReadAllText(Path.Combine(root, "isolation-control")) != ownRole)
+                                throw new IOException("Own synthetic profile control is unreadable or mismatched.");
+                            Mark("own-control-read");
+                            try
+                            {
+                                var other = Path.Combine(pairRoot, ownRole == "A" ? "B" : "A", "profile", "isolation-control");
+                                _ = File.ReadAllText(other);
+                                Mark("cross-access-allowed");
+                            }
+                            catch (UnauthorizedAccessException) { Mark("cross-access-denied"); }
+                            catch (IOException) { Mark("cross-access-inconclusive"); }
+                        }
+                        while (!File.Exists(Path.Combine(root, "observer-release")))
+                        {
+                            if (DateTime.UtcNow >= deadline) throw new TimeoutException("Independent observer did not release the synthetic fixture.");
+                            await Task.Delay(100);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
