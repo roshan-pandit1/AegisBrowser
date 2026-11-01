@@ -1,0 +1,17 @@
+# Scoped WFP object feasibility experiment
+
+Status: test implementation; native WFP execution and effective enforcement are unverified. This is not a containment service and does not affect production browser startup.
+
+The opt-in test creates two uniquely named synthetic per-user AppContainer profiles and reserves two separate loopback TCP ports. It opens a dynamic WFP session and, in a transaction, creates a test-owned provider, sublayer and two block filters. Each filter intersects exactly one fresh AppContainer package SID, TCP, IPv4 loopback destination and its own reserved port at ALE_AUTH_CONNECT_V4. It adds no permit rule, loopback exemption, callout, driver or system-wide rule. It reads each filter back and checks its layer, owner, action and all four conditions before reporting object creation. After closing the dynamic session it queries the two filter keys, provider and sublayer from another session and requires all to be absent. It leaves the synthetic identities to disposal of the test runner; it does not remove user profiles or unrelated WFP objects.
+
+The harness validates its four in-memory conditions before staging each filter, attempts readback inside the transaction before commit, and checks both filters again after commit. On failure with a transaction open, it explicitly attempts transaction abort and reports abort or session-close errors. The test logs its own random provider, sublayer and filter GUIDs. If cleanup reports failure, retain those identifiers and discard the disposable runner; do not reset WFP or delete unrelated rules.
+
+The test's executable and script both reject actual execution unless explicitly requested on a disposable GitHub-hosted runner. Build-only mode performs no WFP API calls. On an isolated runner with Visual Studio's x64 developer environment, the explicit command is:
+
+    ./tests/acceptance/research-wfp-scoped-objects.ps1 -RunOnDisposableRunner
+
+To compile without executing the privileged test, use -BuildOnly. Adding or querying filters requires the BFE access rights documented by Microsoft; this may require an elevated isolated runner. Missing permissions, unavailable SDK, an installation failure or cleanup verification failure are failures or unavailable results, never evidence of network isolation.
+
+This deliberately narrow experiment does not launch CEF, classify traffic, test a permit rule, prove filter arbitration, or observe packet delivery. It does not test IPv6, UDP, DNS, WebRTC, cross-profile traffic, proxy outages, service failure or BFE restart. A successful object readback is not proof that any packet was blocked. Dynamic session objects are removed when the session ends; they cannot by themselves enforce fail-closed behavior if a browser outlives that session. Any future egress experiment needs independent positive and negative controls, a demonstrated enforceable identity for network-capable descendants, lifecycle review and a separately authorized disposable environment.
+
+References: [WFP object management](https://learn.microsoft.com/en-us/windows/win32/fwp/object-management), [available layer conditions](https://learn.microsoft.com/en-us/windows/win32/fwp/filtering-conditions-available-at-each-filtering-layer), [WFP access control](https://learn.microsoft.com/en-us/windows/win32/fwp/access-control) and [filter arbitration](https://learn.microsoft.com/en-us/windows/win32/fwp/filter-arbitration).
