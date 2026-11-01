@@ -80,3 +80,5 @@ The [CEF AppContainer experiment](security/cef-appcontainer-experiment.md) and [
 ## Private-network control follow-up
 
 A suspended synthetic AppContainer's package SID and sole enabled private-network capability were verified in [Windows run 41314237304](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41314237304). No network was attempted by that token test. The opt-in [isolated cross-VM control](security/cross-vm-network-test.md) has not been executed; ordinary and AppContainer cross-VM delivery, WFP packet enforcement and attribution remain unverified. Production required-proxy startup remains blocked.
+
+The current [isolated VM acceptance checklist](security/isolated-vm-acceptance-checklist.md) records the infrastructure blocker and prerequisites. [Packet attribution](security/wfp-packet-attribution.md) and [policy lifetime](security/wfp-fail-closed-lifetime.md) remain research gates; no packet enforcement is claimed.

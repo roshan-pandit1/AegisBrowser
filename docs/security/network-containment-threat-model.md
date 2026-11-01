@@ -34,3 +34,5 @@ Production activation requires independently verified profile identity and all r
 ## CEF identity research update
 
 Two synthetic CEF roots and sampled network-service children used distinct profile-associated AppContainer SIDs in one controlled run; snapshots do not cover all possible subprocesses. See [process observations](cef-appcontainer-process-observation.md). No WFP egress enforcement or service-failure safety is established.
+
+The current [isolated VM acceptance checklist](isolated-vm-acceptance-checklist.md) records the infrastructure blocker and prerequisites. [Packet attribution](wfp-packet-attribution.md) and [policy lifetime](wfp-fail-closed-lifetime.md) remain research gates; no packet enforcement is claimed.
