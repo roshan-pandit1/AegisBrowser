@@ -4,7 +4,7 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <fwpmu.h>
-#include <fwperror.h>
+#include <winerror.h>
 #include <userenv.h>
 #include <rpc.h>
 #include <sddl.h>
