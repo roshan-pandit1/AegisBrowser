@@ -61,6 +61,9 @@ jobs:
       - name: Observe synthetic AppContainer TCP positive control
         timeout-minutes: 3
         run: ./tests/acceptance/observe-appcontainer-tcp-control.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
+      - name: Validate private network fixture inputs
+        timeout-minutes: 3
+        run: ./tests/acceptance/test-private-network-validation.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Verify suspended AppContainer private network capability
         timeout-minutes: 3
         run: ./tests/acceptance/verify-appcontainer-private-capability.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner

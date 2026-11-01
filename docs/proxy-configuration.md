@@ -76,3 +76,7 @@ On 2026-10-31, [Windows CI run 41156105515](https://github.com/roshan-pandit1/Ae
 ## AppContainer research update
 
 The [CEF AppContainer experiment](security/cef-appcontainer-experiment.md) and [concurrent process observations](security/cef-appcontainer-process-observation.md) are research only. The [scoped WFP object fixture](security/wfp-scoped-object-research.md) does not establish packet enforcement. Required-proxy profiles remain blocked before CEF initialization.
+
+## Private-network control follow-up
+
+A suspended synthetic AppContainer's package SID and sole enabled private-network capability were verified in [Windows run 41314237304](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41314237304). No network was attempted by that token test. The opt-in [isolated cross-VM control](security/cross-vm-network-test.md) has not been executed; ordinary and AppContainer cross-VM delivery, WFP packet enforcement and attribution remain unverified. Production required-proxy startup remains blocked.
