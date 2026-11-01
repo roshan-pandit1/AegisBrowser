@@ -43,12 +43,14 @@ internal static partial class Program
                             var handle = control.IsHandleCreated ? control.Handle : IntPtr.Zero;
                             control.HandleCreated += (_, _) => { handle = control.Handle; Trace(name, control, "created", handle); };
                             control.HandleDestroyed += (_, _) => Trace(name, control, "destroyed", handle);
-                            control.ControlAdded += (_, e) => Track(e.Control, e.Control.GetType().Name);
+                            control.ControlAdded += (_, e) => { if (e.Control is Control child) Track(child, child.GetType().Name); };
                             foreach (Control child in control.Controls) Track(child, child.GetType().Name);
                         }
                         Track(form, "MainForm");
                         form.Show();
                         var tabs = form.Controls.OfType<TabControl>().Single();
+                        tabs.SelectedIndexChanged += (_, _) => Trace("TabControl", tabs, "selection-" + tabs.SelectedIndex, tabs.IsHandleCreated ? tabs.Handle : IntPtr.Zero);
+                        tabs.ControlRemoved += (_, _) => Trace("TabControl", tabs, "child-removed", tabs.IsHandleCreated ? tabs.Handle : IntPtr.Zero);
                         var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
                         Button Button(string text) => toolbar.Controls.OfType<Button>().Single(b => b.Text == text);
                         ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
