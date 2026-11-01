@@ -23,6 +23,7 @@ internal static partial class Program
         if (args.Length == 2 && args[0] == "dashboard-launch") return DashboardApplication(args[1]);
         if (args.Length == 2 && args[0] == "proxy-probe") return ProxyProbe(args[1]);
         if (args.Length == 2 && args[0] == "external-egress-probe") return ExternalEgressProbe(args[1]);
+        if (args.Length == 2 && args[0] == "hwnd-repro") return NativeWindowRepro(args[1]);
         if (args.Length == 2 && args[0] == "proxy-auth-probe") return ProxyAuthProbe(args[1]);
         if (args.Length != 2 || args[0] is not ("write" or "read")) return 2;
         Application.EnableVisualStyles();
