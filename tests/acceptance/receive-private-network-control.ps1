@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string] $BindAddress,
     [Parameter(Mandatory = $true)][string] $ExpectedClientAddress,
     [Parameter(Mandatory = $true)][ValidateRange(1024,65535)][int] $Port,
+    [Parameter(Mandatory = $true)][guid] $RunId,
     [Parameter(Mandatory = $true)][guid] $NormalNonce,
     [Parameter(Mandatory = $true)][guid] $ContainedNonce,
     [Parameter(Mandatory = $true)][string] $EvidenceDirectory,
@@ -27,8 +28,8 @@ function ConvertTo-PrivateIPv4([string] $InputAddress) {
 }
 $bind = ConvertTo-PrivateIPv4 $BindAddress
 $expectedClient = ConvertTo-PrivateIPv4 $ExpectedClientAddress
-if ($bind.Equals($expectedClient) -or $NormalNonce -eq [guid]::Empty -or $ContainedNonce -eq [guid]::Empty -or $NormalNonce -eq $ContainedNonce) {
-    throw 'Two distinct VM addresses and two distinct nonempty nonces are required.'
+if ($bind.Equals($expectedClient) -or $RunId -eq [guid]::Empty -or $NormalNonce -eq [guid]::Empty -or $ContainedNonce -eq [guid]::Empty -or $NormalNonce -eq $ContainedNonce -or $RunId -eq $NormalNonce -or $RunId -eq $ContainedNonce) {
+    throw 'Two distinct VM addresses and three distinct nonempty run identifiers are required.'
 }
 $evidenceRoot = [IO.Path]::GetFullPath($EvidenceDirectory)
 if (Test-Path -LiteralPath $evidenceRoot) { throw 'Evidence directory must be new.' }
@@ -81,7 +82,7 @@ try {
             if ($nonce -ceq $contained -and -not $seen.ContainsKey($normal)) { throw 'Contained attempt preceded the ordinary positive control.' }
             $seen[$nonce] = $true
             $pendingRecord = [ordered]@{
-                formatVersion = 1; classification = 'ALLOWED_AND_INDEPENDENTLY_OBSERVED';
+                formatVersion = 2; runId = $RunId.ToString('N'); overallStatus = 'INCONCLUSIVE'; classification = 'ALLOWED_AND_INDEPENDENTLY_OBSERVED';
                 transactionId = $nonce; receiverAddress = $bind.ToString(); receiverPort = $Port;
                 remoteAddress = $remote.Address.ToString(); remotePort = $remote.Port;
                 observedUtc = [DateTime]::UtcNow.ToString('O'); transport = 'IPv4/TCP';

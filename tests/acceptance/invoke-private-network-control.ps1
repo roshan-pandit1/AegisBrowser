@@ -16,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $AcknowledgeDisposableIsolatedNetwork -or $env:AEGIS_DISPOSABLE_VM_NETWORK_TEST -cne 'I_UNDERSTAND') {
     throw 'Explicit disposable isolated-VM acknowledgement and AEGIS_DISPOSABLE_VM_NETWORK_TEST=I_UNDERSTAND are required.'
 }
+. (Join-Path $PSScriptRoot 'private-network-evidence.ps1')
 function Assert-NoLink([string] $Path) {
     $item = Get-Item -LiteralPath $Path -Force
     while ($null -ne $item) {
@@ -38,10 +39,21 @@ function Write-NewFile([string] $Path, [string] $Value) {
     $file = New-Object IO.FileStream($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
     try { $file.Write($data, 0, $data.Length); $file.Flush($true) } finally { $file.Dispose() }
 }
+function Get-SyntheticClientResult([string] $Root) {
+    $path = Join-Path $Root 'private-network-result.txt'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return 'missing' }
+    try {
+        Assert-NoLink $path
+        if ((Get-Item -LiteralPath $path).Length -gt 128) { return 'invalid' }
+        $result = [IO.File]::ReadAllText($path)
+        if ($result -cmatch '^(sent|unavailable:(InvalidDataException|IOException|SocketException|UnauthorizedAccessException|OperationCanceledException)|socket-error:[0-9]{1,10})$') { return $result }
+        return 'invalid'
+    } catch { return 'unreadable' }
+}
 Assert-PrivateIPv4 $ReceiverAddress
 Assert-PrivateIPv4 $ClientAddress
-if ($ReceiverAddress -ceq $ClientAddress -or $RunId -eq [guid]::Empty -or $NormalNonce -eq [guid]::Empty -or $ContainedNonce -eq [guid]::Empty -or $NormalNonce -eq $ContainedNonce) {
-    throw 'Distinct VM addresses, nonempty run ID and distinct nonempty nonces are required.'
+if ($ReceiverAddress -ceq $ClientAddress -or $RunId -eq [guid]::Empty -or $NormalNonce -eq [guid]::Empty -or $ContainedNonce -eq [guid]::Empty -or $NormalNonce -eq $ContainedNonce -or $RunId -eq $NormalNonce -or $RunId -eq $ContainedNonce) {
+    throw 'Distinct VM addresses and three distinct nonempty run identifiers are required.'
 }
 $parent = [IO.Path]::GetFullPath($ParentDirectory)
 Assert-NoLink $parent
@@ -70,12 +82,20 @@ if ($Stage -eq 'Ordinary') {
     Write-NewFile (Join-Path $normalRoot 'private-network-control.txt') ($ReceiverAddress + "`n" + $Port + "`n" + $NormalNonce.ToString('N') + "`n")
     $process = Start-Process -FilePath $exe -ArgumentList @('private-network-control-client', ('"{0}"' -f $normalRoot)) -WorkingDirectory $fixture -WindowStyle Hidden -PassThru
     $null = $process.Handle
+    $processCreated = $process.StartTime.ToUniversalTime().ToString('O')
+    $timedOut = $false
     if (-not $process.WaitForExit(15000)) {
+        $timedOut = $true
         $process.Kill()
         if (-not $process.WaitForExit(5000)) { throw 'Owned synthetic ordinary client did not terminate.' }
-        throw 'Ordinary client timed out. Do not proceed until receiver evidence exists.'
     }
     $process.Refresh()
+    $clientRecord = [ordered]@{ formatVersion = 2; runId = $id; overallStatus = 'INCONCLUSIVE'; stage = 'Ordinary'; transactionId = $NormalNonce.ToString('N');
+        receiverAddress = $ReceiverAddress; receiverPort = $Port; clientAddress = $ClientAddress; processId = $process.Id;
+        processCreatedUtc = $processCreated; completedUtc = [DateTime]::UtcNow.ToString('O'); exitCode = $process.ExitCode;
+        timedOut = $timedOut; clientResult = (Get-SyntheticClientResult $normalRoot); receiverObservation = 'not-evaluated'; processAttribution = 'unverified'; wfpDecision = 'not-observed' }
+    Write-NewFile (Join-Path $root 'ordinary-client.json') ($clientRecord | ConvertTo-Json -Compress)
+    if ($timedOut) { throw 'Ordinary client timed out. Do not proceed until receiver evidence exists.' }
     if ($process.ExitCode -ne 0) { throw 'Ordinary client failed. Inspect only the synthetic result and receiver evidence.' }
     Write-Output ("ORDINARY_SENT: pid={0}; waiting for independent receiver evidence before AppContainer stage." -f $process.Id)
     Write-Output ("SYNTHETIC_ROOT: {0}" -f $root)
@@ -91,12 +111,15 @@ if ([string]::IsNullOrWhiteSpace($OrdinaryObservation)) { throw 'Independent ord
 Assert-NoLink $OrdinaryObservation
 if ((Get-Item -LiteralPath $OrdinaryObservation).Length -gt 4096) { throw 'Receiver evidence is oversized.' }
 $observation = Get-Content -LiteralPath $OrdinaryObservation -Raw | ConvertFrom-Json
-if ($observation.formatVersion -ne 1 -or $observation.classification -cne 'ALLOWED_AND_INDEPENDENTLY_OBSERVED' -or
-    $observation.transactionId -cne $NormalNonce.ToString('N') -or $observation.receiverAddress -cne $ReceiverAddress -or
-    $observation.receiverPort -ne $Port -or $observation.remoteAddress -cne $ClientAddress -or $observation.transport -cne 'IPv4/TCP' -or
-    $observation.observedMatches -ne 1 -or $observation.duplicateObservationWindowSeconds -ne 2 -or $observation.duplicateCoverage -cne 'bounded-window-only' -or
-    $observation.processAttribution -cne 'unverified' -or $observation.wfpDecision -cne 'not-observed') {
-    throw 'Ordinary control evidence does not match this run.'
+Assert-OrdinaryReceiverEvidence -Evidence $observation -RunId $RunId -Nonce $NormalNonce -ReceiverAddress $ReceiverAddress -ClientAddress $ClientAddress -Port $Port
+$ordinaryClient = Join-Path $root 'ordinary-client.json'
+Assert-NoLink $ordinaryClient
+if ((Get-Item -LiteralPath $ordinaryClient).Length -gt 4096) { throw 'Ordinary client evidence is oversized.' }
+$ordinaryRecord = Get-Content -LiteralPath $ordinaryClient -Raw | ConvertFrom-Json
+if (-not (Test-JsonInteger $ordinaryRecord.formatVersion) -or $ordinaryRecord.formatVersion -ne 2 -or $ordinaryRecord.runId -cne $id -or $ordinaryRecord.overallStatus -cne 'INCONCLUSIVE' -or $ordinaryRecord.stage -cne 'Ordinary' -or $ordinaryRecord.transactionId -cne $NormalNonce.ToString('N') -or
+    $ordinaryRecord.receiverAddress -cne $ReceiverAddress -or -not (Test-JsonInteger $ordinaryRecord.receiverPort) -or $ordinaryRecord.receiverPort -ne $Port -or $ordinaryRecord.clientAddress -cne $ClientAddress -or
+    -not (Test-JsonInteger $ordinaryRecord.exitCode) -or $ordinaryRecord.exitCode -ne 0 -or $ordinaryRecord.clientResult -cne 'sent' -or $ordinaryRecord.timedOut -isnot [bool] -or $ordinaryRecord.timedOut) {
+    throw 'Ordinary client did not complete successfully for this run.'
 }
 Write-NewFile (Join-Path $clientRoot 'private-network-control.txt') ($ReceiverAddress + "`n" + $Port + "`n" + $ContainedNonce.ToString('N') + "`n")
 Add-Type -Path (Join-Path $PSScriptRoot '../../scripts/containment/AppContainerLaunchResearch.cs')
@@ -120,8 +143,18 @@ try {
     $child = [AegisContainmentResearch.ContainedCefLauncher]::StartPrivateNetworkControl($name, $exe, $clientRoot)
     $token = $child.Verify($sid)
     Write-Output ("VERIFIED: suspended synthetic process pid={0} created={1} package={2} and requested capability verified" -f $child.Id, $child.CreationUtc(), $token)
+    $created = $child.CreationUtc()
     $child.Resume()
-    if (-not $child.Wait(15000)) { $child.StopTimedOutTest(); throw 'AppContainer client timed out; receiver absence is inconclusive.' }
-    if ($child.ExitCode() -ne 0) { throw 'AppContainer client failed; receiver absence is inconclusive.' }
+    $timedOut = -not $child.Wait(15000)
+    if ($timedOut) { $child.StopTimedOutTest() }
+    $exitCode = $child.ExitCode()
+    $clientRecord = [ordered]@{ formatVersion = 2; runId = $id; overallStatus = 'INCONCLUSIVE'; stage = 'AppContainer'; transactionId = $ContainedNonce.ToString('N');
+        receiverAddress = $ReceiverAddress; receiverPort = $Port; clientAddress = $ClientAddress; processId = $child.Id;
+        processCreatedUtc = $created; completedUtc = [DateTime]::UtcNow.ToString('O'); exitCode = $exitCode;
+        timedOut = $timedOut; clientResult = (Get-SyntheticClientResult $clientRoot); packageSid = $token; capabilitySid = $child.ExpectedCapabilitySid;
+        tokenVerifiedBeforeResume = $true; receiverObservation = 'not-evaluated'; processAttribution = 'unverified'; wfpDecision = 'not-observed' }
+    Write-NewFile (Join-Path $root 'appcontainer-client.json') ($clientRecord | ConvertTo-Json -Compress)
+    if ($timedOut) { throw 'AppContainer client timed out; receiver absence is inconclusive.' }
+    if ($exitCode -ne 0) { throw 'AppContainer client failed; receiver absence is inconclusive.' }
     Write-Output 'CLIENT_SENT: independent receiver evidence is still required; nonce correlation does not attribute the flow to a process.'
 } finally { if ($null -ne $child) { $child.Dispose() } }
