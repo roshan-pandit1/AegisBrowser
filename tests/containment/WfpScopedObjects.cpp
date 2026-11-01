@@ -135,7 +135,10 @@ static void AddFilter(HANDLE engine, const GUID& provider, const GUID& sublayer,
 static bool ExactScope(const FWPM_FILTER0* filter, const GUID& provider, const GUID& sublayer, const Fixture& fixture)
 {
     bool sid = false, address = false, port = false, protocol = false;
-    bool header = filter && IsEqualGUID(filter->filterKey, fixture.filter) && filter->flags == 0 &&
+    // BFE may return INDEXED for lookup acceleration. Reject every other flag,
+    // including DISABLED and anything that could change the filter's action.
+    bool header = filter && IsEqualGUID(filter->filterKey, fixture.filter) &&
+        (filter->flags & ~static_cast<UINT32>(FWPM_FILTER_FLAG_INDEXED)) == 0 &&
         filter->providerKey && IsEqualGUID(*filter->providerKey, provider) &&
         IsEqualGUID(filter->subLayerKey, sublayer) && IsEqualGUID(filter->layerKey, FWPM_LAYER_ALE_AUTH_CONNECT_V4) &&
         filter->action.type == FWP_ACTION_BLOCK && filter->numFilterConditions == 4;
@@ -155,11 +158,69 @@ static bool ExactScope(const FWPM_FILTER0* filter, const GUID& provider, const G
     return header && sid && address && port && protocol;
 }
 
+// Called only after a failed readback check. Do not change acceptance based on
+// these diagnostics: the transaction must still abort on any unexpected value.
+static void PrintScopeMismatch(const FWPM_FILTER0* filter, const GUID& provider, const GUID& sublayer, const Fixture& fixture)
+{
+    if (!filter) {
+        std::fprintf(stderr, "READBACK: null filter\n");
+        return;
+    }
+    std::fprintf(stderr,
+        "READBACK: filter-key-match=%d flags=0x%08lX provider-key-match=%d sublayer-match=%d layer-match=%d action=0x%08lX conditions=%lu expected-port=%u\n",
+        IsEqualGUID(filter->filterKey, fixture.filter), static_cast<unsigned long>(filter->flags),
+        filter->providerKey && IsEqualGUID(*filter->providerKey, provider),
+        IsEqualGUID(filter->subLayerKey, sublayer), IsEqualGUID(filter->layerKey, FWPM_LAYER_ALE_AUTH_CONNECT_V4),
+        static_cast<unsigned long>(filter->action.type), static_cast<unsigned long>(filter->numFilterConditions), fixture.port);
+    if (!filter->filterCondition) {
+        std::fprintf(stderr, "READBACK: null condition array\n");
+        return;
+    }
+    // Bound diagnostics if the returned object is unexpectedly malformed.
+    const UINT32 count = filter->numFilterConditions < 16 ? filter->numFilterConditions : 16;
+    for (UINT32 i = 0; i < count; ++i) {
+        const auto& c = filter->filterCondition[i];
+        RPC_WSTR key = nullptr;
+        RPC_STATUS keyStatus = UuidToStringW(const_cast<GUID*>(&c.fieldKey), &key);
+        std::fprintf(stderr, "READBACK: condition=%lu field=%ls match=%d type=%d",
+            static_cast<unsigned long>(i), keyStatus == RPC_S_OK && key ? reinterpret_cast<wchar_t*>(key) : L"<guid-unavailable>",
+            static_cast<int>(c.matchType), static_cast<int>(c.conditionValue.type));
+        if (key && RpcStringFreeW(&key) != RPC_S_OK) std::fprintf(stderr, " guid-release-failed");
+        switch (c.conditionValue.type) {
+        case FWP_UINT8:
+            std::fprintf(stderr, " value=%u", static_cast<unsigned>(c.conditionValue.uint8));
+            break;
+        case FWP_UINT16:
+            std::fprintf(stderr, " value=%u", static_cast<unsigned>(c.conditionValue.uint16));
+            break;
+        case FWP_UINT32:
+            std::fprintf(stderr, " value=0x%08lX", static_cast<unsigned long>(c.conditionValue.uint32));
+            break;
+        case FWP_V4_ADDR_MASK:
+            if (c.conditionValue.v4AddrMask) std::fprintf(stderr, " address=0x%08lX mask=0x%08lX",
+                static_cast<unsigned long>(c.conditionValue.v4AddrMask->addr),
+                static_cast<unsigned long>(c.conditionValue.v4AddrMask->mask));
+            else std::fprintf(stderr, " null-address-mask");
+            break;
+        case FWP_SID:
+            std::fprintf(stderr, " sid-valid=%d sid-match=%d", c.conditionValue.sid && IsValidSid(c.conditionValue.sid),
+                c.conditionValue.sid && IsValidSid(c.conditionValue.sid) && EqualSid(c.conditionValue.sid, fixture.sid));
+            break;
+        default:
+            std::fprintf(stderr, " value-not-decoded");
+            break;
+        }
+        std::fputc('\n', stderr);
+    }
+    if (count != filter->numFilterConditions) std::fprintf(stderr, "READBACK: condition output truncated\n");
+}
+
 static void VerifyFilter(HANDLE engine, const GUID& provider, const GUID& sublayer, const Fixture& fixture)
 {
     FWPM_FILTER0* filter = nullptr;
     Check(FwpmFilterGetByKey0(engine, &fixture.filter, &filter), "FwpmFilterGetByKey0");
     bool valid = ExactScope(filter, provider, sublayer, fixture);
+    if (!valid) PrintScopeMismatch(filter, provider, sublayer, fixture);
     if (filter) FwpmFreeMemory0(reinterpret_cast<void**>(&filter));
     if (!valid) throw std::runtime_error("Returned filter scope does not exactly match owned fixture.");
 }
