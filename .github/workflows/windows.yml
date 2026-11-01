@@ -30,6 +30,9 @@ jobs:
         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
       - name: Build browser integration tests
         run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Research actual CEF under an AppContainer identity
+        timeout-minutes: 4
+        run: ./tests/acceptance/observe-appcontainer-cef.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
       - name: Browser storage, OAuth, tab and renderer tests
         timeout-minutes: 5
         run: |
