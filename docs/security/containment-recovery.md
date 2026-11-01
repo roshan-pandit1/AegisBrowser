@@ -1,6 +1,6 @@
 # Containment recovery and operational boundary
 
-Status: research only. AegisBrowser currently installs **no** containment service, WFP filters, AppContainer identity or driver. There is no supported installation, removal or repair command for one. Do not invent or execute system-wide firewall reset commands as recovery.
+Status: research only. The production application installs **no** containment service, WFP filters, AppContainer identity or driver. A separate opt-in research test can register uniquely named synthetic AppContainer identities on a disposable GitHub-hosted runner, as described in the [architecture decision](profile-isolation-architecture.md); it does not delete identities. There is no supported production installation, removal or repair command for containment. Do not invent or execute system-wide firewall reset commands as recovery.
 
 For the existing proxy configuration, preserve the proxy database, its journal/WAL/SHM files, profile directory, `.aegis-proxy-required` marker and credential files. Follow [proxy configuration recovery](../proxy-configuration.md); do not delete a marker or open an older build to bypass the startup block. Do not delete or overwrite browser profiles or private storage. Explicitly selecting Direct is a user decision that removes the required policy; it is not a repair of containment and is not appropriate when a proxy remains required.
 

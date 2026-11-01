@@ -77,6 +77,9 @@ jobs:
       - name: Observe CEF traffic from external loopback fixtures
         timeout-minutes: 5
         run: ./tests/acceptance/observe-external-egress.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Research suspended synthetic AppContainer identities
+        timeout-minutes: 2
+        run: ./tests/acceptance/research-appcontainer-launch.ps1 -RegisterOnDisposableRunner
       - name: Build Chromium filtering tests
         if: ${{ !cancelled() }}
         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
