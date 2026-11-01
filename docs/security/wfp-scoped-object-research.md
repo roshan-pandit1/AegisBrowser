@@ -6,6 +6,12 @@ The opt-in test creates two uniquely named synthetic per-user AppContainer profi
 
 The harness validates its four in-memory conditions before staging each filter, attempts readback inside the transaction before commit, and checks both filters again after commit. On failure with a transaction open, it explicitly attempts transaction abort and reports abort or session-close errors. The test logs its own random provider, sublayer and filter GUIDs. If cleanup reports failure, retain those identifiers and discard the disposable runner; do not reset WFP or delete unrelated rules.
 
+## Isolated readback observation
+
+The explicit disposable-runner [diagnostic run 41291189281](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41291189281) built the fixture, opened a dynamic session, staged the objects and read back the first filter. Its four expected SID, IPv4 loopback, port and TCP conditions matched, but BFE returned filter flags `0x00000040`. This is `FWPM_FILTER_FLAG_INDEXED`, documented by Microsoft as an index for faster classification lookup ([FWPM_FILTER0](https://learn.microsoft.com/en-us/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_filter0)). The diagnostic revision had introduced a strict zero-flags check, so that run aborted rather than committing; post-failure object absence was not independently verified. The comparison now accepts only the documented INDEXED bit and still rejects DISABLED and every other unexpected flag. This change requires a new native execution to verify behavior.
+
+The earlier failed run using the PR #41 fixture predated that zero-flags check. Its precise mismatch remains unknown; this later observation does not establish its cause. Neither failure establishes packet enforcement. For recovery records, the diagnostic run's owned provider was `1cdda14d-2d26-4e49-a9c8-d5fca570a2d4`, sublayer `c1e2841c-717f-48d2-8f27-45f155d8c5fc`, filter A `f62d07ee-bc14-426e-8ce5-9c2e7b89cab9`, and filter B `3e78f26d-f41e-405d-972a-6b94a300d104`. These identifiers belong to the disposable runner; do not remove unrelated objects.
+
 The test's executable and script both reject actual execution unless explicitly requested on a disposable GitHub-hosted runner. Build-only mode performs no WFP API calls. On an isolated runner with Visual Studio's x64 developer environment, the explicit command is:
 
     ./tests/acceptance/research-wfp-scoped-objects.ps1 -RunOnDisposableRunner
