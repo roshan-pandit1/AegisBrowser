@@ -17,3 +17,7 @@ To run only on an explicitly opted-in disposable GitHub-hosted Windows runner af
     ./tests/acceptance/observe-appcontainer-tcp-control.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -RunOnDisposableRunner
 
 The script uses unique test roots and SIDs, rejects linked source paths, grants access only within its new synthetic root, and leaves its identity and files for disposal with the runner. It does not touch real browser profiles or existing Windows networking settings. If a synthetic client hangs, only its own retained process is stopped. This experiment does not execute or verify WFP behavior. The existing startup guard continues to block required-proxy profiles.
+
+## Private-network control follow-up
+
+A suspended synthetic AppContainer's package SID and sole enabled private-network capability were verified in [Windows run 41314237304](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41314237304). No network was attempted by that token test. The opt-in [isolated cross-VM control](cross-vm-network-test.md) has not been executed; ordinary and AppContainer cross-VM delivery, WFP packet enforcement and attribution remain unverified. Production required-proxy startup remains blocked.

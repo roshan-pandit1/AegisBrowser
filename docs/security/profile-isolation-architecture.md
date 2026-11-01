@@ -52,3 +52,7 @@ An offline-built x64 CEF proxy probe on that ARM64 host observed the controlled 
 ## Further test fixtures
 
 See the [actual CEF launch](cef-appcontainer-experiment.md), [concurrent process snapshots](cef-appcontainer-process-observation.md), and [scoped WFP object fixture](wfp-scoped-object-research.md). These do not establish complete child coverage or packet enforcement; production activation remains blocked.
+
+## Private-network control follow-up
+
+A suspended synthetic AppContainer's package SID and sole enabled private-network capability were verified in [Windows run 41314237304](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/41314237304). No network was attempted by that token test. The opt-in [isolated cross-VM control](cross-vm-network-test.md) has not been executed; ordinary and AppContainer cross-VM delivery, WFP packet enforcement and attribution remain unverified. Production required-proxy startup remains blocked.
