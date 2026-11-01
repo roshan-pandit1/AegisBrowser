@@ -69,6 +69,7 @@ $result = [ordered]@{
     normalPid = $null
     normalCreationUtc = $null
     observedConnections = 0
+    clientResult = 'missing'
     exitCode = $null
     nativeError = $null
     cleanup = 'not-completed'
@@ -155,6 +156,20 @@ finally {
     catch { $cleanupErrors += ('synthetic process cleanup: ' + $_.Exception.Message) }
     try { $observer.Dispose() }
     catch { $cleanupErrors += ('observer cleanup: ' + $_.Exception.Message) }
+    try {
+        $clientResultPath = Join-Path $profile 'packet-result.txt'
+        if (Test-Path -LiteralPath $clientResultPath -PathType Leaf) {
+            $item = Get-Item -LiteralPath $clientResultPath -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Length -gt 128) {
+                $result.clientResult = 'invalid'
+            } else {
+                $candidate = [IO.File]::ReadAllText($clientResultPath)
+                if ($candidate -match '^(sent|unavailable:(IOException|SocketException|UnauthorizedAccessException|OperationCanceledException)|socket-error:[0-9]{1,10})$') {
+                    $result.clientResult = $candidate
+                } else { $result.clientResult = 'invalid' }
+            }
+        }
+    } catch { $result.clientResult = 'unreadable' }
     if ($cleanupErrors.Count) {
         $result.cleanup = 'failed'
         $result.outcome = 'FIXTURE_FAILURE'

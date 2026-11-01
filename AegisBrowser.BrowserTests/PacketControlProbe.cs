@@ -26,7 +26,11 @@ internal static partial class Program
         }
         catch (Exception ex) when (ex is IOException or SocketException or UnauthorizedAccessException or OperationCanceledException)
         {
-            try { File.WriteAllText(Path.Combine(root, "packet-result.txt"), "unavailable:" + ex.GetType().Name); }
+            var socketError = ex as SocketException ?? ex.InnerException as SocketException;
+            var result = socketError is null
+                ? "unavailable:" + ex.GetType().Name
+                : "socket-error:" + (int)socketError.SocketErrorCode;
+            try { File.WriteAllText(Path.Combine(root, "packet-result.txt"), result); }
             catch (Exception failure) when (failure is IOException or UnauthorizedAccessException) { }
             return 1;
         }
