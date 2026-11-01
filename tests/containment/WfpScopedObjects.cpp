@@ -105,7 +105,7 @@ static void AddFilter(HANDLE engine, const GUID& provider, const GUID& sublayer,
     conditions[0].fieldKey = FWPM_CONDITION_ALE_PACKAGE_ID;
     conditions[0].matchType = FWP_MATCH_EQUAL;
     conditions[0].conditionValue.type = FWP_SID;
-    conditions[0].conditionValue.sid = fixture.sid;
+    conditions[0].conditionValue.sid = static_cast<SID*>(fixture.sid);
     conditions[1].fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
     conditions[1].matchType = FWP_MATCH_EQUAL;
     conditions[1].conditionValue.type = FWP_UINT32;
