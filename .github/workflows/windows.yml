@@ -92,6 +92,16 @@ jobs:
           }
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: native window candidate reproduction completed and CEF shut down')) { throw 'Native window reproduction did not complete.' }
+      - name: Repeated native shutdown stress
+        timeout-minutes: 15
+        run: ./tests/acceptance/native-shutdown-stress.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -Attempts 3 -EvidenceRoot "$env:RUNNER_TEMP/aegis-shutdown-stress"
+      - name: Upload synthetic shutdown stress evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-shutdown-stress-evidence
+          path: ${{ runner.temp }}/aegis-shutdown-stress/**/*.log
+          if-no-files-found: warn
       - name: Build Chromium filtering tests
         if: ${{ !cancelled() }}
         run: dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
