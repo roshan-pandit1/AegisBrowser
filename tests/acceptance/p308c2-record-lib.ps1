@@ -22,6 +22,7 @@ function ConvertFrom-P308c2Payload {
     foreach ($b in $Payload) { if (($b -lt 32 -or $b -gt 126) -and $b -ne 10) { throw 'SCHEMA_INVALID' } }
     $keys = @('protocol','version','algorithm','role','type','stage','run','transaction','client','receiver','port','transport','observedUtc','pid','createdUtc','completedUtc','exitCode','clientResult','tokenVerifiedBeforeResume','packageSid','resumed','timedOut','observationCount','sourceAddress','sourcePort','duplicateWindowSeconds','duplicateStatus','receiverExit','receiverError')
     $parts = [Text.Encoding]::ASCII.GetString($Payload).Split([char]10)
+    if ($parts.Length -eq ($keys.Count + 5)) { $keys += @('capabilitySid','listenerStartedUtc','windowStartUtc','windowEndUtc') }
     if ($parts.Length -ne ($keys.Count + 1) -or $parts[-1] -cne '') { throw 'SCHEMA_INVALID' }
     $v = [ordered]@{}
     for ($i=0; $i -lt $keys.Count; $i++) {
@@ -31,7 +32,7 @@ function ConvertFrom-P308c2Payload {
         if ($value -cnotmatch '^[A-Za-z0-9.:/-]+$') { throw 'SCHEMA_INVALID' }
         $v[$keys[$i]] = $value
     }
-    if ($v.protocol -cne 'AegisCrossVmEvidence' -or $v.version -cne '2' -or $v.algorithm -cne 'RSA-PKCS1-SHA256' -or $v.transport -cne 'IPv4/TCP') { throw 'SCHEMA_INVALID' }
+    if ($v.protocol -cne 'AegisCrossVmEvidence' -or (($v.version -cne '2' -or $keys.Count -ne 29) -and ($v.version -cne '3' -or $keys.Count -ne 33)) -or $v.algorithm -cne 'RSA-PKCS1-SHA256' -or $v.transport -cne 'IPv4/TCP') { throw 'SCHEMA_INVALID' }
     if (($v.role -ceq 'VmA' -and $v.type -cne 'client') -or ($v.role -ceq 'VmB' -and $v.type -cnotin @('receiver','completion')) -or $v.role -cnotin @('VmA','VmB')) { throw 'SCHEMA_INVALID' }
     if (($v.type -ceq 'completion' -and $v.stage -cne 'Complete') -or ($v.type -cne 'completion' -and $v.stage -cnotin @('Ordinary','AppContainer'))) { throw 'SCHEMA_INVALID' }
     if ($v.run -cnotmatch '^[0-9a-f]{32}$' -or $v.run -ceq ('0' * 32) -or ($v.transaction -cnotmatch '^[0-9a-f]{32}$' -and $v.transaction -cne '-') -or $v.transaction -ceq ('0' * 32)) { throw 'SCHEMA_INVALID' }
@@ -47,8 +48,19 @@ function ConvertFrom-P308c2Payload {
         $parsed = [DateTimeOffset]::MinValue
         if (-not [DateTimeOffset]::TryParseExact($v[$name], "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed) -or $parsed.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", [Globalization.CultureInfo]::InvariantCulture) -cne $v[$name]) { throw 'SCHEMA_INVALID' }
     }
+    if ($v.version -ceq '3') {
+        foreach ($name in @('listenerStartedUtc','windowStartUtc','windowEndUtc')) {
+            if ($v[$name] -ceq '-') { continue }
+            $parsed = [DateTimeOffset]::MinValue
+            if (-not [DateTimeOffset]::TryParseExact($v[$name], "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed) -or $parsed.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", [Globalization.CultureInfo]::InvariantCulture) -cne $v[$name]) { throw 'SCHEMA_INVALID' }
+        }
+        if ($v.capabilitySid -cne '-' -and $v.capabilitySid -cnotmatch '^S-1-15-3(-[0-9]+)+$') { throw 'SCHEMA_INVALID' }
+    }
     foreach ($name in @('pid','exitCode','observationCount','sourcePort','duplicateWindowSeconds','receiverExit')) {
-        if ($v[$name] -cne '-' -and $v[$name] -cnotmatch '^(0|[1-9][0-9]{0,9})$') { throw 'SCHEMA_INVALID' }
+        if ($name -ceq 'exitCode' -and $v.version -ceq '3' -and $v[$name] -cne '-') {
+            $code = 0
+            if ($v[$name] -cnotmatch '^(0|-?[1-9][0-9]{0,9})$' -or -not [int]::TryParse($v[$name], [ref]$code)) { throw 'SCHEMA_INVALID' }
+        } elseif ($v[$name] -cne '-' -and $v[$name] -cnotmatch '^(0|[1-9][0-9]{0,9})$') { throw 'SCHEMA_INVALID' }
     }
     foreach ($name in @('tokenVerifiedBeforeResume','resumed','timedOut')) { if ($v[$name] -cnotin @('-','true','false')) { throw 'SCHEMA_INVALID' } }
     if ($v.sourceAddress -cne '-' -and $v.sourceAddress -cne $v.client) { throw 'SCHEMA_INVALID' }

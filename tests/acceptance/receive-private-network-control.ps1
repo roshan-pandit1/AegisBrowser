@@ -9,11 +9,17 @@ param(
     [Parameter(Mandatory = $true)][guid] $ContainedNonce,
     [Parameter(Mandatory = $true)][string] $EvidenceDirectory,
     [ValidateRange(10,600)][int] $TimeoutSeconds = 300,
+    [string] $SigningIdentity,
     [switch] $AcknowledgeDisposableIsolatedNetwork
 )
 $ErrorActionPreference = 'Stop'
 if (-not $AcknowledgeDisposableIsolatedNetwork -or $env:AEGIS_DISPOSABLE_VM_NETWORK_TEST -cne 'I_UNDERSTAND') {
     throw 'Explicit disposable isolated-VM acknowledgement and AEGIS_DISPOSABLE_VM_NETWORK_TEST=I_UNDERSTAND are required.'
+}
+if (-not [string]::IsNullOrWhiteSpace($SigningIdentity)) {
+    . (Join-Path $PSScriptRoot 'p308c3-fixture-lib.ps1')
+    $signingKey=Open-P308c3SigningKey -Role VmB -Identity $SigningIdentity
+    try { Test-P308c3SigningChallenge $signingKey } finally { $signingKey.Dispose() }
 }
 function ConvertTo-PrivateIPv4([string] $InputAddress) {
     $address = $null
@@ -48,6 +54,7 @@ $pendingRecord = $null
 $pendingUntil = [DateTime]::MinValue
 try {
     $listener.Start()
+    $listenerStartedUtc = [DateTime]::UtcNow.ToString('O')
     Write-Output ("READY: independent receiver {0}:{1}; expected source {2}; no WFP or attribution instrumentation" -f $bind, $Port, $expectedClient)
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while (($seen.Count -lt 2 -or $null -ne $pendingRecord) -and [DateTime]::UtcNow -lt $deadline) {
@@ -57,6 +64,13 @@ try {
             $encoded = [Text.Encoding]::UTF8.GetBytes(($pendingRecord | ConvertTo-Json -Compress))
             $file = New-Object IO.FileStream($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
             try { $file.Write($encoded, 0, $encoded.Length); $file.Flush($true) } finally { $file.Dispose() }
+            if ($SigningIdentity) {
+                $stage = if ($pendingRecord.transactionId -ceq $normal) { 'Ordinary' } else { 'AppContainer' }
+                $endUtc = [DateTime]::UtcNow.ToString('O')
+                $fields = ConvertTo-P308c3ReceiverFields -Record $pendingRecord -Stage $stage -ListenerStartedUtc $listenerStartedUtc -WindowStartUtc $pendingRecord.observedUtc -WindowEndUtc $endUtc
+                $prefix=if ($stage -ceq 'Ordinary') { 'ordinary-observation' } else { 'appcontainer-observation' }
+                Write-P308c3FixtureRecord -Fields $fields -Role VmB -Identity $SigningIdentity -OutputPrefix (Join-Path $evidenceRoot $prefix)
+            }
             Write-Output ("OBSERVED: {0}; one matching transaction in the bounded observation window; process attribution remains unverified." -f $name)
             $pendingRecord = $null
             continue
@@ -66,6 +80,8 @@ try {
         try {
             $client.ReceiveTimeout = 3000
             $remote = [Net.IPEndPoint] $client.Client.RemoteEndPoint
+            $local = [Net.IPEndPoint] $client.Client.LocalEndPoint
+            if (-not $local.Address.Equals($bind) -or $local.Port -ne $Port) { throw 'Unexpected listener endpoint.' }
             if (-not $remote.Address.Equals($expectedClient)) { throw 'Unexpected client address.' }
             $stream = $client.GetStream()
             $bytes = New-Object byte[] 33
@@ -83,7 +99,7 @@ try {
             $seen[$nonce] = $true
             $pendingRecord = [ordered]@{
                 formatVersion = 2; runId = $RunId.ToString('N'); overallStatus = 'INCONCLUSIVE'; classification = 'ALLOWED_AND_INDEPENDENTLY_OBSERVED';
-                transactionId = $nonce; receiverAddress = $bind.ToString(); receiverPort = $Port;
+                transactionId = $nonce; receiverAddress = $local.Address.ToString(); receiverPort = $local.Port;
                 remoteAddress = $remote.Address.ToString(); remotePort = $remote.Port;
                 observedUtc = [DateTime]::UtcNow.ToString('O'); transport = 'IPv4/TCP';
                 observedMatches = 1; duplicateObservationWindowSeconds = 2;
@@ -95,4 +111,11 @@ try {
     if ($null -ne $pendingRecord) { throw 'Receiver timed out before the bounded observation window completed.' }
     if (-not $seen.ContainsKey($normal)) { throw 'Ordinary positive control missing: environment unavailable or inconclusive.' }
     if (-not $seen.ContainsKey($contained)) { Write-Output 'INCONCLUSIVE: no AppContainer transaction was received before timeout.' }
+    if ($SigningIdentity) {
+        # The supervisor records the actual process exit separately after this script ends.
+        $summary=[ordered]@{runId=$RunId.ToString('N'); clientAddress=$expectedClient.ToString(); receiverAddress=$bind.ToString(); port=$Port; listenerStartedUtc=$listenerStartedUtc; completedUtc=[DateTime]::UtcNow.ToString('O'); observedCount=$seen.Count}
+        $data=[Text.Encoding]::UTF8.GetBytes(($summary | ConvertTo-Json -Compress))
+        $file=New-Object IO.FileStream((Join-Path $evidenceRoot 'receiver-local-completion.json'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+        try { $file.Write($data,0,$data.Length); $file.Flush($true) } finally { $file.Dispose() }
+    }
 } finally { $listener.Stop() }

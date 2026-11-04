@@ -19,7 +19,8 @@ function Invoke-P308c2OfflineCorrelation {
       [Parameter(Mandatory=$true)][int] $Port,
       [Parameter(Mandatory=$true)][DateTimeOffset] $WindowStart,
       [Parameter(Mandatory=$true)][DateTimeOffset] $WindowEnd,
-      [Parameter(Mandatory=$true)][string] $LedgerPath
+      [Parameter(Mandatory=$true)][string] $LedgerPath,
+      [switch] $RequireVersion3
     )
     Assert-P308c2Trust -KeyA $KeyA -FingerprintA $PinA -KeyB $KeyB -FingerprintB $PinB
     Assert-CrossVmEndpoints -LocalAddress $Client -PeerAddress $Receiver -Port $Port
@@ -32,6 +33,7 @@ function Invoke-P308c2OfflineCorrelation {
       $pin = if ($i -eq 0 -or $i -eq 2) { $PinA } else { $PinB }
       if ($items[$i].Payload -isnot [byte[]] -or $items[$i].Signature -isnot [byte[]]) { throw 'SCHEMA_INVALID' }
       $r = Read-P308c2SignedRecord -Payload $items[$i].Payload -Signature $items[$i].Signature -Key $key -ExpectedFingerprint $pin
+      if ($RequireVersion3 -and $r.version -cne '3') { throw 'SCHEMA_INVALID' }
       $expectedType = @('client','receiver','client','receiver','completion')[$i]
       $expectedStage = @('Ordinary','Ordinary','AppContainer','AppContainer','Complete')[$i]
       $expectedRole = if ($i -eq 0 -or $i -eq 2) { 'VmA' } else { 'VmB' }
@@ -59,6 +61,21 @@ function Invoke-P308c2OfflineCorrelation {
     $completion = $records[4]
     if ($completion.observationCount -cne '2' -or $completion.receiverExit -cne '0' -or $completion.receiverError -cne 'none' -or $completion.duplicateStatus -cne 'none') { throw 'RECEIVER_INCOMPLETE' }
     foreach ($name in @('pid','createdUtc','completedUtc','exitCode','clientResult','tokenVerifiedBeforeResume','packageSid','resumed','timedOut','sourceAddress','sourcePort','duplicateWindowSeconds')) { if ($completion[$name] -cne '-') { throw 'EVIDENCE_MISMATCH' } }
+    if ($RequireVersion3) {
+      foreach ($i in @(0,2)) {
+        $r=$records[$i]
+        if ($r.listenerStartedUtc -cne '-' -or $r.windowStartUtc -cne '-' -or $r.windowEndUtc -cne '-') { throw 'EVIDENCE_MISMATCH' }
+        if (($i -eq 0 -and $r.capabilitySid -cne '-') -or ($i -eq 2 -and $r.capabilitySid -cne 'S-1-15-3-3')) { throw 'EVIDENCE_MISMATCH' }
+      }
+      foreach ($i in @(1,3,4)) {
+        $r=$records[$i]
+        if ($r.capabilitySid -cne '-' -or $r.listenerStartedUtc -ceq '-' -or $r.windowStartUtc -ceq '-' -or $r.windowEndUtc -ceq '-') { throw 'RECEIVER_INCOMPLETE' }
+        $start=[DateTimeOffset]::Parse($r.listenerStartedUtc); $wstart=[DateTimeOffset]::Parse($r.windowStartUtc); $wend=[DateTimeOffset]::Parse($r.windowEndUtc); $obs=[DateTimeOffset]::Parse($r.observedUtc)
+        if ($start -lt $WindowStart -or $start -gt $wstart -or $wstart -gt $wend -or $wend -gt $WindowEnd -or ($i -ne 4 -and ($obs -lt $wstart -or $obs -gt $wend)) -or ($i -eq 4 -and $obs -lt $wend)) { throw 'EVIDENCE_MISMATCH' }
+        if ($r.listenerStartedUtc -cne $records[4].listenerStartedUtc) { throw 'EVIDENCE_MISMATCH' }
+        if ($i -ne 4 -and ($obs -ne $wstart -or ($wend - $wstart).TotalSeconds -lt 2 -or $wend -gt [DateTimeOffset]::Parse($records[4].windowEndUtc))) { throw 'EVIDENCE_MISMATCH' }
+      }
+    }
     # Compare ordering only within each VM clock, not across unsynchronized machines.
     if ([DateTimeOffset]::Parse($records[0].completedUtc) -gt [DateTimeOffset]::Parse($records[2].createdUtc) -or [DateTimeOffset]::Parse($records[1].observedUtc).AddSeconds(2) -gt [DateTimeOffset]::Parse($records[3].observedUtc) -or [DateTimeOffset]::Parse($records[3].observedUtc).AddSeconds(2) -gt [DateTimeOffset]::Parse($completion.observedUtc)) { throw 'EVIDENCE_MISMATCH' }
     # Durably consume IDs before returning success. Missing/corrupt state fails closed.
