@@ -1,4 +1,4 @@
-﻿# P3-08C2 research-only record primitives. No files, networking, or trust-store mutation.
+# P3-08C2 research-only record primitives. No files, networking, or trust-store mutation.
 # Callers must obtain trusted fingerprints independently of the records.
 function Get-P308c2Fingerprint {
     param([Parameter(Mandatory=$true)][Security.Cryptography.RSA] $Key)
@@ -70,4 +70,3 @@ function New-P308c2Signature {
     $null = ConvertFrom-P308c2Payload $Payload
     return ,$Key.SignData($Payload,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
 }
-
