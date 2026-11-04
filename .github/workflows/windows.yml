@@ -26,6 +26,12 @@ jobs:
         run: ./tests/acceptance/test-private-network-evidence-offline.ps1
       - name: Validate P3-08C authentication primitive offline
         run: ./tests/acceptance/test-p308c-authentication.ps1
+      - name: Validate P3-08C2 offline evidence primitives
+        run: |
+          ./tests/acceptance/test-p308c2-record.ps1
+          ./tests/acceptance/test-p308c2-files.ps1
+          ./tests/acceptance/test-p308c2-replay-ledger.ps1
+          ./tests/acceptance/test-p308c2-correlation.ps1
       - name: Restore Windows x64 application
         run: dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
       - name: Build Windows x64 Release
