@@ -45,8 +45,13 @@ if ($addressRows.Count -eq 1) {
     $profiles = @(Get-NetConnectionProfile -InterfaceIndex $interfaceIndex -ErrorAction SilentlyContinue)
     if ($profiles.Count -eq 1) { $category = [string] $profiles[0].NetworkCategory }
 }
-$routes4 = @(Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.DestinationPrefix -ceq '0.0.0.0/0' })
-$routes6 = @(Get-NetRoute -AddressFamily IPv6 -ErrorAction Stop | Where-Object { $_.DestinationPrefix -ceq '::/0' })
+$allRoutes = @(Get-NetRoute -ErrorAction Stop)
+$routes4 = @($allRoutes | Where-Object { $_.DestinationPrefix -ceq '0.0.0.0/0' })
+$routes6 = @($allRoutes | Where-Object { $_.DestinationPrefix -ceq '::/0' })
+$gatewayRoutes = @($allRoutes | Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' -and $_.NextHop -ne '::' })
+$adapters = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop)
+$otherActive = @($adapters | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceIndex -ne $interfaceIndex })
+$allAddresses = @(Get-NetIPAddress -ErrorAction Stop)
 $otherIPv6 = @(Get-NetIPAddress -AddressFamily IPv6 -ErrorAction Stop | Where-Object {
     $_.IPAddress -ne '::1' -and $_.IPAddress -notlike 'fe80:*' -and $_.IPAddress -notlike 'fe80*'
 })
@@ -54,10 +59,10 @@ $firewalls = @(Get-NetFirewallProfile -ErrorAction Stop)
 $firewallEnabled = ($firewalls.Count -eq 3 -and @($firewalls | Where-Object { -not $_.Enabled }).Count -eq 0)
 $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
 
-$issues = @(Get-CrossVmPreflightBlockers -LocalAddressMatches $addressRows.Count -NetworkCategory $category -DefaultIPv4Routes $routes4.Count -DefaultIPv6Routes $routes6.Count -NonLinkLocalIPv6Addresses $otherIPv6.Count -FirewallEnabled $firewallEnabled -AdapterUp $adapterUp -AddressPreferred $addressPreferred)
+$issues = @(Get-CrossVmPreflightBlockers -LocalAddressMatches $addressRows.Count -NetworkCategory $category -DefaultIPv4Routes $routes4.Count -DefaultIPv6Routes $routes6.Count -NonLinkLocalIPv6Addresses $otherIPv6.Count -FirewallEnabled $firewallEnabled -AdapterUp $adapterUp -AddressPreferred $addressPreferred -OtherActiveAdapters $otherActive.Count -GatewayRoutes $gatewayRoutes.Count)
 $status = if ($issues.Count -gt 0) { 'BLOCKED_PRECHECK' } else { 'REVIEW_REQUIRED' }
 $record = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     status = $status
     observedUtc = [DateTime]::UtcNow.ToString('O')
     role = $Role
@@ -80,9 +85,16 @@ $record = [ordered]@{
         defaultIPv6RouteCount = $routes6.Count
         nonLinkLocalIPv6AddressCount = $otherIPv6.Count
         allFirewallProfilesEnabled = $firewallEnabled
+        otherActiveAdapterCount = $otherActive.Count
+        gatewayRouteCount = $gatewayRoutes.Count
+        adapters = @($adapters | Select-Object Name, InterfaceDescription, InterfaceIndex, Status, MacAddress)
+        addresses = @($allAddresses | Select-Object InterfaceIndex, InterfaceAlias, AddressFamily, IPAddress, PrefixLength, AddressState)
+        routes = @($allRoutes | Select-Object InterfaceIndex, DestinationPrefix, NextHop, RouteMetric, PolicyStore)
+        firewallProfiles = @($firewalls | Select-Object Name, Enabled)
     }
     blockers = @($issues)
     limitations = @(
+        'Snapshot is not atomic; repeat and compare before and after testing. On-link routes and hidden or inactive VPN configurations require operator review.'
         'Read-only local snapshot: no reachability probe, packet capture, WFP rule or filter decision.'
         'No verification of virtual-switch isolation, hypervisor topology, firewall rule contents, external routing or independent peer identity.'
         'REVIEW_REQUIRED does not mean network isolation is verified or authorize running the TCP controls.'

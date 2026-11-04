@@ -32,6 +32,8 @@ $valid = @{
     FirewallEnabled = $true
     AdapterUp = $true
     AddressPreferred = $true
+    OtherActiveAdapters = 0
+    GatewayRoutes = 0
 }
 $issues = @(Get-CrossVmPreflightBlockers @valid)
 if ($issues.Count -ne 0) { throw 'Minimal local snapshot rejected unexpectedly.' }
@@ -47,6 +49,8 @@ $badCases = @(
     @{ key = 'FirewallEnabled'; value = $false; expected = 'FIREWALL_PROFILE_DISABLED_OR_UNAVAILABLE' }
     @{ key = 'AdapterUp'; value = $false; expected = 'LOCAL_ADAPTER_NOT_UP' }
     @{ key = 'AddressPreferred'; value = $false; expected = 'LOCAL_ADDRESS_NOT_PREFERRED' }
+    @{ key = 'OtherActiveAdapters'; value = 1; expected = 'OTHER_ACTIVE_ADAPTER_PRESENT' }
+    @{ key = 'GatewayRoutes'; value = 1; expected = 'GATEWAY_ROUTE_PRESENT' }
 )
 foreach ($case in $badCases) {
     $argsCopy = @{}

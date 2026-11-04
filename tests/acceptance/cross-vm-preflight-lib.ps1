@@ -34,7 +34,9 @@ function Get-CrossVmPreflightBlockers {
         [Parameter(Mandatory = $true)][int] $NonLinkLocalIPv6Addresses,
         [Parameter(Mandatory = $true)][bool] $FirewallEnabled,
         [Parameter(Mandatory = $true)][bool] $AdapterUp,
-        [Parameter(Mandatory = $true)][bool] $AddressPreferred
+        [Parameter(Mandatory = $true)][bool] $AddressPreferred,
+        [Parameter(Mandatory = $true)][int] $OtherActiveAdapters,
+        [Parameter(Mandatory = $true)][int] $GatewayRoutes
     )
     $issues = New-Object 'System.Collections.Generic.List[string]'
     if ($LocalAddressMatches -ne 1) { $issues.Add('LOCAL_ADDRESS_NOT_UNIQUE') }
@@ -45,5 +47,7 @@ function Get-CrossVmPreflightBlockers {
     if (-not $FirewallEnabled) { $issues.Add('FIREWALL_PROFILE_DISABLED_OR_UNAVAILABLE') }
     if (-not $AdapterUp) { $issues.Add('LOCAL_ADAPTER_NOT_UP') }
     if (-not $AddressPreferred) { $issues.Add('LOCAL_ADDRESS_NOT_PREFERRED') }
+    if ($OtherActiveAdapters -ne 0) { $issues.Add('OTHER_ACTIVE_ADAPTER_PRESENT') }
+    if ($GatewayRoutes -ne 0) { $issues.Add('GATEWAY_ROUTE_PRESENT') }
     return $issues.ToArray()
 }

@@ -22,6 +22,8 @@ jobs:
           git rev-parse HEAD
       - name: Validate P3-08 preflight offline
         run: ./tests/acceptance/test-cross-vm-preflight.ps1
+      - name: Validate synthetic receiver evidence offline
+        run: ./tests/acceptance/test-private-network-evidence-offline.ps1
       - name: Restore Windows x64 application
         run: dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
       - name: Build Windows x64 Release
