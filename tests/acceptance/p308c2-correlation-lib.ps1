@@ -20,9 +20,16 @@ function Invoke-P308c2OfflineCorrelation {
       [Parameter(Mandatory=$true)][DateTimeOffset] $WindowStart,
       [Parameter(Mandatory=$true)][DateTimeOffset] $WindowEnd,
       [Parameter(Mandatory=$true)][string] $LedgerPath,
-      [switch] $RequireVersion3
+      [switch] $RequireVersion3,
+      [string] $ExpectedPackageSid
     )
     Assert-P308c2Trust -KeyA $KeyA -FingerprintA $PinA -KeyB $KeyB -FingerprintB $PinB
+    if ($RequireVersion3 -and -not $PSBoundParameters.ContainsKey('ExpectedPackageSid')) { throw 'SCHEMA_INVALID' }
+    if ($PSBoundParameters.ContainsKey('ExpectedPackageSid')) {
+      if ($ExpectedPackageSid -cnotmatch '^S-1-15-2(-[0-9]+)+$') { throw 'SCHEMA_INVALID' }
+      try { $canonicalSid = New-Object Security.Principal.SecurityIdentifier($ExpectedPackageSid) } catch { throw 'SCHEMA_INVALID' }
+      if ($canonicalSid.Value -cne $ExpectedPackageSid) { throw 'SCHEMA_INVALID' }
+    }
     Assert-CrossVmEndpoints -LocalAddress $Client -PeerAddress $Receiver -Port $Port
     $ids = @($Run.ToString('N'), $OrdinaryTransaction.ToString('N'), $AppTransaction.ToString('N'))
     if ($Run -eq [guid]::Empty -or $OrdinaryTransaction -eq [guid]::Empty -or $AppTransaction -eq [guid]::Empty -or @($ids | Select-Object -Unique).Count -ne 3 -or $WindowStart -ge $WindowEnd) { throw 'SCHEMA_INVALID' }
@@ -33,6 +40,7 @@ function Invoke-P308c2OfflineCorrelation {
       $pin = if ($i -eq 0 -or $i -eq 2) { $PinA } else { $PinB }
       if ($items[$i].Payload -isnot [byte[]] -or $items[$i].Signature -isnot [byte[]]) { throw 'SCHEMA_INVALID' }
       $r = Read-P308c2SignedRecord -Payload $items[$i].Payload -Signature $items[$i].Signature -Key $key -ExpectedFingerprint $pin
+      if ($r.version -ceq '3' -and -not $PSBoundParameters.ContainsKey('ExpectedPackageSid')) { throw 'SCHEMA_INVALID' }
       if ($RequireVersion3 -and $r.version -cne '3') { throw 'SCHEMA_INVALID' }
       $expectedType = @('client','receiver','client','receiver','completion')[$i]
       $expectedStage = @('Ordinary','Ordinary','AppContainer','AppContainer','Complete')[$i]
@@ -50,6 +58,7 @@ function Invoke-P308c2OfflineCorrelation {
       if ($created -lt $WindowStart -or $completed -gt $WindowEnd -or $created -gt $completed -or $completed -gt $observed) { throw 'EVIDENCE_MISMATCH' }
       if ($r.exitCode -cne '0' -or $r.clientResult -cne 'sent' -or $r.timedOut -cne 'false') { throw 'CLIENT_FAILED' }
       if ($i -eq 2 -and ($r.tokenVerifiedBeforeResume -cne 'true' -or $r.resumed -cne 'true' -or $r.packageSid -ceq '-')) { throw 'EVIDENCE_MISMATCH' }
+      if ($i -eq 2 -and $PSBoundParameters.ContainsKey('ExpectedPackageSid') -and $r.packageSid -cne $ExpectedPackageSid) { throw 'EVIDENCE_MISMATCH' }
       if ($i -eq 0 -and ($r.tokenVerifiedBeforeResume -cne '-' -or $r.packageSid -cne '-' -or $r.resumed -cne '-')) { throw 'EVIDENCE_MISMATCH' }
       foreach ($name in @('observationCount','sourceAddress','sourcePort','duplicateWindowSeconds','duplicateStatus','receiverExit','receiverError')) { if ($r[$name] -cne '-') { throw 'EVIDENCE_MISMATCH' } }
     }

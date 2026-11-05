@@ -1,8 +1,8 @@
 # Research-only replay ledger. Caller must validate all evidence before consuming IDs.
 # State directory must be operator-owned; path checks do not defeat malicious replacement.
 function Assert-P308c2UnlinkedPath([string] $Path, [bool] $MustExist) {
+    if (-not [IO.Path]::IsPathRooted($Path) -or $Path -notmatch '^[A-Za-z]:\\' -or $Path.Substring(2).Contains(':')) { throw 'STATE_PATH_INVALID' }
     $full = [IO.Path]::GetFullPath($Path)
-    if ($full.StartsWith('\\') -or $full.StartsWith('\\?\')) { throw 'STATE_PATH_INVALID' }
     $current = if ($MustExist) { Get-Item -LiteralPath $full -Force -ErrorAction Stop } else { Get-Item -LiteralPath ([IO.Path]::GetDirectoryName($full)) -Force -ErrorAction Stop }
     while ($null -ne $current) {
         if (($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'STATE_PATH_INVALID' }

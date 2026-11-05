@@ -11,6 +11,8 @@ function Reject([scriptblock] $action, [string] $expected) {
 }
 $a = [guid]::NewGuid(); $b = [guid]::NewGuid(); $c = [guid]::NewGuid()
 Reject { Add-P308c2ConsumedRun $path $a $b $c } 'Cannot find path'
+Reject { Initialize-P308c2Ledger 'relative-ledger' } 'STATE_PATH_INVALID'
+Reject { Initialize-P308c2Ledger ($path + ':alternate') } 'STATE_PATH_INVALID'
 Initialize-P308c2Ledger $path; $checks++
 Reject { Initialize-P308c2Ledger $path } 'already exists'
 Add-P308c2ConsumedRun $path $a $b $c; $checks++

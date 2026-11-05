@@ -42,6 +42,8 @@ jobs:
         run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c3-operator.ps1
       - name: Validate P3-08C3 replay ledger offline
         run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c3-replay.ps1
+      - name: Validate P3-08C4 lab readiness offline
+        run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c4-readiness.ps1
       - name: Restore Windows x64 application
         run: dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
       - name: Build Windows x64 Release

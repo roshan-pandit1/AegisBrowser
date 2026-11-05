@@ -28,7 +28,17 @@ try {
  $done=Base 'VmB' 'completion' 'Complete' '-' '2026-11-04T10:00:09.0000000Z';$done.observationCount='2';$done.receiverExit='0';$done.receiverError='none';$done.duplicateStatus='none'
  $params=@{OrdinaryClient=(Signed $oc $a);OrdinaryReceiver=(Signed $or $b);AppClient=(Signed $ac $a);AppReceiver=(Signed $ar $b);ReceiverCompletion=(Signed $done $b);KeyA=$a;PinA=(Get-P308c2Fingerprint $a);KeyB=$b;PinB=(Get-P308c2Fingerprint $b);Run=$run;OrdinaryTransaction=$normal;AppTransaction=$app;Client='10.9.8.1';Receiver='10.9.8.2';Port=47123;WindowStart=[DateTimeOffset]::Parse('2026-11-04T09:59:00Z');WindowEnd=[DateTimeOffset]::Parse('2026-11-04T10:01:00Z');LedgerPath=(Join-Path $root 'ledger')}
  Initialize-P308c2Ledger $params.LedgerPath
+ Reject { Invoke-P308c2OfflineCorrelation @params -RequireVersion3 } 'SCHEMA_INVALID'
+ Reject { Invoke-P308c2OfflineCorrelation @params -ExpectedPackageSid 'S-1-15-2-456' } 'EVIDENCE_MISMATCH'
+ Reject { Invoke-P308c2OfflineCorrelation @params -ExpectedPackageSid 'invalid' } 'SCHEMA_INVALID'
+ Reject { Invoke-P308c2OfflineCorrelation @params -ExpectedPackageSid 'S-1-15-2-0123' } 'SCHEMA_INVALID'
+ # Verify rejection does not consume the run, then accept the matching pin.
+ $params.ExpectedPackageSid='S-1-15-2-123'
  if ((Invoke-P308c2OfflineCorrelation @params) -cne 'AUTHENTICATED_AND_CORRELATED') { throw 'Expected correlated synthetic case' };$checks++
+ # Legacy v2 callers that did not supply a package pin remain compatible.
+ $legacy=@{}; foreach($key in $params.Keys) { if ($key -ne 'ExpectedPackageSid') { $legacy[$key]=$params[$key] } }
+ $legacy.LedgerPath=Join-Path $root 'legacy-ledger'; Initialize-P308c2Ledger $legacy.LedgerPath
+ if ((Invoke-P308c2OfflineCorrelation @legacy) -cne 'AUTHENTICATED_AND_CORRELATED') { throw 'Legacy v2 caller rejected' };$checks++
  Reject { Invoke-P308c2OfflineCorrelation @params } 'REPLAY_DETECTED'
  foreach ($case in @(
   @{which='OrdinaryClient';field='exitCode';value='1';expected='CLIENT_FAILED'},
