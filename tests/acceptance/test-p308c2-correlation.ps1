@@ -28,6 +28,35 @@ try {
  $done=Base 'VmB' 'completion' 'Complete' '-' '2026-11-04T10:00:09.0000000Z';$done.observationCount='2';$done.receiverExit='0';$done.receiverError='none';$done.duplicateStatus='none'
  $params=@{OrdinaryClient=(Signed $oc $a);OrdinaryReceiver=(Signed $or $b);AppClient=(Signed $ac $a);AppReceiver=(Signed $ar $b);ReceiverCompletion=(Signed $done $b);KeyA=$a;PinA=(Get-P308c2Fingerprint $a);KeyB=$b;PinB=(Get-P308c2Fingerprint $b);Run=$run;OrdinaryTransaction=$normal;AppTransaction=$app;Client='10.9.8.1';Receiver='10.9.8.2';Port=47123;WindowStart=[DateTimeOffset]::Parse('2026-11-04T09:59:00Z');WindowEnd=[DateTimeOffset]::Parse('2026-11-04T10:01:00Z');LedgerPath=(Join-Path $root 'ledger')}
  Initialize-P308c2Ledger $params.LedgerPath
+ # Version 3 must enforce its own constraints even if callers omit RequireVersion3.
+ function AsV3($source) {
+   $copy=[ordered]@{}; foreach($name in $source.Keys) {$copy[$name]=$source[$name]}
+   $copy.version='3'; $copy.capabilitySid='-'; $copy.listenerStartedUtc='-'; $copy.windowStartUtc='-'; $copy.windowEndUtc='-'
+   return $copy
+ }
+ $vOc=AsV3 $oc; $vOr=AsV3 $or; $vAc=AsV3 $ac; $vAr=AsV3 $ar; $vDone=AsV3 $done
+ $vAc.capabilitySid='S-1-15-3-3'
+ foreach($record in @($vOr,$vAr,$vDone)) { $record.listenerStartedUtc='2026-11-04T10:00:00.0000000Z' }
+ $vOr.windowStartUtc=$vOr.observedUtc; $vOr.windowEndUtc='2026-11-04T10:00:05.0000000Z'
+ $vAr.windowStartUtc=$vAr.observedUtc; $vAr.windowEndUtc='2026-11-04T10:00:09.0000000Z'
+ $vDone.windowStartUtc='2026-11-04T10:00:00.0000000Z'; $vDone.windowEndUtc='2026-11-04T10:00:09.0000000Z'
+ $vDone.observedUtc='2026-11-04T10:00:10.0000000Z'
+ $v3=@{};foreach($k in $params.Keys){$v3[$k]=$params[$k]}
+ $v3.OrdinaryClient=Signed $vOc $a; $v3.OrdinaryReceiver=Signed $vOr $b
+ $v3.AppClient=Signed $vAc $a; $v3.AppReceiver=Signed $vAr $b; $v3.ReceiverCompletion=Signed $vDone $b
+ $v3.ExpectedPackageSid='S-1-15-2-123'; $v3.LedgerPath=Join-Path $root 'v3-ledger'; Initialize-P308c2Ledger $v3.LedgerPath
+ $vAc.capabilitySid='-';$v3.AppClient=Signed $vAc $a
+ Reject { Invoke-P308c2OfflineCorrelation @v3 } 'EVIDENCE_MISMATCH'
+ $vAc.capabilitySid='S-1-15-3-2';$v3.AppClient=Signed $vAc $a
+ Reject { Invoke-P308c2OfflineCorrelation @v3 } 'EVIDENCE_MISMATCH'
+ $vAc.capabilitySid='S-1-15-3-3';$v3.AppClient=Signed $vAc $a
+ $vOr.windowEndUtc='2026-11-04T10:00:04.0000000Z';$v3.OrdinaryReceiver=Signed $vOr $b
+ Reject { Invoke-P308c2OfflineCorrelation @v3 } 'EVIDENCE_MISMATCH'
+ $vOr.windowEndUtc='2026-11-04T10:00:05.0000000Z';$v3.OrdinaryReceiver=Signed $vOr $b
+ $v3.OrdinaryClient=Signed $oc $a
+ Reject { Invoke-P308c2OfflineCorrelation @v3 } 'SCHEMA_INVALID'
+ $v3.OrdinaryClient=Signed $vOc $a
+ if ((Invoke-P308c2OfflineCorrelation @v3) -cne 'AUTHENTICATED_AND_CORRELATED') { throw 'Valid v3 evidence rejected' };$checks++
  Reject { Invoke-P308c2OfflineCorrelation @params -RequireVersion3 } 'SCHEMA_INVALID'
  Reject { Invoke-P308c2OfflineCorrelation @params -ExpectedPackageSid 'S-1-15-2-456' } 'EVIDENCE_MISMATCH'
  Reject { Invoke-P308c2OfflineCorrelation @params -ExpectedPackageSid 'invalid' } 'SCHEMA_INVALID'

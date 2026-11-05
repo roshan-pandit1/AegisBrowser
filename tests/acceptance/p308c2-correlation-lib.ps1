@@ -35,11 +35,14 @@ function Invoke-P308c2OfflineCorrelation {
     if ($Run -eq [guid]::Empty -or $OrdinaryTransaction -eq [guid]::Empty -or $AppTransaction -eq [guid]::Empty -or @($ids | Select-Object -Unique).Count -ne 3 -or $WindowStart -ge $WindowEnd) { throw 'SCHEMA_INVALID' }
     $items = @($OrdinaryClient,$OrdinaryReceiver,$AppClient,$AppReceiver,$ReceiverCompletion)
     $records = @()
+    $recordVersion = $null
     for ($i=0; $i -lt 5; $i++) {
       $key = if ($i -eq 0 -or $i -eq 2) { $KeyA } else { $KeyB }
       $pin = if ($i -eq 0 -or $i -eq 2) { $PinA } else { $PinB }
       if ($items[$i].Payload -isnot [byte[]] -or $items[$i].Signature -isnot [byte[]]) { throw 'SCHEMA_INVALID' }
       $r = Read-P308c2SignedRecord -Payload $items[$i].Payload -Signature $items[$i].Signature -Key $key -ExpectedFingerprint $pin
+      if ($null -eq $recordVersion) { $recordVersion = $r.version }
+      elseif ($r.version -cne $recordVersion) { throw 'SCHEMA_INVALID' }
       if ($r.version -ceq '3' -and -not $PSBoundParameters.ContainsKey('ExpectedPackageSid')) { throw 'SCHEMA_INVALID' }
       if ($RequireVersion3 -and $r.version -cne '3') { throw 'SCHEMA_INVALID' }
       $expectedType = @('client','receiver','client','receiver','completion')[$i]
@@ -70,7 +73,8 @@ function Invoke-P308c2OfflineCorrelation {
     $completion = $records[4]
     if ($completion.observationCount -cne '2' -or $completion.receiverExit -cne '0' -or $completion.receiverError -cne 'none' -or $completion.duplicateStatus -cne 'none') { throw 'RECEIVER_INCOMPLETE' }
     foreach ($name in @('pid','createdUtc','completedUtc','exitCode','clientResult','tokenVerifiedBeforeResume','packageSid','resumed','timedOut','sourceAddress','sourcePort','duplicateWindowSeconds')) { if ($completion[$name] -cne '-') { throw 'EVIDENCE_MISMATCH' } }
-    if ($RequireVersion3) {
+    # Enforce semantics from the authenticated record version, regardless of caller flags.
+    if ($recordVersion -ceq '3') {
       foreach ($i in @(0,2)) {
         $r=$records[$i]
         if ($r.listenerStartedUtc -cne '-' -or $r.windowStartUtc -cne '-' -or $r.windowEndUtc -cne '-') { throw 'EVIDENCE_MISMATCH' }

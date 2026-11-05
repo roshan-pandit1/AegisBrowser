@@ -54,6 +54,9 @@ jobs:
         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
       - name: Build browser integration tests
         run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Reject invalid synthetic private-network client inputs
+        timeout-minutes: 3
+        run: ./tests/acceptance/test-private-network-validation.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Browser storage, OAuth, tab and renderer tests
         timeout-minutes: 5
         run: |
