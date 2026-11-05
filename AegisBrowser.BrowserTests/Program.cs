@@ -21,7 +21,9 @@ internal static partial class Program
     private static int Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "retirement-request-unit") return RetirementRequestUnit();
+        if (args.Length == 1 && args[0] == "lifetime-dispatcher-unit") return LifetimeDispatcherUnit();
         if (args.Length == 1 && args[0] == "native-release-unit") return NativeReleaseUnit().GetAwaiter().GetResult();
+        if (args.Length == 1 && args[0] == "popup-owner-close-unit") return PopupOwnerCloseUnit();
         if (args.Length == 1 && args[0] == "late-close-unit") return LateCloseUnit().GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] == "dashboard-launch") return DashboardApplication(args[1]);
         if (args.Length == 2 && args[0] == "appcontainer-probe") return AppContainerCefProbe(args[1]);

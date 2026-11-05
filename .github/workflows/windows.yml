@@ -51,6 +51,20 @@ jobs:
           $code = $LASTEXITCODE
           $output | Write-Output
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 7 native release ordering checks')) { throw 'Native release ordering regression failed or incomplete.' }
+      - name: Verify durable lifecycle dispatch
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe lifetime-dispatcher-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 23 lifetime dispatcher checks')) { throw 'Lifecycle dispatcher regression failed or incomplete.' }
+      - name: Verify popup owner-close callbacks
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe popup-owner-close-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 18 popup owner close checks')) { throw 'Popup owner-close regression failed or incomplete.' }
       - name: Browser storage, OAuth, tab and renderer tests
         timeout-minutes: 5
         run: |

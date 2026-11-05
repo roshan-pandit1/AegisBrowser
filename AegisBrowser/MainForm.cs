@@ -24,10 +24,23 @@ public sealed class MainForm : Form
     private readonly HashSet<TabPage> retiring = new();
     private readonly HashSet<TabPage> retiredDuringClose = new();
     private readonly Dictionary<TabPage, RetirementRequest> retirementRequests = new();
+    private readonly LifetimeDispatcher lifetimeDispatcher;
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
     public MainForm(string profile, string? profilePath = null)
     {
+        // Lifecycle notifications are coalesced and retained across handle recreation.
+        // Failure logging is safe from either CEF or WinForms thread.
+        lifetimeDispatcher = new LifetimeDispatcher(action => BeginInvoke(action),
+            ex => System.Diagnostics.Debug.WriteLine("Lifecycle dispatch failed: " + ex));
+        HandleCreated += (_, _) => lifetimeDispatcher.HandleCreated();
+        HandleDestroyed += (_, _) => lifetimeDispatcher.HandleDestroyed();
+        Disposed += (_, _) =>
+        {
+            var pending = lifetimeDispatcher.Stop();
+            if (pending != 0) System.Diagnostics.Debug.WriteLine($"Lifecycle notifications undelivered: {pending}");
+        };
+        if (IsHandleCreated) lifetimeDispatcher.HandleCreated();
         var configuration = new PrivacyConfiguration();
         string? privacyWarning = null;
         if (profilePath is not null)
@@ -149,11 +162,10 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { /* Handle destroyed during shutdown. */ }
     }
 
-    private void PostLifetime(Action action)
+    private void PostLifetime(object key, Action action)
     {
-        if (IsDisposed || !IsHandleCreated) return;
-        try { BeginInvoke((Action)(() => { if (!IsDisposed) action(); })); }
-        catch (InvalidOperationException) { }
+        if (!lifetimeDispatcher.Post(key, action))
+            System.Diagnostics.Debug.WriteLine("Lifecycle notification arrived after dispatcher shutdown.");
     }
 
     private void NewTab(string url)
@@ -171,8 +183,13 @@ public sealed class MainForm : Form
         browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
         // The readiness callback is a fallback for native-initiated closes. Explicit
         // tab/window closes start their observer immediately, before this callback.
-        var popups = new SafePopups(Report, () => PostLifetime(() => BeginRetirement(page, nativeCloseObserved: true)));
-        browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
+        var closeNotification = new object();
+        var initializationNotification = new object();
+        // Both signals schedule the same idempotent UI observation. Close-start
+        // alone does not satisfy the separate native-readiness/closure tasks.
+        void ObserveNativeClose() => PostLifetime(closeNotification, () => BeginRetirement(page, nativeCloseObserved: true));
+        var popups = new SafePopups(Report, ObserveNativeClose, ownerCloseStarted: ObserveNativeClose);
+        browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(initializationNotification, () =>
         {
             if (retiring.Contains(page)) RequestNativeClose(page, browser);
         });
@@ -249,8 +266,9 @@ public sealed class MainForm : Form
         if (!retirementRequests.TryGetValue(page, out var request)) return;
         try
         {
-            // The CEF callback can complete before its posted WinForms notification.
-            if (((SafePopups)browser.LifeSpanHandler).OwnerCloseReady.IsCompletedSuccessfully)
+            // Native close may start before the WinForms notification arrives.
+            // This signal suppresses a duplicate request, never authorizes release.
+            if (((SafePopups)browser.LifeSpanHandler).OwnerCloseStarted.IsCompletedSuccessfully)
                 request.MarkNativeCloseObserved();
             if (!request.TryRequestClose(browser.IsBrowserInitialized)) return;
             browser.GetBrowserHost().CloseBrowser(true);

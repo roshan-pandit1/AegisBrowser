@@ -64,6 +64,9 @@ internal static partial class Program
                         // Exercise a real owner popup while the window itself closes.
                         // One cycle keeps this native smoke test bounded on CI.
                         SafePopups? activePopupOwner = null;
+                        ChromiumWebBrowser? rapidPopupBrowser = iteration == 1 ? Current() : null;
+                        SafePopups? rapidPopupOwner = rapidPopupBrowser is null ? null :
+                            rapidPopupBrowser.LifeSpanHandler as SafePopups ?? throw new InvalidOperationException("Missing rapid-popup lifetime handler.");
                         if (iteration == 0)
                         {
                             var popupBrowser = Current();
@@ -82,6 +85,13 @@ internal static partial class Program
                         {
                             if (owners.Any(owner => !owner.OwnerClosed.IsCompleted)) removedBeforeNativeClose = true;
                         };
+                        if (rapidPopupBrowser is not null)
+                        {
+                            // Submit a real popup request just before closing. Dispatching
+                            // DevTools does not prove OnBeforePopup or OnAfterCreated ran.
+                            await Cef.UIThreadTaskFactory.StartNew(() => rapidPopupBrowser.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate",
+                                new Dictionary<string, object> { ["expression"] = "window.open('about:blank','rapid-shutdown-popup')", ["userGesture"] = true }));
+                        }
                         form.Close(); form.Close();
                         await Wait(() => form.IsDisposed, "window repro normal asynchronous shutdown");
                         Check(!removedBeforeNativeClose, "window retains tab parents until all native browser owners close");
@@ -89,6 +99,11 @@ internal static partial class Program
                         {
                             Check(activePopupOwner.PopupCount == 0 && activePopupOwner.OwnerClosed.IsCompletedSuccessfully,
                                 "window close completes native owner and active popup closure");
+                        }
+                        if (rapidPopupOwner is not null)
+                        {
+                            Check(rapidPopupOwner.OwnerClosed.IsCompletedSuccessfully && rapidPopupOwner.PopupCount == 0,
+                                "window closes tracked owner after a rapid popup request");
                         }
                         Console.WriteLine($"PASS: native window candidate reproduction cycle {number} closed normally");
                     }
