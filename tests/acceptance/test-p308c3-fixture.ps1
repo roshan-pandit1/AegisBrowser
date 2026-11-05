@@ -52,8 +52,8 @@ try {
  $hostExe=(Get-Process -Id $PID).Path
  $argv=@('-NoProfile','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $supervisor),'-BindAddress','10.9.8.2','-ExpectedClientAddress','10.9.8.1','-Port','47123','-RunId',([guid]::NewGuid().ToString('D')),'-NormalNonce',([guid]::NewGuid().ToString('D')),'-ContainedNonce',([guid]::NewGuid().ToString('D')),'-EvidenceDirectory',('"{0}"' -f $blockedRoot),'-SigningIdentity','synthetic')
  $child=Start-Process -FilePath $hostExe -ArgumentList $argv -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+ $null=$child.Handle
  if (-not $child.WaitForExit(15000)) { $child.Kill(); throw 'Unacknowledged supervisor timed out.' }
- $child.Refresh()
- if ($child.ExitCode -eq 0 -or (Test-Path -LiteralPath $blockedRoot) -or -not ([IO.File]::ReadAllText($stderr).Contains('Explicit disposable isolated-VM acknowledgement'))) { throw 'Supervisor guard failed.' };$checks++
+ if ($child.ExitCode -ne 1 -or (Test-Path -LiteralPath $blockedRoot) -or -not ([IO.File]::ReadAllText($stderr).Contains('Explicit disposable isolated-VM acknowledgement'))) { throw "Supervisor guard failed: exit=$($child.ExitCode); stderr=$stderr" };$checks++
  Write-Output "PASS: $checks synthetic fixture mapping and signing checks; no network, retained public evidence in $root"
 } finally { $key.Dispose();$public.Dispose();$testKeyParameters=$null }
