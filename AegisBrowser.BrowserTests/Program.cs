@@ -20,6 +20,7 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "late-close-unit") return LateCloseUnit().GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] == "dashboard-launch") return DashboardApplication(args[1]);
         if (args.Length == 2 && args[0] == "appcontainer-probe") return AppContainerCefProbe(args[1]);
         if (args.Length == 2 && args[0] == "appcontainer-observer") return AppContainerCefProbe(args[1], true);
@@ -396,7 +397,7 @@ internal static partial class Program
         await life.OwnerCloseReady.WaitAsync(TimeSpan.FromSeconds(10));
         var release = ((BrowserView)web).ReleaseNativeHostAsync();
         Check(ReferenceEquals(release, ((BrowserView)web).ReleaseNativeHostAsync()), "duplicate host release shares one operation");
-        await release;
+        await release.WaitAsync(TimeSpan.FromSeconds(10));
         Check(life.OwnerClosed.IsCompletedSuccessfully && !web.IsHandleCreated, "native browser closed before adapter disposal");
         web.Dispose();
     }

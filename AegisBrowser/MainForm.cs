@@ -170,8 +170,21 @@ public sealed class MainForm : Form
         browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
         var popups = new SafePopups(Report, () => PostLifetime(async () =>
         {
-            try { await browser.ReleaseNativeHostAsync(); }
-            catch (TimeoutException) { Report("Browser shutdown timed out; close the window to retry."); return; }
+            try
+            {
+                await NativeCloseWaiter.WaitAsync(browser.ReleaseNativeHostAsync(), TimeSpan.FromSeconds(10), () =>
+                {
+                    // The window can already be closing, when ordinary page reports are suppressed.
+                    if (!IsDisposed) status.Text = "Waiting for the browser to finish closing.";
+                });
+            }
+            catch (Exception ex)
+            {
+                // Do not dispose the owner unless native closure has been confirmed.
+                System.Diagnostics.Debug.WriteLine("Browser host release failed: " + ex);
+                if (!IsDisposed) status.Text = "Browser shutdown failed; native closure was not confirmed.";
+                return;
+            }
             retiring.Remove(page);
             if (closing)
             {

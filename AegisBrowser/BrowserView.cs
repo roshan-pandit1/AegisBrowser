@@ -21,6 +21,6 @@ internal sealed class BrowserView(string address, IRequestContext? requestContex
         var lifetime = (SafePopups)LifeSpanHandler;
         await lifetime.OwnerCloseReady;
         if (IsHandleCreated) DestroyHandle();
-        await lifetime.OwnerClosed.WaitAsync(TimeSpan.FromSeconds(10));
+        await lifetime.OwnerClosed;
     }
 }
