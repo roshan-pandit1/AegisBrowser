@@ -19,8 +19,9 @@ internal sealed class BrowserView(string address, IRequestContext? requestContex
     private async Task ReleaseNativeHostCoreAsync()
     {
         var lifetime = (SafePopups)LifeSpanHandler;
-        await lifetime.OwnerCloseReady;
-        if (IsHandleCreated) DestroyHandle();
-        await lifetime.OwnerClosed;
+        await NativeHostRelease.RunAsync(lifetime.OwnerCloseReady, () =>
+        {
+            if (IsHandleCreated) DestroyHandle();
+        }, lifetime.OwnerClosed);
     }
 }

@@ -37,6 +37,20 @@ jobs:
           $code = $LASTEXITCODE
           $output | Write-Output
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 4 late native close checks')) { throw 'Delayed native close regression failed or incomplete.' }
+      - name: Verify retirement request lifecycle
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe retirement-request-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 16 retirement request checks')) { throw 'Retirement request regression failed or incomplete.' }
+      - name: Verify native release callback ordering
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe native-release-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 7 native release ordering checks')) { throw 'Native release ordering regression failed or incomplete.' }
       - name: Browser storage, OAuth, tab and renderer tests
         timeout-minutes: 5
         run: |

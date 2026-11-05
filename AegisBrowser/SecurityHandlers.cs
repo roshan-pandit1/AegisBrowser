@@ -104,6 +104,9 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
     private volatile bool closing;
+    private int popupCloseRequested;
+    // Accessed only on the CEF UI thread, as are life-span callbacks.
+    private readonly HashSet<int> popupCloseIssued = new();
     private readonly TaskCompletionSource<bool> closeReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal Task OwnerCloseReady => closeReady.Task;
     private readonly TaskCompletionSource<bool> closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -131,13 +134,29 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
 
     internal int PopupCount => popups.Count;
 
+    private void RequestPopupClose(IBrowser popup)
+    {
+        // Mark before dispatch; a failed call may already have reached CEF.
+        try
+        {
+            if (popupCloseIssued.Add(popup.Identifier) && !popup.IsDisposed)
+                popup.GetHost().CloseBrowser(true);
+        }
+        catch (Exception ex)
+        {
+            // Do not infer closure or retry an uncertain request. Continue
+            // requesting closure for other popups in the CEF UI task.
+            System.Diagnostics.Debug.WriteLine("Popup close request failed: " + ex);
+        }
+    }
+
     internal void ClosePopups()
     {
         closing = true;
+        if (Interlocked.Exchange(ref popupCloseRequested, 1) != 0) return;
         Cef.UIThreadTaskFactory.StartNew(() =>
         {
-            foreach (var popup in popups.Values)
-                if (!popup.IsDisposed) popup.GetHost().CloseBrowser(true);
+            foreach (var popup in popups.Values) RequestPopupClose(popup);
         });
     }
 
@@ -145,7 +164,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
     {
         if (!browser.IsPopup) return;
         popups[browser.Identifier] = browser;
-        if (closing) browser.GetHost().CloseBrowser(true);
+        if (closing) RequestPopupClose(browser);
     }
 
     protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
@@ -153,6 +172,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
         if (browser.IsPopup)
         {
             popups.TryRemove(browser.Identifier, out _);
+            popupCloseIssued.Remove(browser.Identifier);
             // Keep the embedded owner and its shared handler alive until all
             // native popup close callbacks have finished.
             Cef.UIThreadTaskFactory.StartNew(CompleteOwnerClose);

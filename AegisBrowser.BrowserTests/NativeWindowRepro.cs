@@ -61,6 +61,17 @@ internal static partial class Program
                         await Wait(() => tabs.TabCount == 1 && Current() != previous, "window repro last-tab replacement");
                         await Ready(Current());
                         Trace("MainForm", form, "replacement-ready", form.IsHandleCreated ? form.Handle : IntPtr.Zero);
+                        // Exercise a real owner popup while the window itself closes.
+                        // One cycle keeps this native smoke test bounded on CI.
+                        SafePopups? activePopupOwner = null;
+                        if (iteration == 0)
+                        {
+                            var popupBrowser = Current();
+                            activePopupOwner = (SafePopups)popupBrowser.LifeSpanHandler;
+                            await Cef.UIThreadTaskFactory.StartNew(() => popupBrowser.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate",
+                                new Dictionary<string, object> { ["expression"] = "window.open('about:blank','shutdown-popup')", ["userGesture"] = true }));
+                            await Wait(() => activePopupOwner.PopupCount == 1, "window repro active popup created");
+                        }
                         for (var tab = 0; tab < 4; tab++) Button("+").PerformClick();
                         Trace("MainForm", form, "rapid-tabs-created", form.IsHandleCreated ? form.Handle : IntPtr.Zero);
                         var owners = tabs.TabPages.Cast<TabPage>()
@@ -74,6 +85,11 @@ internal static partial class Program
                         form.Close(); form.Close();
                         await Wait(() => form.IsDisposed, "window repro normal asynchronous shutdown");
                         Check(!removedBeforeNativeClose, "window retains tab parents until all native browser owners close");
+                        if (activePopupOwner is not null)
+                        {
+                            Check(activePopupOwner.PopupCount == 0 && activePopupOwner.OwnerClosed.IsCompletedSuccessfully,
+                                "window close completes native owner and active popup closure");
+                        }
                         Console.WriteLine($"PASS: native window candidate reproduction cycle {number} closed normally");
                     }
                 }
