@@ -10,6 +10,11 @@ param(
     [Parameter(Mandatory = $true)][string] $ParentDirectory,
     [string] $BrowserTestsExe,
     [string] $OrdinaryObservation,
+    [string] $SigningIdentity,
+    [string] $TrustManifest,
+    [string] $TrustManifestSha256,
+    [string] $OrdinarySignedPayload,
+    [string] $OrdinarySignedSignature,
     [switch] $AcknowledgeDisposableIsolatedNetwork
 )
 $ErrorActionPreference = 'Stop'
@@ -17,6 +22,11 @@ if (-not $AcknowledgeDisposableIsolatedNetwork -or $env:AEGIS_DISPOSABLE_VM_NETW
     throw 'Explicit disposable isolated-VM acknowledgement and AEGIS_DISPOSABLE_VM_NETWORK_TEST=I_UNDERSTAND are required.'
 }
 . (Join-Path $PSScriptRoot 'private-network-evidence.ps1')
+if (-not [string]::IsNullOrWhiteSpace($SigningIdentity)) {
+    . (Join-Path $PSScriptRoot 'p308c3-fixture-lib.ps1')
+    $signingKey=Open-P308c3SigningKey -Role VmA -Identity $SigningIdentity
+    try { Test-P308c3SigningChallenge $signingKey } finally { $signingKey.Dispose() }
+}
 function Assert-NoLink([string] $Path) {
     $item = Get-Item -LiteralPath $Path -Force
     while ($null -ne $item) {
@@ -95,6 +105,10 @@ if ($Stage -eq 'Ordinary') {
         processCreatedUtc = $processCreated; completedUtc = [DateTime]::UtcNow.ToString('O'); exitCode = $process.ExitCode;
         timedOut = $timedOut; clientResult = (Get-SyntheticClientResult $normalRoot); receiverObservation = 'not-evaluated'; processAttribution = 'unverified'; wfpDecision = 'not-observed' }
     Write-NewFile (Join-Path $root 'ordinary-client.json') ($clientRecord | ConvertTo-Json -Compress)
+    if ($SigningIdentity) {
+        $fields=ConvertTo-P308c3ClientFields -Record $clientRecord
+        Write-P308c3FixtureRecord -Fields $fields -Role VmA -Identity $SigningIdentity -OutputPrefix (Join-Path $root 'ordinary-client')
+    }
     if ($timedOut) { throw 'Ordinary client timed out. Do not proceed until receiver evidence exists.' }
     if ($process.ExitCode -ne 0) { throw 'Ordinary client failed. Inspect only the synthetic result and receiver evidence.' }
     Write-Output ("ORDINARY_SENT: pid={0}; waiting for independent receiver evidence before AppContainer stage." -f $process.Id)
@@ -120,6 +134,22 @@ if (-not (Test-JsonInteger $ordinaryRecord.formatVersion) -or $ordinaryRecord.fo
     $ordinaryRecord.receiverAddress -cne $ReceiverAddress -or -not (Test-JsonInteger $ordinaryRecord.receiverPort) -or $ordinaryRecord.receiverPort -ne $Port -or $ordinaryRecord.clientAddress -cne $ClientAddress -or
     -not (Test-JsonInteger $ordinaryRecord.exitCode) -or $ordinaryRecord.exitCode -ne 0 -or $ordinaryRecord.clientResult -cne 'sent' -or $ordinaryRecord.timedOut -isnot [bool] -or $ordinaryRecord.timedOut) {
     throw 'Ordinary client did not complete successfully for this run.'
+}
+if ($SigningIdentity) {
+    if (-not $TrustManifest -or -not $TrustManifestSha256 -or -not $OrdinarySignedPayload -or -not $OrdinarySignedSignature) { throw 'Signed ordinary receiver evidence and independently pinned trust manifest are required before AppContainer execution.' }
+    . (Join-Path $PSScriptRoot 'p308c2-file-lib.ps1')
+    . (Join-Path $PSScriptRoot 'p308c3-operator-lib.ps1')
+    $trust=Read-OperatorManifest $TrustManifest $TrustManifestSha256 @('protocol','version','roleA','statusA','algorithmA','fingerprintA','modulusA','exponentA','roleB','statusB','algorithmB','fingerprintB','modulusB','exponentB')
+    if ($trust.protocol -cne 'AegisOperatorTrust' -or $trust.version -cne '1' -or $trust.roleA -cne 'VmA' -or $trust.roleB -cne 'VmB' -or $trust.statusA -cne 'active' -or $trust.statusB -cne 'active' -or $trust.algorithmA -cne 'RSA-PKCS1-SHA256' -or $trust.algorithmB -cne 'RSA-PKCS1-SHA256') { throw 'UNTRUSTED_KEY' }
+    $localKey=$null; $keyA=$null; $keyB=$null
+    try {
+        $localKey=Open-P308c3SigningKey -Identity $SigningIdentity -Role VmA
+        $keyA=Import-ApprovedPublicKey $trust.modulusA $trust.exponentA
+        $keyB=Import-ApprovedPublicKey $trust.modulusB $trust.exponentB
+        if ((Get-P308c2Fingerprint $localKey) -cne $trust.fingerprintA) { throw 'UNTRUSTED_KEY' }
+        $signed=Import-P308c2FileRecord $OrdinarySignedPayload $OrdinarySignedSignature
+        Assert-P308c3PriorOrdinary -Payload $signed.Payload -Signature $signed.Signature -KeyA $keyA -PinA $trust.fingerprintA -KeyB $keyB -PinB $trust.fingerprintB -Run $RunId -Transaction $NormalNonce -Client $ClientAddress -Receiver $ReceiverAddress -Port $Port
+    } finally { if ($localKey) { $localKey.Dispose() }; if ($keyA) { $keyA.Dispose() }; if ($keyB) { $keyB.Dispose() } }
 }
 Write-NewFile (Join-Path $clientRoot 'private-network-control.txt') ($ReceiverAddress + "`n" + $Port + "`n" + $ContainedNonce.ToString('N') + "`n")
 Add-Type -Path (Join-Path $PSScriptRoot '../../scripts/containment/AppContainerLaunchResearch.cs')
@@ -152,8 +182,12 @@ try {
         receiverAddress = $ReceiverAddress; receiverPort = $Port; clientAddress = $ClientAddress; processId = $child.Id;
         processCreatedUtc = $created; completedUtc = [DateTime]::UtcNow.ToString('O'); exitCode = $exitCode;
         timedOut = $timedOut; clientResult = (Get-SyntheticClientResult $clientRoot); packageSid = $token; capabilitySid = $child.ExpectedCapabilitySid;
-        tokenVerifiedBeforeResume = $true; receiverObservation = 'not-evaluated'; processAttribution = 'unverified'; wfpDecision = 'not-observed' }
+        tokenVerifiedBeforeResume = $true; resumed = $true; receiverObservation = 'not-evaluated'; processAttribution = 'unverified'; wfpDecision = 'not-observed' }
     Write-NewFile (Join-Path $root 'appcontainer-client.json') ($clientRecord | ConvertTo-Json -Compress)
+    if ($SigningIdentity) {
+        $fields=ConvertTo-P308c3ClientFields -Record $clientRecord
+        Write-P308c3FixtureRecord -Fields $fields -Role VmA -Identity $SigningIdentity -OutputPrefix (Join-Path $root 'appcontainer-client')
+    }
     if ($timedOut) { throw 'AppContainer client timed out; receiver absence is inconclusive.' }
     if ($exitCode -ne 0) { throw 'AppContainer client failed; receiver absence is inconclusive.' }
     Write-Output 'CLIENT_SENT: independent receiver evidence is still required; nonce correlation does not attribute the flow to a process.'

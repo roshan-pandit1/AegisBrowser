@@ -84,15 +84,20 @@ foreach ($case in $cases) {
     $null = New-Item -ItemType Directory -Path $dir
     [IO.File]::WriteAllLines((Join-Path $dir 'private-network-control.txt'), @($case.address, $case.port, $case.nonce))
     $process = Start-Process -FilePath $exe -ArgumentList @('private-network-control-client', ('"{0}"' -f $dir)) -WindowStyle Hidden -PassThru
-    if (-not $process.WaitForExit(15000)) {
-        $process.Kill()
-        if (-not $process.WaitForExit(5000)) { throw 'Owned invalid-input client did not terminate.' }
-        throw ('Invalid-input client timed out: ' + $case.name)
-    }
-    $process.Refresh()
-    $result = Join-Path $dir 'private-network-result.txt'
-    if ($process.ExitCode -ne 1 -or -not (Test-Path -LiteralPath $result) -or [IO.File]::ReadAllText($result) -cne 'unavailable:InvalidDataException') {
-        throw ('Invalid input was not rejected by the synthetic client: ' + $case.name)
+    try {
+        # Retain the process handle so ExitCode remains available after the process exits.
+        $null = $process.Handle
+        if (-not $process.WaitForExit(15000)) {
+            $process.Kill()
+            if (-not $process.WaitForExit(5000)) { throw 'Owned invalid-input client did not terminate.' }
+            throw ('Invalid-input client timed out: ' + $case.name)
+        }
+        $result = Join-Path $dir 'private-network-result.txt'
+        if ($process.ExitCode -ne 1 -or -not (Test-Path -LiteralPath $result) -or [IO.File]::ReadAllText($result) -cne 'unavailable:InvalidDataException') {
+            throw ('Invalid input was not rejected by the synthetic client: ' + $case.name)
+        }
+    } finally {
+        $process.Dispose()
     }
     Write-Output ('PASS: rejected synthetic input before socket creation: ' + $case.name)
 }

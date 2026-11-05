@@ -20,6 +20,30 @@ jobs:
           dotnet --info
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git rev-parse HEAD
+      - name: Validate P3-08 preflight offline
+        run: ./tests/acceptance/test-cross-vm-preflight.ps1
+      - name: Validate synthetic receiver evidence offline
+        run: ./tests/acceptance/test-private-network-evidence-offline.ps1
+      - name: Validate P3-08C authentication primitive offline
+        run: ./tests/acceptance/test-p308c-authentication.ps1
+      - name: Validate P3-08C2 offline evidence primitives
+        run: |
+          ./tests/acceptance/test-p308c2-record.ps1
+          ./tests/acceptance/test-p308c2-files.ps1
+          ./tests/acceptance/test-p308c2-replay-ledger.ps1
+          ./tests/acceptance/test-p308c2-correlation.ps1
+      - name: Validate offline test process exit handling
+        run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c3-ci-process.ps1
+      - name: Validate P3-08C3 signing keys offline
+        run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c3-keys.ps1
+      - name: Validate P3-08C3 fixture evidence offline
+        run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c3-fixture.ps1
+      - name: Validate P3-08C3 operator verifier offline
+        run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c3-operator.ps1
+      - name: Validate P3-08C3 replay ledger offline
+        run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c3-replay.ps1
+      - name: Validate P3-08C4 lab readiness offline
+        run: ./tests/acceptance/invoke-isolated-powershell-test.ps1 -TestScript ./tests/acceptance/test-p308c4-readiness.ps1
       - name: Restore Windows x64 application
         run: dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
       - name: Build Windows x64 Release
@@ -30,6 +54,9 @@ jobs:
         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
       - name: Build browser integration tests
         run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Reject invalid synthetic private-network client inputs
+        timeout-minutes: 3
+        run: ./tests/acceptance/test-private-network-validation.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Browser storage, OAuth, tab and renderer tests
         timeout-minutes: 5
         run: |
