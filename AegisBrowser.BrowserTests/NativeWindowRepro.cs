@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using AegisBrowser;
 using CefSharp;
 using CefSharp.WinForms;
@@ -15,6 +16,7 @@ internal static partial class Program
         Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(profileRoot); Directory.CreateDirectory(root);
         var initialized = false; var result = 0;
+        var rapidEvents = new ConcurrentQueue<PopupLifecycleEvent>();
         try
         {
             Cef.EnableWaitForBrowsersToClose();
@@ -67,6 +69,9 @@ internal static partial class Program
                         ChromiumWebBrowser? rapidPopupBrowser = iteration == 1 ? Current() : null;
                         SafePopups? rapidPopupOwner = rapidPopupBrowser is null ? null :
                             rapidPopupBrowser.LifeSpanHandler as SafePopups ?? throw new InvalidOperationException("Missing rapid-popup lifetime handler.");
+                        // Exactly one synthetic popup request uses this owner. The
+                        // observer reports event kinds only, never URLs or page data.
+                        rapidPopupOwner?.SetLifecycleObserverForTest(rapidEvents.Enqueue);
                         if (iteration == 0)
                         {
                             var popupBrowser = Current();
@@ -114,7 +119,31 @@ internal static partial class Program
             Application.Run(host);
         }
         catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
-        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
+        finally
+        {
+            if (initialized)
+            {
+                Cef.WaitForBrowsersToClose(10000);
+                // Snapshot after the bounded browser-close wait. Missing creation
+                // may mean abort or a later callback; this binding does not expose
+                // a terminal abort signal, so absence is never called safe.
+                var observed = rapidEvents.ToArray();
+                var approved = Array.IndexOf(observed, PopupLifecycleEvent.PopupApproved);
+                var ready = Array.IndexOf(observed, PopupLifecycleEvent.OwnerReady);
+                var created = Array.IndexOf(observed, PopupLifecycleEvent.PopupCreated);
+                Console.WriteLine("POPUP-LIFECYCLE observations=" + string.Join(",", observed));
+                if (approved >= 0 && ready > approved && created > ready)
+                {
+                    result = 1;
+                    Console.Error.WriteLine("UNSAFE_OBSERVED: owner readiness preceded creation of the approved synthetic popup.");
+                }
+                else if (approved >= 0 && created > approved && ready > created)
+                    Console.WriteLine("OBSERVED: popup creation preceded owner readiness in this run; other orderings remain unproven.");
+                else
+                    Console.WriteLine("INCONCLUSIVE: approved-popup-in-flight ordering was not established in the bounded observation.");
+                Cef.Shutdown();
+            }
+        }
         if (result == 0) Console.WriteLine("PASS: native window candidate reproduction completed and CEF shut down");
         return result;
     }

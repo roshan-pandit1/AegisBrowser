@@ -112,6 +112,8 @@ internal static partial class Program
             // No terminal abort callback is exposed by the installed binding.
             var inFlightQueue = new Queue<Action>();
             var inFlight = new SafePopups(_ => { }, null, inFlightQueue.Enqueue);
+            var callbackEvents = new List<PopupLifecycleEvent>();
+            inFlight.SetLifecycleObserverForTest(callbackEvents.Add);
             var approvedArgs = new object?[] { null, owner, null, "about:blank", "", default(WindowOpenDisposition), true, null, null, null, false, null };
             Check(!(bool)beforePopup.Invoke(inFlight, approvedArgs)!, "user-gesture popup can be approved before owner close");
             close.Invoke(inFlight, new object?[] { null, owner });
@@ -124,12 +126,24 @@ internal static partial class Program
             ((SyntheticPopupProxy)(object)delayed).Host = delayedHost;
             created.Invoke(inFlight, new object?[] { null, delayed });
             Check(inFlight.PopupCount == 1 && ((SyntheticPopupHostProxy)(object)delayedHost).Requests == 1, "previously approved popup created after close is tracked and asked to close");
-            if (readyBeforeCreation) Console.WriteLine("KNOWN LIMITATION: readiness can precede creation of a previously approved popup; native resource safety remains unverified.");
+            Check(callbackEvents.IndexOf(PopupLifecycleEvent.PopupApproved) >= 0 && callbackEvents.IndexOf(PopupLifecycleEvent.PopupCreated) > callbackEvents.IndexOf(PopupLifecycleEvent.PopupApproved), "test telemetry records approval before late creation");
+            // This is a contract probe, not a safety pass: it does not decide
+            // whether native CEF can realize the synthetic ordering.
+            Console.WriteLine(readyBeforeCreation
+                ? "OWNER_RELEASE_CONTRACT: UNSATISFIED for synthetic approved-before-ready-before-created ordering; native behavior remains unverified."
+                : "OWNER_RELEASE_CONTRACT: this synthetic ordering did not release before creation; native behavior remains unverified.");
+            var observerFaultQueue = new Queue<Action>();
+            var observerFault = new SafePopups(_ => { }, null, observerFaultQueue.Enqueue);
+            observerFault.SetLifecycleObserverForTest(_ => throw new InvalidOperationException("synthetic observer failure"));
+            var observerArgs = new object?[] { null, owner, null, "about:blank", "", default(WindowOpenDisposition), true, null, null, null, false, null };
+            Check(!(bool)beforePopup.Invoke(observerFault, observerArgs)!, "failed telemetry cannot reject an allowed popup");
+            Check((bool)close.Invoke(observerFault, new object?[] { null, owner })!, "failed telemetry cannot change owner close handling");
+            while (observerFaultQueue.Count > 0) observerFaultQueue.Dequeue()();
             var failedDispatch = new SafePopups(_ => { }, null, _ => throw new InvalidOperationException("synthetic CEF dispatch failure"));
             Check((bool)close.Invoke(failedDispatch, new object?[] { null, owner })! && failedDispatch.OwnerCloseStarted.IsCompletedSuccessfully && !failedDispatch.OwnerCloseReady.IsCompleted, "CEF scheduling failure keeps owner readiness incomplete");
             beforeClose.Invoke(failedDispatch, new object?[] { null, owner });
             Check(!failedDispatch.OwnerClosed.IsCompleted && !failedDispatch.OwnerCloseReady.IsCompleted, "failed final notification dispatch never implies native closure");
-            Console.WriteLine("PASS: 22 popup owner close checks");
+            Console.WriteLine("PASS: 25 popup owner close checks");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }

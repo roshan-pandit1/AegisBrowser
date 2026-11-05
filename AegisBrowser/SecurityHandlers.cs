@@ -100,6 +100,9 @@ internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, F
     }
 }
 
+// Synthetic integration instrumentation: event kinds only; never URLs or page data.
+internal enum PopupLifecycleEvent { PopupApproved, PopupCreated, PopupClosed, OwnerDoClose, OwnerBeforeClose, OwnerReady }
+
 internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null, Action<Action>? scheduleForTest = null, Action? ownerCloseStarted = null) : LifeSpanHandler
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
@@ -117,6 +120,18 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
     internal Task OwnerClosed => closed.Task;
 
     private bool ownerClosing; // Accessed only on the CEF UI thread.
+    private Action<PopupLifecycleEvent>? lifecycleObserverForTest;
+
+    // Test-only observer is installed before exercising the synthetic browser.
+    // It must not alter native callback behavior or access WinForms controls.
+    internal void SetLifecycleObserverForTest(Action<PopupLifecycleEvent>? observer) =>
+        Volatile.Write(ref lifecycleObserverForTest, observer);
+
+    private void ObserveForTest(PopupLifecycleEvent observation)
+    {
+        try { Volatile.Read(ref lifecycleObserverForTest)?.Invoke(observation); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Test lifecycle observer failed: " + ex); }
+    }
 
     private void QueueOnCefUiThread(Action action)
     {
@@ -142,12 +157,17 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
 
     private void CompleteOwnerClose()
     {
-        if (ownerClosing && popups.IsEmpty && closeReady.TrySetResult(true)) ownerCloseReady?.Invoke();
+        if (ownerClosing && popups.IsEmpty && closeReady.TrySetResult(true))
+        {
+            ObserveForTest(PopupLifecycleEvent.OwnerReady);
+            ownerCloseReady?.Invoke();
+        }
     }
 
     protected override bool DoClose(IWebBrowser control, IBrowser browser)
     {
         if (browser.IsPopup) return false;
+        ObserveForTest(PopupLifecycleEvent.OwnerDoClose);
         MarkOwnerCloseStarted();
         // A native-initiated owner close may occur without an application close
         // request. Stop accepting new popups and request tracked popup closure now;
@@ -200,6 +220,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
     {
         if (!browser.IsPopup) return;
         popups[browser.Identifier] = browser;
+        ObserveForTest(PopupLifecycleEvent.PopupCreated);
         if (closing) RequestPopupClose(browser);
     }
 
@@ -207,6 +228,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
     {
         if (browser.IsPopup)
         {
+            ObserveForTest(PopupLifecycleEvent.PopupClosed);
             popups.TryRemove(browser.Identifier, out _);
             popupCloseIssued.Remove(browser.Identifier);
             // Keep the embedded owner and its shared handler alive until all
@@ -215,6 +237,7 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
         }
         else
         {
+            ObserveForTest(PopupLifecycleEvent.OwnerBeforeClose);
             MarkOwnerCloseStarted();
             QueueOnCefUiThread(() => closed.TrySetResult(true));
         }
@@ -229,7 +252,11 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
         // Keep CEF's original browsing context: window.opener, POST data, named-window
         // reuse and postMessage are required by OAuth. CEF still enforces COOP/SOP.
         if (!closing && userGesture && (string.IsNullOrEmpty(targetUrl) || targetUrl == "about:blank"
-            || BrowserPolicy.IsWebUrl(targetUrl))) return false;
+            || BrowserPolicy.IsWebUrl(targetUrl)))
+        {
+            ObserveForTest(PopupLifecycleEvent.PopupApproved);
+            return false;
+        }
         report("Popup blocked: a user gesture and a web destination are required.");
         return true;
     }
