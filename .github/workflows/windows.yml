@@ -30,6 +30,48 @@ jobs:
         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
       - name: Build browser integration tests
         run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Verify delayed native close recovery
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe late-close-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 4 late native close checks')) { throw 'Delayed native close regression failed or incomplete.' }
+      - name: Verify retirement request lifecycle
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe retirement-request-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 16 retirement request checks')) { throw 'Retirement request regression failed or incomplete.' }
+      - name: Verify native release callback ordering
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe native-release-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 7 native release ordering checks')) { throw 'Native release ordering regression failed or incomplete.' }
+      - name: Verify durable lifecycle dispatch
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe lifetime-dispatcher-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 23 lifetime dispatcher checks')) { throw 'Lifecycle dispatcher regression failed or incomplete.' }
+      - name: Verify popup owner-close callbacks
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe popup-owner-close-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 25 popup owner close checks')) { throw 'Popup owner-close regression failed or incomplete.' }
+      - name: Verify hypothetical popup correlation model
+        timeout-minutes: 2
+        run: |
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe popup-correlation-model-unit 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: 32 synthetic popup correlation model checks')) { throw 'Synthetic popup correlation model failed or incomplete.' }
       - name: Browser storage, OAuth, tab and renderer tests
         timeout-minutes: 5
         run: |

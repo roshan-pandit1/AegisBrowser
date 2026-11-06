@@ -100,28 +100,87 @@ internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, F
     }
 }
 
-internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null) : LifeSpanHandler
+// Synthetic integration instrumentation: event kinds only; never URLs or page data.
+internal enum PopupLifecycleEvent { PopupApproved, PopupCreated, PopupClosed, OwnerDoClose, OwnerBeforeClose, OwnerReady }
+
+internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null, Action<Action>? scheduleForTest = null, Action? ownerCloseStarted = null) : LifeSpanHandler
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
     private volatile bool closing;
+    private int popupCloseRequested;
+    // Accessed only on the CEF UI thread, as are life-span callbacks.
+    private readonly HashSet<int> popupCloseIssued = new();
+    // A close-start observation suppresses redundant app requests; it is not
+    // evidence of readiness, native destruction, or popup completion.
+    private readonly TaskCompletionSource<bool> closeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task OwnerCloseStarted => closeStarted.Task;
     private readonly TaskCompletionSource<bool> closeReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal Task OwnerCloseReady => closeReady.Task;
     private readonly TaskCompletionSource<bool> closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal Task OwnerClosed => closed.Task;
 
     private bool ownerClosing; // Accessed only on the CEF UI thread.
+    private Action<PopupLifecycleEvent>? lifecycleObserverForTest;
+
+    // Test-only observer is installed before exercising the synthetic browser.
+    // It must not alter native callback behavior or access WinForms controls.
+    internal void SetLifecycleObserverForTest(Action<PopupLifecycleEvent>? observer) =>
+        Volatile.Write(ref lifecycleObserverForTest, observer);
+
+    private void ObserveForTest(PopupLifecycleEvent observation)
+    {
+        try { Volatile.Read(ref lifecycleObserverForTest)?.Invoke(observation); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Test lifecycle observer failed: " + ex); }
+    }
+
+    private void QueueOnCefUiThread(Action action)
+    {
+        try
+        {
+            if (scheduleForTest is not null) scheduleForTest(action);
+            else Cef.UIThreadTaskFactory.StartNew(action);
+        }
+        catch (Exception ex)
+        {
+            // A scheduling failure is not closure evidence. Leave completion
+            // tasks pending so the WinForms observer can report incompleteness.
+            System.Diagnostics.Debug.WriteLine("CEF lifecycle dispatch failed: " + ex);
+        }
+    }
+
+    private void MarkOwnerCloseStarted()
+    {
+        if (!closeStarted.TrySetResult(true)) return;
+        try { ownerCloseStarted?.Invoke(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Owner close notification failed: " + ex); }
+    }
 
     private void CompleteOwnerClose()
     {
-        if (ownerClosing && popups.IsEmpty && closeReady.TrySetResult(true)) ownerCloseReady?.Invoke();
+        if (ownerClosing && popups.IsEmpty && closeReady.TrySetResult(true))
+        {
+            ObserveForTest(PopupLifecycleEvent.OwnerReady);
+            ownerCloseReady?.Invoke();
+        }
     }
 
     protected override bool DoClose(IWebBrowser control, IBrowser browser)
     {
         if (browser.IsPopup) return false;
+        ObserveForTest(PopupLifecycleEvent.OwnerDoClose);
+        MarkOwnerCloseStarted();
+        // A native-initiated owner close may occur without an application close
+        // request. Stop accepting new popups and request tracked popup closure now;
+        // waiting for the ready callback first would deadlock on those popups.
+        try { ClosePopups(); }
+        catch (Exception ex)
+        {
+            // A failed dispatch is not evidence of popup or owner closure.
+            System.Diagnostics.Debug.WriteLine("Popup close dispatch failed: " + ex);
+        }
         // Suppress CEF's WM_CLOSE to the top-level WinForms owner. Release the
         // embedded host only after this native close callback has returned.
-        Cef.UIThreadTaskFactory.StartNew(() =>
+        QueueOnCefUiThread(() =>
         {
             ownerClosing = true;
             CompleteOwnerClose();
@@ -131,13 +190,29 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
 
     internal int PopupCount => popups.Count;
 
+    private void RequestPopupClose(IBrowser popup)
+    {
+        // Mark before dispatch; a failed call may already have reached CEF.
+        try
+        {
+            if (popupCloseIssued.Add(popup.Identifier) && !popup.IsDisposed)
+                popup.GetHost().CloseBrowser(true);
+        }
+        catch (Exception ex)
+        {
+            // Do not infer closure or retry an uncertain request. Continue
+            // requesting closure for other popups in the CEF UI task.
+            System.Diagnostics.Debug.WriteLine("Popup close request failed: " + ex);
+        }
+    }
+
     internal void ClosePopups()
     {
         closing = true;
-        Cef.UIThreadTaskFactory.StartNew(() =>
+        if (Interlocked.Exchange(ref popupCloseRequested, 1) != 0) return;
+        QueueOnCefUiThread(() =>
         {
-            foreach (var popup in popups.Values)
-                if (!popup.IsDisposed) popup.GetHost().CloseBrowser(true);
+            foreach (var popup in popups.Values) RequestPopupClose(popup);
         });
     }
 
@@ -145,19 +220,27 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
     {
         if (!browser.IsPopup) return;
         popups[browser.Identifier] = browser;
-        if (closing) browser.GetHost().CloseBrowser(true);
+        ObserveForTest(PopupLifecycleEvent.PopupCreated);
+        if (closing) RequestPopupClose(browser);
     }
 
     protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
     {
         if (browser.IsPopup)
         {
+            ObserveForTest(PopupLifecycleEvent.PopupClosed);
             popups.TryRemove(browser.Identifier, out _);
+            popupCloseIssued.Remove(browser.Identifier);
             // Keep the embedded owner and its shared handler alive until all
             // native popup close callbacks have finished.
-            Cef.UIThreadTaskFactory.StartNew(CompleteOwnerClose);
+            QueueOnCefUiThread(CompleteOwnerClose);
         }
-        else Cef.UIThreadTaskFactory.StartNew(() => closed.TrySetResult(true));
+        else
+        {
+            ObserveForTest(PopupLifecycleEvent.OwnerBeforeClose);
+            MarkOwnerCloseStarted();
+            QueueOnCefUiThread(() => closed.TrySetResult(true));
+        }
     }
 
     protected override bool OnBeforePopup(IWebBrowser control, IBrowser browser, IFrame frame,
@@ -169,7 +252,11 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
         // Keep CEF's original browsing context: window.opener, POST data, named-window
         // reuse and postMessage are required by OAuth. CEF still enforces COOP/SOP.
         if (!closing && userGesture && (string.IsNullOrEmpty(targetUrl) || targetUrl == "about:blank"
-            || BrowserPolicy.IsWebUrl(targetUrl))) return false;
+            || BrowserPolicy.IsWebUrl(targetUrl)))
+        {
+            ObserveForTest(PopupLifecycleEvent.PopupApproved);
+            return false;
+        }
         report("Popup blocked: a user gesture and a web destination are required.");
         return true;
     }

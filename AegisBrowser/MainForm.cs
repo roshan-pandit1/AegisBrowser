@@ -22,10 +22,25 @@ public sealed class MainForm : Form
     private SearchSettingsForm? searchWindow;
     internal string SearchEngineId => searchSettings.EngineId;
     private readonly HashSet<TabPage> retiring = new();
+    private readonly HashSet<TabPage> retiredDuringClose = new();
+    private readonly Dictionary<TabPage, RetirementRequest> retirementRequests = new();
+    private readonly LifetimeDispatcher lifetimeDispatcher;
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
     public MainForm(string profile, string? profilePath = null)
     {
+        // Lifecycle notifications are coalesced and retained across handle recreation.
+        // Failure logging is safe from either CEF or WinForms thread.
+        lifetimeDispatcher = new LifetimeDispatcher(action => BeginInvoke(action),
+            ex => System.Diagnostics.Debug.WriteLine("Lifecycle dispatch failed: " + ex));
+        HandleCreated += (_, _) => lifetimeDispatcher.HandleCreated();
+        HandleDestroyed += (_, _) => lifetimeDispatcher.HandleDestroyed();
+        Disposed += (_, _) =>
+        {
+            var pending = lifetimeDispatcher.Stop();
+            if (pending != 0) System.Diagnostics.Debug.WriteLine($"Lifecycle notifications undelivered: {pending}");
+        };
+        if (IsHandleCreated) lifetimeDispatcher.HandleCreated();
         var configuration = new PrivacyConfiguration();
         string? privacyWarning = null;
         if (profilePath is not null)
@@ -103,20 +118,19 @@ public sealed class MainForm : Form
             e.Cancel = true;
             if (closing) return;
             closing = true;
-            foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
-            {
-                retiring.Add(page);
-                var web = page.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
-                if (web is null || web.IsDisposed) { retiring.Remove(page); continue; }
-                ((SafePopups)web.LifeSpanHandler).ClosePopups();
-                if (web.IsBrowserInitialized) web.GetBrowserHost().CloseBrowser(true);
-            }
-            if (retiring.Count == 0) { closeComplete = true; BeginInvoke((Action)Close); }
+            var pages = tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray();
+            // Register every owner before starting any observer: a completed task
+            // can resume synchronously while this close event is still running.
+            foreach (var page in pages) retiring.Add(page);
+            foreach (var page in pages) BeginRetirement(page, nativeCloseObserved: false);
+            if (retiring.Count == 0 && !closeComplete) { closeComplete = true; BeginInvoke((Action)Close); }
         };
         FormClosed += (_, _) =>
         {
             foreach (var page in retiring.ToArray()) page.Dispose();
             retiring.Clear();
+            retirementRequests.Clear();
+            retiredDuringClose.Clear();
         };
     }
 
@@ -148,11 +162,10 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { /* Handle destroyed during shutdown. */ }
     }
 
-    private void PostLifetime(Action action)
+    private void PostLifetime(object key, Action action)
     {
-        if (IsDisposed || !IsHandleCreated) return;
-        try { BeginInvoke((Action)(() => { if (!IsDisposed) action(); })); }
-        catch (InvalidOperationException) { }
+        if (!lifetimeDispatcher.Post(key, action))
+            System.Diagnostics.Debug.WriteLine("Lifecycle notification arrived after dispatcher shutdown.");
     }
 
     private void NewTab(string url)
@@ -168,27 +181,17 @@ public sealed class MainForm : Form
         });
         browser.PermissionHandler = new OriginPermissions(Report);
         browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
-        var popups = new SafePopups(Report, () => PostLifetime(async () =>
+        // The readiness callback is a fallback for native-initiated closes. Explicit
+        // tab/window closes start their observer immediately, before this callback.
+        var closeNotification = new object();
+        var initializationNotification = new object();
+        // Both signals schedule the same idempotent UI observation. Close-start
+        // alone does not satisfy the separate native-readiness/closure tasks.
+        void ObserveNativeClose() => PostLifetime(closeNotification, () => BeginRetirement(page, nativeCloseObserved: true));
+        var popups = new SafePopups(Report, ObserveNativeClose, ownerCloseStarted: ObserveNativeClose);
+        browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(initializationNotification, () =>
         {
-            try { await browser.ReleaseNativeHostAsync(); }
-            catch (TimeoutException) { Report("Browser shutdown timed out; close the window to retry."); return; }
-            retiring.Remove(page);
-            if (closing)
-            {
-                // Keep all tab parents alive during window shutdown. Removing one page
-                // can select another still-closing tab and recreate its browser HWND.
-                // The form disposes the pages after every native owner has closed.
-                if (retiring.Count == 0) { closeComplete = true; Close(); }
-                return;
-            }
-            tabs.TabPages.Remove(page);
-            page.Dispose();
-            if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
-        }));
-        browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
-        {
-            if (retiring.Contains(page) && browser.IsBrowserInitialized)
-                browser.GetBrowserHost().CloseBrowser(true);
+            if (retiring.Contains(page)) RequestNativeClose(page, browser);
         });
         browser.LifeSpanHandler = popups;
         page.Disposed += (_, _) => popups.ClosePopups();
@@ -230,14 +233,98 @@ public sealed class MainForm : Form
         reload.Text = browser?.IsLoading == true ? "Stop" : "Reload";
     }
 
+    // All retirement state is confined to the WinForms thread. A warning never
+    // authorizes disposal; the same observer remains alive for a late callback.
+    private void BeginRetirement(TabPage page, bool nativeCloseObserved)
+    {
+        if (page.IsDisposed || retiredDuringClose.Contains(page)) return;
+        var browser = page.Controls.OfType<BrowserView>().FirstOrDefault();
+        retiring.Add(page);
+        if (browser is null || browser.IsDisposed)
+        {
+            status.Text = "Browser shutdown incomplete; native closure was not confirmed.";
+            return;
+        }
+        if (!retirementRequests.TryGetValue(page, out var request))
+            retirementRequests[page] = request = new RetirementRequest();
+        if (nativeCloseObserved) request.MarkNativeCloseObserved();
+        if (request.TryClosePopups())
+        {
+            try { ((SafePopups)browser.LifeSpanHandler).ClosePopups(); }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Popup close request failed: " + ex);
+                status.Text = "Browser shutdown incomplete; popup closure was not confirmed.";
+            }
+        }
+        if (request.TryBeginObservation()) _ = ObserveRetirementAsync(page, browser);
+        if (!nativeCloseObserved) RequestNativeClose(page, browser);
+    }
+
+    private void RequestNativeClose(TabPage page, BrowserView browser)
+    {
+        if (!retirementRequests.TryGetValue(page, out var request)) return;
+        try
+        {
+            // Native close may start before the WinForms notification arrives.
+            // This signal suppresses a duplicate request, never authorizes release.
+            if (((SafePopups)browser.LifeSpanHandler).OwnerCloseStarted.IsCompletedSuccessfully)
+                request.MarkNativeCloseObserved();
+            if (!request.TryRequestClose(browser.IsBrowserInitialized)) return;
+            browser.GetBrowserHost().CloseBrowser(true);
+        }
+        catch (Exception ex)
+        {
+            // The call may have been dispatched before failing. Do not send a
+            // duplicate or dispose; keep waiting for native evidence.
+            System.Diagnostics.Debug.WriteLine("Native close request failed: " + ex);
+            status.Text = "Browser shutdown incomplete; native closure was not confirmed.";
+        }
+    }
+
+    private async Task ObserveRetirementAsync(TabPage page, BrowserView browser)
+    {
+        try
+        {
+            await NativeCloseWaiter.WaitAsync(browser.ReleaseNativeHostAsync(), TimeSpan.FromSeconds(10), () =>
+            {
+                if (!IsDisposed) status.Text = "Waiting for the browser to finish closing.";
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine("Browser host release failed: " + ex);
+            if (!IsDisposed) status.Text = "Browser shutdown incomplete; native closure was not confirmed.";
+            return;
+        }
+        try
+        {
+            retiring.Remove(page);
+            retirementRequests.Remove(page);
+            if (closing)
+            {
+                // Ignore a queued readiness callback for this already-closed owner
+                // while other parents remain alive during form shutdown.
+                retiredDuringClose.Add(page);
+                if (retiring.Count == 0 && !closeComplete) { closeComplete = true; BeginInvoke((Action)Close); }
+                return;
+            }
+            tabs.TabPages.Remove(page);
+            page.Dispose();
+            if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
+        }
+        catch (Exception ex)
+        {
+            // The native owner was confirmed closed, but UI cleanup did not finish.
+            System.Diagnostics.Debug.WriteLine("Browser retirement finalization failed: " + ex);
+            if (!IsDisposed) status.Text = "Browser shutdown incomplete; window cleanup failed.";
+        }
+    }
+
     private void CloseTab()
     {
         if (tabs.SelectedTab is not { } page) return;
-        var browser = Current!;
-        if (!retiring.Add(page)) return;
-        ((SafePopups)browser.LifeSpanHandler).ClosePopups();
-        // Keep the TabPage parent HWND alive until CEF reports DoClose readiness; disposing during creation can destroy a window CEF still uses.
-        if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
+        BeginRetirement(page, nativeCloseObserved: false);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>
