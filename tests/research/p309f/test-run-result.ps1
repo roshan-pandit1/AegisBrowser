@@ -50,6 +50,10 @@ try {
     Check ((Result $false 0 ($valid + @('EVENT: BROWSER_CREATED'))).Reason -ceq 'MISSING_OR_DUPLICATE_MARKER') 'duplicate creation remains incomplete'
     $wrongOrder = @($valid[0..3]) + @($valid[5], $valid[4]) + $valid[6..9]
     Check ((Result $false 0 $wrongOrder).Reason -ceq 'EVENT_ORDER_CONTRADICTORY') 'contradictory close ordering is rejected'
+    $lateConfig = @($valid[0..1]) + @($valid[3..8]) + @($valid[2], $valid[9])
+    Check ((Result $false 0 $lateConfig).Reason -ceq 'EVENT_ORDER_CONTRADICTORY') 'configuration reported after shutdown is rejected'
+    $earlyConfig = @($valid[0], $valid[2], $valid[1]) + $valid[3..9]
+    Check ((Result $false 0 $earlyConfig).Reason -ceq 'EVENT_ORDER_CONTRADICTORY') 'configuration reported before initialization return is rejected'
     Check ((Result $false 0 $valid @('FIXTURE_RESULT: FAILED')).Reason -ceq 'CONTRADICTORY_FAILURE_MARKER') 'fixture failure contradicts zero exit'
     Check ((Result $false 0 $valid @('CEF_SHUTDOWN: INCOMPLETE')).Reason -ceq 'CONTRADICTORY_FAILURE_MARKER') 'incomplete shutdown marker prevents success'
     Check ((Result $false 0 ($valid + @('EVENT: MAIN_FRAME_LOAD_ERROR code=-3'))).Reason -ceq 'CONTRADICTORY_FAILURE_MARKER') 'load error prevents success'

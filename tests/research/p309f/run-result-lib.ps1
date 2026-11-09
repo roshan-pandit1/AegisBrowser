@@ -76,6 +76,13 @@ function Get-P309fRunResult {
         if ($indices.Count -ne 1) { return New-P309fResult 'INCOMPLETE' 'MISSING_OR_DUPLICATE_MARKER' }
         $positions[$marker] = $indices[0]
     }
+    # The client prints the requested-configuration marker after successful
+    # initialization and before it can return from CEF shutdown. Context
+    # initialization itself may occur on either side of the init return.
+    if ($positions['EVENT: CEF_INITIALIZE_SUCCEEDED'] -ge $positions['SANDBOX_CONFIGURATION: REQUESTED; ENFORCEMENT: INCONCLUSIVE'] -or
+        $positions['SANDBOX_CONFIGURATION: REQUESTED; ENFORCEMENT: INCONCLUSIVE'] -ge $positions['EVENT: CEF_SHUTDOWN_RETURNED; SUBPROCESS_CLEANUP: INCONCLUSIVE']) {
+        return New-P309fResult 'INCOMPLETE' 'EVENT_ORDER_CONTRADICTORY'
+    }
     foreach ($marker in $optional) {
         $indices = @(for ($i = 0; $i -lt $StandardOutput.Count; $i++) {
             if ($StandardOutput[$i] -ceq $marker) { $i }
