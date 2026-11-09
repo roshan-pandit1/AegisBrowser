@@ -14,6 +14,14 @@ The separate `.github/workflows/p309e-native-baseline.yml` runs only on the rese
 
 On the Windows ARM64 development host, isolated x64 MSBuild compiled and linked the pinned unmodified native runtime after the matching SDK and managed reference were restored. The resulting experimental runtime SHA-256 was `DC75B9260D1732845D3E8E7DE82FC1B9F4A4CF031EA95DC37DCC32139D7FC718`; its build log is in the isolated temporary build directory. A .NET 8 x64 test host loaded the runtime with the matching CEF files, but a .NET 6 host failed because the built assembly reported .NET 8 framework references despite the project's `net6.0` target. That discrepancy, runtime compatibility and reproducibility require further investigation. Native CEF initialization was not attempted: the pinned [CefSettingsBase constructor](https://github.com/cefsharp/CefSharp/blob/ec1027aa21e1af1217681a349104c15d29bbc21a/CefSharp.Core.Runtime/CefSettingsBase.h) sets `no_sandbox` and no managed setter to reverse it was established during this experiment. This observation concerns the pinned source, not a change to the application. No CEF startup/close test or ABI validation is claimed.
 
+For a separately prepared, operator-controlled disposable directory containing the source-built runtime, `CefSharp.dll`, `libcef.dll`, `chrome_elf.dll`, and `Ijwhost.dll`, the test-only reflection probe is:
+
+```powershell
+& 'C:\Program Files\dotnet\x64\dotnet.exe' run --project .\tests\research\p309e\LoadProbe -c Release -- 'C:\path\to\isolated\probe-files'
+```
+
+Loading native DLLs executes loader initialization, so never point this command at untrusted or production files. The probe prints file hashes and assembly references, verifies that public initialization and shutdown methods are present, and does not call them. Windows may resolve other dependencies according to its normal loader rules. A successful probe is not a CEF startup, shutdown or ABI test.
+
 The entry point `tests/research/p309e-native-baseline.ps1` intentionally requires a runner-owned absolute `RUNNER_TEMP`, VS 2022 and the exact SDK. It creates a new GUID-named child directory and leaves it for runner disposal; it does not delete existing directories. Invoke it in a comparable disposable environment only. .NET first-run certificate generation is disabled in the research workflow. Always inspect the actual workflow run and exit status before treating the baseline as built.
 
 ## Offline source audit

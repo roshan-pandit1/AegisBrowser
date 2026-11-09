@@ -32,6 +32,20 @@ jobs:
           dotnet-version: |
             6.0.428
             8.0.427
+      - name: Build and reject incomplete reflection probe inputs
+        run: |
+          dotnet build ./tests/research/p309e/LoadProbe/LoadProbe.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Reflection probe build failed.' }
+          $probe = './tests/research/p309e/LoadProbe/bin/Release/net8.0/LoadProbe.dll'
+          & dotnet $probe
+          if ($LASTEXITCODE -ne 2) { throw "Missing argument returned unexpected code $LASTEXITCODE." }
+          $empty = Join-Path $env:RUNNER_TEMP ('aegis-empty-' + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $empty -ErrorAction Stop | Out-Null
+          & dotnet $probe $empty
+          if ($LASTEXITCODE -ne 1) { throw "Missing files returned unexpected code $LASTEXITCODE." }
+          # Both nonzero exits were asserted above; do not leak the expected
+          # rejection into the Actions shell's final process exit status.
+          $global:LASTEXITCODE = 0
       - name: Restore and build unmodified native baseline
         timeout-minutes: 25
         run: ./tests/research/p309e-native-baseline.ps1
