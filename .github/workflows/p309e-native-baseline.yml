@@ -1,0 +1,51 @@
+name: Experimental pinned CefSharp native baseline
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/p3-09e-native-popup-bridge
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+
+jobs:
+  baseline:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify offline source-audit failure handling
+        run: ./tests/research/p309e/test-source-audit.ps1
+      - name: Install isolated .NET SDKs
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: |
+            6.0.428
+            8.0.427
+      - name: Build and reject incomplete reflection probe inputs
+        run: |
+          dotnet build ./tests/research/p309e/LoadProbe/LoadProbe.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Reflection probe build failed.' }
+          $probe = './tests/research/p309e/LoadProbe/bin/Release/net8.0/LoadProbe.dll'
+          & dotnet $probe
+          if ($LASTEXITCODE -ne 2) { throw "Missing argument returned unexpected code $LASTEXITCODE." }
+          $empty = Join-Path $env:RUNNER_TEMP ('aegis-empty-' + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $empty -ErrorAction Stop | Out-Null
+          & dotnet $probe $empty
+          if ($LASTEXITCODE -ne 1) { throw "Missing files returned unexpected code $LASTEXITCODE." }
+          # Both nonzero exits were asserted above; do not leak the expected
+          # rejection into the Actions shell's final process exit status.
+          $global:LASTEXITCODE = 0
+      - name: Restore and build unmodified native baseline
+        timeout-minutes: 25
+        run: ./tests/research/p309e-native-baseline.ps1
