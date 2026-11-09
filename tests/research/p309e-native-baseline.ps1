@@ -28,6 +28,8 @@ New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
 $env:NUGET_PACKAGES = Join-Path $root 'nuget-global'
 $env:NUGET_HTTP_CACHE_PATH = Join-Path $root 'nuget-http'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 
 $git = (Get-Command git.exe -ErrorAction Stop).Source
 $nuget = (Get-Command nuget.exe -ErrorAction Stop).Source
@@ -97,12 +99,31 @@ Write-Host "CEF_SDK_PACKAGE_SHA512=$actualSdkSha512"
 Write-Host ("CEF_SDK_PACKAGE_SHA256={0}" -f (Get-FileHash -LiteralPath $sdkArchive -Algorithm SHA256).Hash)
 Write-Host 'The SHA-512 pin was compared with official NuGet metadata; this does not independently authenticate publisher identity.'
 
-$solution = Join-Path $source 'CefSharp3.netcore.sln'
+$managedProject = Join-Path $source 'CefSharp\CefSharp.netcore.csproj'
+$nativeProject = Join-Path $source 'CefSharp.Core.Runtime\CefSharp.Core.Runtime.netcore.vcxproj'
+foreach ($project in @($managedProject, $nativeProject)) {
+    if (-not (Test-Path -LiteralPath $project -PathType Leaf)) { throw "Pinned project is missing: $project" }
+}
+# Build only the managed reference and native binding. The upstream solution
+# also contains a ref-assembly project that depends on Microsoft.DotNet.GenAPI
+# from a separate feed and is not required for this baseline. Force MSBuild to
+# use the same pinned SDK as dotnet rather than silently selecting another SDK.
+$dotnetRoot = Split-Path -Parent $dotnet
+$sdkPath = Join-Path $dotnetRoot 'sdk\6.0.428\Sdks'
+if (-not (Test-Path -LiteralPath $sdkPath -PathType Container)) { throw 'Pinned .NET SDK resolver path is unavailable.' }
+$env:DOTNET_ROOT = $dotnetRoot
+$env:MSBuildSDKsPath = $sdkPath
+$env:MSBuildEnableWorkloadResolver = 'false'
+$solutionDir = $source.TrimEnd('\', '/') + '\'
 $common = @('/p:Platform=x64', '/p:Configuration=Release', '/p:VisualStudioVersion=17.0', '/nologo', '/v:minimal')
 Push-Location $source
 try {
-    Invoke-Checked $msbuild (@($solution, '/t:Restore', '/p:RestoreSources=https://api.nuget.org/v3/index.json') + $common)
-    Invoke-Checked $msbuild (@($solution, '/t:Build', '/m:2') + $common)
+    Invoke-Checked $dotnet @('restore', $managedProject, '--source', 'https://api.nuget.org/v3/index.json')
+    Invoke-Checked $dotnet @('build', $managedProject, '--no-restore', '-c', 'Release', '-p:Platform=x64', '-p:VisualStudioVersion=17.0')
+    $managedOutput = Join-Path $source 'CefSharp\bin.netcore\x64\Release\net6.0\CefSharp.dll'
+    if (-not (Test-Path -LiteralPath $managedOutput -PathType Leaf)) { throw 'Expected managed reference build output is missing.' }
+    Write-Host ("MANAGED_REFERENCE_SHA256={0}" -f (Get-FileHash -LiteralPath $managedOutput -Algorithm SHA256).Hash)
+    Invoke-Checked $msbuild (@($nativeProject, '/t:Build', '/p:BuildProjectReferences=false', "/p:SolutionDir=$solutionDir", '/m:1') + $common)
 } finally { Pop-Location }
 
 $runtime = Join-Path $source 'CefSharp.Core.Runtime\bin.netcore\x64\Release\CefSharp.Core.Runtime.dll'
