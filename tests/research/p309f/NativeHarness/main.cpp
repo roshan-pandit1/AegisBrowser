@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cwchar>
 #include <string>
+#include "FixtureGate.h"
 
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
@@ -23,16 +24,20 @@
 #endif
 
 namespace {
-constexpr char kFixtureUrl[] =
-    "data:text/html,%3Ctitle%3EAegis%20CEF%20research%3C/title%3E%3Cp%3EOffline%20fixture%3C/p%3E";
 struct State {
   bool created = false;
+  bool load_started = false;
   bool loaded = false;
   bool close_started = false;
   bool closed = false;
   bool failed = false;
   bool lifetime_fault = false;
+  std::string fixture_frame_id;
 };
+
+bool IsFixtureFrame(CefRefPtr<CefFrame> frame) {
+  return p309g::IsFixtureUrl(frame->GetURL().ToString());
+}
 
 class Client final : public CefClient, public CefLifeSpanHandler, public CefLoadHandler {
  public:
@@ -61,10 +66,43 @@ class Client final : public CefClient, public CefLifeSpanHandler, public CefLoad
     state_->created = true;
     std::puts("EVENT: BROWSER_CREATED");
   }
+  void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                   TransitionType) override {
+    if (!frame->IsMain() || browser->IsPopup() || state_->close_started) return;
+    if (!IsFixtureFrame(frame)) {
+      std::puts("EVENT: OTHER_MAIN_FRAME_LOAD_START");
+      return;
+    }
+    const auto identifier = frame->GetIdentifier().ToString();
+    if (identifier.empty()) {
+      state_->failed = true;
+      state_->close_started = true;
+      std::puts("EVENT: FIXTURE_FRAME_ID_MISSING");
+      browser->GetHost()->CloseBrowser(false);
+      return;
+    }
+    if (!state_->load_started) {
+      state_->load_started = true;
+      state_->fixture_frame_id = identifier;
+      std::puts("EVENT: MAIN_FRAME_LOAD_STARTED");
+    } else if (state_->fixture_frame_id != identifier) {
+      state_->failed = true;
+      state_->close_started = true;
+      std::puts("EVENT: FIXTURE_FRAME_ID_CHANGED");
+      browser->GetHost()->CloseBrowser(false);
+    }
+  }
   void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int) override {
     if (!frame->IsMain() || browser->IsPopup() || state_->close_started) return;
-    if (frame->GetURL().ToString() != kFixtureUrl) {
+    if (!IsFixtureFrame(frame)) {
       std::puts("EVENT: OTHER_MAIN_FRAME_LOAD_END");
+      return;
+    }
+    if (!state_->load_started || frame->GetIdentifier().ToString() != state_->fixture_frame_id) {
+      state_->failed = true;
+      state_->close_started = true;
+      std::puts("EVENT: FIXTURE_LOAD_START_OR_FRAME_MISMATCH");
+      browser->GetHost()->CloseBrowser(false);
       return;
     }
     state_->loaded = true;
@@ -118,7 +156,7 @@ class App final : public CefApp, public CefBrowserProcessHandler {
     window.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
     CefBrowserSettings settings;
     CefRefPtr<Client> client = new Client(state_);
-    if (!CefBrowserHost::CreateBrowser(window, client, kFixtureUrl, settings, nullptr, nullptr)) {
+    if (!CefBrowserHost::CreateBrowser(window, client, p309g::kFixtureUrl, settings, nullptr, nullptr)) {
       state_->failed = true;
       std::puts("EVENT: CREATE_BROWSER_FAILED");
       CefQuitMessageLoop();
@@ -133,16 +171,6 @@ bool ExplicitOptIn() {
   wchar_t value[8] = {};
   return GetEnvironmentVariableW(L"AEGIS_P309F_EXECUTE_SANDBOX_TEST", value, 8) == 3 &&
          std::wcscmp(value, L"YES") == 0;
-}
-
-bool HasNoSandboxSwitch(int argc, char* argv[]) {
-  for (int i = 0; i < argc; ++i) {
-    if (_stricmp(argv[i], "--no-sandbox") == 0 ||
-        _strnicmp(argv[i], "--no-sandbox=", 13) == 0 ||
-        _stricmp(argv[i], "--disable-gpu-sandbox") == 0 ||
-        _strnicmp(argv[i], "--disable-gpu-sandbox=", 22) == 0) return true;
-  }
-  return false;
 }
 
 bool CreateTemporaryCache(std::wstring& path) {
@@ -163,29 +191,28 @@ CEF_BOOTSTRAP_EXPORT int RunConsoleMain(int argc, char* argv[], void* sandbox_in
   // still running. No buffered output is treated as a completion signal.
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   std::setvbuf(stderr, nullptr, _IONBF, 0);
-  if (!ExplicitOptIn()) {
-    std::fputs("BLOCKED: OPT_IN\n", stderr);
-    return 10;
-  }
-  if (!sandbox_info) {
-    std::fputs("BLOCKED: MISSING_SANDBOX_INFO\n", stderr);
-    return 10;
-  }
-  if (HasNoSandboxSwitch(argc, argv)) {
-    std::fputs("BLOCKED: DISALLOWED_SANDBOX_SWITCH\n", stderr);
-    return 10;
+  switch (p309g::EvaluateGate(ExplicitOptIn(), sandbox_info != nullptr, argc, argv)) {
+    case p309g::GateFailure::OptIn:
+      std::fprintf(stderr, "BLOCKED: OPT_IN role=%s\n", p309g::ProcessRole(argc, argv)); return 10;
+    case p309g::GateFailure::MissingSandboxInfo:
+      std::fprintf(stderr, "BLOCKED: MISSING_SANDBOX_INFO role=%s\n", p309g::ProcessRole(argc, argv)); return 16;
+    case p309g::GateFailure::NoSandbox:
+      std::fprintf(stderr, "BLOCKED: DISALLOWED_SANDBOX_SWITCH role=%s switch=no-sandbox\n", p309g::ProcessRole(argc, argv)); return 17;
+    case p309g::GateFailure::DisableGpuSandbox:
+      std::fprintf(stderr, "BLOCKED: DISALLOWED_SANDBOX_SWITCH role=%s switch=disable-gpu-sandbox\n", p309g::ProcessRole(argc, argv)); return 17;
+    case p309g::GateFailure::None: break;
   }
   if (!bootstrap_version || bootstrap_version->size <
           offsetof(cef_version_info_t, chrome_version_patch) + sizeof(bootstrap_version->chrome_version_patch) ||
       bootstrap_version->cef_version_major != 154 ||
       bootstrap_version->cef_version_minor != 0 || bootstrap_version->cef_version_patch != 34 ||
       bootstrap_version->chrome_version_build != 8037 || bootstrap_version->chrome_version_patch != 98) {
-    std::fputs("BLOCKED: BOOTSTRAP_VERSION\n", stderr);
+    std::fprintf(stderr, "BLOCKED: BOOTSTRAP_VERSION role=%s\n", p309g::ProcessRole(argc, argv));
     return 11;
   }
   if (cef_version_info(0) != 154 || cef_version_info(1) != 0 || cef_version_info(2) != 34 ||
       cef_version_info(6) != 8037 || cef_version_info(7) != 98) {
-    std::fputs("BLOCKED: CEF_RUNTIME_VERSION\n", stderr);
+    std::fprintf(stderr, "BLOCKED: CEF_RUNTIME_VERSION role=%s\n", p309g::ProcessRole(argc, argv));
     return 12;
   }
   CefMainArgs main_args(GetModuleHandleW(nullptr));

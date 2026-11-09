@@ -1,0 +1,80 @@
+name: Experimental supervised CEF lifecycle
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/p3-09g-sandbox-lifecycle-evidence
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+
+jobs:
+  native-diagnostic:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: |
+            6.0.428
+            8.0.427
+      - name: Run offline process, token and existing safety checks
+        timeout-minutes: 5
+        run: |
+          dotnet run --project ./tests/research/p309g/ProcessSupervisor -c Release -- --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Process supervisor tests failed.' }
+          dotnet run --project ./tests/research/p309g/TokenObserver.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Token observer tests failed.' }
+          ./tests/research/p309f/test-sandbox-preflight.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Sandbox preflight tests failed.' }
+          ./tests/research/p309f/test-run-result.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Result classification tests failed.' }
+          ./tests/research/p309g/test-result.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Supervised-result correlation tests failed.' }
+      - name: Build pinned native baseline
+        id: baseline
+        timeout-minutes: 20
+        run: ./tests/research/p309e-native-baseline.ps1
+      - name: Compile client and test sandbox gate
+        id: client
+        env:
+          P309G_CEF_SDK: ${{ steps.baseline.outputs.sdk_path }}
+        run: |
+          if (-not $env:P309G_CEF_SDK -or -not (Test-Path -LiteralPath $env:P309G_CEF_SDK -PathType Container)) { throw 'Pinned CEF SDK is missing.' }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = @(& $vswhere -version '[17.0,18.0)' -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.CLI.Support -property installationPath)
+          if ($LASTEXITCODE -ne 0 -or $vs.Count -ne 1 -or -not $vs[0]) { throw 'Required VS 2022 C++ toolchain is unavailable.' }
+          $msbuild = Join-Path $vs[0] 'MSBuild/Current/Bin/MSBuild.exe'
+          $root = Join-Path $env:RUNNER_TEMP ('aegis-p309g-build-' + [Guid]::NewGuid().ToString('N'))
+          $out = (Join-Path $root 'client') + '\'
+          $obj = (Join-Path $root 'client-obj') + '\'
+          $gateOut = (Join-Path $root 'gate') + '\'
+          $gateObj = (Join-Path $root 'gate-obj') + '\'
+          New-Item -ItemType Directory -Path $out,$obj,$gateOut,$gateObj -ErrorAction Stop | Out-Null
+          & $msbuild ./tests/research/p309f/NativeHarness/GateTests.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 "/p:OutDir=$gateOut" "/p:IntDir=$gateObj" /m:1 /v:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Gate test build failed.' }
+          $gate = @(& (Join-Path $gateOut 'GateTests.exe'))
+          $gateCode = $LASTEXITCODE
+          $gate | Write-Output
+          if ($gateCode -ne 0 -or !(($gate -join "`n") -match 'PASS: 19 synthetic fixture and sandbox-gate checks')) { throw 'Gate tests failed or incomplete.' }
+          & $msbuild ./tests/research/p309f/NativeHarness/NativeHarness.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 "/p:CefSdkRoot=$env:P309G_CEF_SDK" "/p:OutDir=$out" "/p:IntDir=$obj" /m:1 /v:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Native client build failed.' }
+          $client = Join-Path $out 'p309f_client.dll'
+          if (-not (Test-Path -LiteralPath $client -PathType Leaf)) { throw 'Native client is missing.' }
+          "client_path=$client" >> $env:GITHUB_OUTPUT
+      - name: Run bounded native diagnostic
+        timeout-minutes: 8
+        env:
+          P309G_CLIENT: ${{ steps.client.outputs.client_path }}
+        run: ./tests/research/p309g/invoke-native-ci.ps1 -ClientPath $env:P309G_CLIENT
