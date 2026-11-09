@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{EE20FAEE-46E9-4A93-B1C2-975CC0DE4C0A}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>P309fNativeHarness</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <PlatformToolset Condition="'$(PlatformToolset)' == ''">v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>p309f_client</TargetName>
+    <CefHeadersRoot Condition="'$(CefHeadersRoot)' == ''">$(CefSdkRoot)\CEF\include</CefHeadersRoot>
+  </PropertyGroup>
+  <Target Name="ValidateCefSdk" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(CefSdkRoot)' == ''" Text="CefSdkRoot must name the verified cef.sdk.154.0.34 directory." />
+    <Error Condition="!Exists('$(CefHeadersRoot)\include\cef_sandbox_win.h')" Text="Pinned CEF sandbox header not found." />
+    <Error Condition="!Exists('$(CefSdkRoot)\CEF\x64\release\VS2022\libcef_dll_wrapper.lib')" Text="Pinned x64 CEF wrapper library not found." />
+  </Target>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(CefHeadersRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NOMINMAX;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalLibraryDirectories>$(CefSdkRoot)\CEF\x64\release;$(CefSdkRoot)\CEF\x64\release\VS2022;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libcef.lib;libcef_dll_wrapper.lib;shlwapi.lib;comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="main.cpp" /></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
