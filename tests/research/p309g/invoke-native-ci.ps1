@@ -5,6 +5,7 @@ param([Parameter(Mandatory)][string]$ClientPath)
 # official CEF distribution that matched its published index checksum; this
 # is not an independent publisher attestation. Never use production profiles.
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest
 $expectedArchive = 'C81C34D048D87276F4A18F0B000206710A1709BB67DD658948B87100E1A538DA'
 $expectedBootstrap = 'BD0D6DCF683171305C02BCEE6B6F5DAD2ABDD2F90FF8EF0593BE585E78E164C9'
@@ -22,8 +23,10 @@ $bundle = Join-Path $root 'bundle'
 $unpack = Join-Path $root 'unpack'
 $archive = Join-Path $root 'cef.tar.bz2'
 New-Item -ItemType Directory -Path $bundle,$unpack -ErrorAction Stop | Out-Null
-Invoke-WebRequest -Uri $url -OutFile $archive
+Write-Output 'DIAGNOSTIC_STAGE: DOWNLOAD_PINNED_CEF'
+Invoke-WebRequest -Uri $url -OutFile $archive -TimeoutSec 180
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -cne $expectedArchive) { throw 'Pinned CEF archive hash mismatch.' }
+Write-Output 'DIAGNOSTIC_STAGE: ARCHIVE_HASH_VERIFIED'
 
 # Check the complete pinned archive before extraction. Reject links, absolute
 # paths and traversal; extraction is confined to the new runner-owned root.
@@ -36,6 +39,7 @@ foreach ($entry in $entries) {
 }
 $details = @(& tar.exe -tvf $archive)
 if ($LASTEXITCODE -ne 0 -or @($details | Where-Object { $_ -match '^[lh]' }).Count -ne 0) { throw 'CEF archive contains a link or could not be inspected.' }
+Write-Output 'DIAGNOSTIC_STAGE: EXTRACT_PINNED_CEF'
 & tar.exe -xf $archive -C $unpack
 if ($LASTEXITCODE -ne 0) { throw 'CEF archive extraction failed.' }
 $distribution = Join-Path $unpack $name
@@ -82,6 +86,7 @@ $manifest = Join-Path $root 'manifest.json'
 $json = [ordered]@{ schema = 'p309g-bundle-v1'; files = @($files.ToArray()) } | ConvertTo-Json -Depth 5 -Compress
 [IO.File]::WriteAllText($manifest, $json, [Text.UTF8Encoding]::new($false))
 $manifestHash = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
+Write-Output 'DIAGNOSTIC_STAGE: SUPERVISE_PINNED_CLIENT'
 $supervisor = Join-Path $PSScriptRoot 'ProcessSupervisor/bin/Release/net8.0/ProcessSupervisor.exe'
 if (-not (Test-Path -LiteralPath $supervisor -PathType Leaf)) { throw 'Built supervisor is missing.' }
 $previous = $ErrorActionPreference
