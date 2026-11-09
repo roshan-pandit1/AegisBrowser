@@ -129,6 +129,11 @@ try {
 $runtime = Join-Path $source 'CefSharp.Core.Runtime\bin.netcore\x64\Release\CefSharp.Core.Runtime.dll'
 if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) { throw 'Expected native runtime output is missing.' }
 Write-Host ("EXPERIMENTAL_RUNTIME_SHA256={0}" -f (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash)
+if ($env:GITHUB_OUTPUT) {
+    # The workflow may perform metadata-only checks on the isolated output.
+    # This is an ephemeral runner path, not a published binary artifact.
+    [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "runtime_path=$runtime`n", [Text.UTF8Encoding]::new($false))
+}
 Write-Host 'UNMODIFIED_NATIVE_BUILD: PASS (compile/link only; native load, CEF startup, callback safety and ABI are not established)'
 Write-Host 'EXPERIMENTAL_BRIDGE_BUILD: NOT_RUN'
 Write-Host 'OWNER_RELEASE_CONTRACT: UNSATISFIED'

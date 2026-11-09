@@ -1,0 +1,51 @@
+name: Experimental native framework and sandbox qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/p3-09f-sandbox-native-qualification
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+
+jobs:
+  qualification:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: |
+            6.0.428
+            8.0.427
+      - name: Test metadata and sandbox input rejection
+        run: |
+          ./tests/research/p309f/test-framework-metadata.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Framework metadata checks failed.' }
+          ./tests/research/p309f/test-sandbox-preflight.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Sandbox preflight checks failed.' }
+      - name: Build pinned unmodified CefSharp baseline
+        id: baseline
+        timeout-minutes: 25
+        run: ./tests/research/p309e-native-baseline.ps1
+      - name: Check source-built assembly references
+        env:
+          P309F_RUNTIME: ${{ steps.baseline.outputs.runtime_path }}
+        run: |
+          if (-not $env:P309F_RUNTIME) { throw 'Native build did not report an output path.' }
+          dotnet ./tests/research/p309f/FrameworkMetadata/bin/Release/net8.0/FrameworkMetadata.dll $env:P309F_RUNTIME 6
+          if ($LASTEXITCODE -ne 0) { throw 'Native assembly references exceed the .NET 6 metadata gate.' }
+          Write-Host 'SANDBOX_ENFORCEMENT: NOT_RUN'
+          Write-Host 'NATIVE_CEF_STARTUP: NOT_RUN'
+          Write-Host 'OWNER_RELEASE_CONTRACT: UNSATISFIED'
