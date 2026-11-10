@@ -15,11 +15,35 @@
 <p>This embedded page reads browser properties locally. It makes no network requests and stores no report. Values are observations, not an anonymity score. Profiles separate stored browsing data; they do not change your device or network identity.</p>
 <p>Supported secure same-origin camera, microphone, location and notification requests use Chromium consent prompts. Other permissions, screen capture and downloads are denied. This page requests no permissions.</p>
 <button id="refresh">Refresh report</button>
+<section aria-labelledby="exposure-title">
+<h2 id="exposure-title">Local fingerprint exposure audit</h2>
+<p>This checks which browser APIs are present, without creating a fingerprint hash, requesting permissions, or sending data anywhere. Availability does not mean a site has actually accessed an API, and the report is not an anonymity or security-bypass score.</p>
+<pre id="exposure" aria-live="polite">Checking available APIs…</pre>
+</section>
+<h2>Current browser values</h2>
 <pre id="result" aria-live="polite">Collecting local observations…</pre>
 <script>
 'use strict';
 const read = fn => { try { return fn() ?? 'not exposed'; } catch { return 'unavailable'; } };
+// Check the availability of common fingerprinting surfaces without reading
+// high-entropy values, requesting permission, creating contexts or persisting data.
+const present = test => {
+  try { return test() ? 'API available' : 'Not observed'; }
+  catch { return 'Unavailable'; }
+};
 function report() {
+  const surfaces = {
+    'Canvas 2D': present(() => typeof HTMLCanvasElement !== 'undefined'),
+    'WebGL': present(() => typeof WebGLRenderingContext !== 'undefined'),
+    'AudioContext': present(() => typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined'),
+    'WebRTC': present(() => typeof RTCPeerConnection !== 'undefined'),
+    'User-Agent Client Hints': present(() => 'userAgentData' in navigator),
+    'Hardware concurrency': present(() => typeof navigator.hardwareConcurrency === 'number'),
+    'Device memory': present(() => typeof navigator.deviceMemory === 'number'),
+    'Screen dimensions': present(() => typeof screen.width === 'number'),
+    'Timezone': present(() => typeof Intl.DateTimeFormat === 'function')
+  };
+  document.querySelector('#exposure').textContent = JSON.stringify(surfaces, null, 2);
   const values = {
     userAgent: navigator.userAgent,
     userAgentData: read(() => navigator.userAgentData?.toJSON()),
