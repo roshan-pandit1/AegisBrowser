@@ -304,6 +304,8 @@ internal static partial class Program
         {
             var uri = new Uri(request.Url);
             var body = "<!doctype html><title>Local storage policy fixture</title>";
+            if (uri.Host == new Uri(StorageThird).Host && uri.AbsolutePath == "/p404-input")
+                return ResourceHandler.FromString(StorageInputFramePage(), mimeType: "text/html");
             if (uri.Host == new Uri(StorageThird).Host && uri.AbsolutePath == "/embedded")
             {
                 // Record only presence of the fixed synthetic marker, never a

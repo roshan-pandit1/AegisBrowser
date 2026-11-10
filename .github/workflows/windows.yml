@@ -64,6 +64,18 @@ jobs:
               throw "Cookie probe $phase did not complete CEF shutdown"
             }
           }
+      - name: Controlled CEF storage input preflight
+        timeout-minutes: 3
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-p404-input-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe storage-policy-probe $profileRoot 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
+              ($output -join "`n") -notmatch 'PASS: controlled CEF mouse input activates the cross-origin iframe button' -or
+              ($output -join "`n") -notmatch 'PASS: isolated CEF storage policy probe shutdown completed') {
+            throw 'CEF input preflight failed or did not complete shutdown.'
+          }
       - name: HTTPS fixture certificate preflight
         timeout-minutes: 2
         run: |

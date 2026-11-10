@@ -39,10 +39,14 @@ remains part of the evidence.
 
 The P4-03 real TLS fixture is reused on a disposable hosted runner with its
 temporary test-user CA and exact-root cleanup. The experiment sends mouse
-press/release input through CEF's internal DevTools input client to a visible
-test button; it does not set a JavaScript `userGesture` override, open a remote
-debugging port, or grant a permission. The page reports `event.isTrusted` and
-`navigator.userActivation.isActive` at the instant it calls the API. A local
+input to visible test controls. It uses CEF's internal DevTools input client
+for the top-level control and posts window messages for the cross-origin
+iframe only after verifying that the target belongs to the test process and
+its browser window. It does not move the system cursor, set a JavaScript
+`userGesture` override for the Storage Access request, open a remote debugging
+port, or grant a permission. The page reports `event.isTrusted` and
+`navigator.userActivation.isActive` at the instant it calls the API. These are
+automated input events, not evidence of a physical user's action. A local
 CEF-only preflight observed both flags for a top-level button and an iframe;
 that preflight does not establish HTTPS or cross-site permission behavior.
 
@@ -69,6 +73,13 @@ both before and after that popup command. The existing popup fixture uses a
 DevTools gesture flag; it is not evidence of a physical user action. The new
 Storage Access request itself uses a visible button and separately observed
 trusted mouse input and activation.
+
+The [next hosted run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42859660481)
+reached the visible cross-site iframe but timed out without a completed input
+result; root removal was verified. A local cross-origin in-process CEF fixture
+reproduced the missing DevTools input while a same-origin iframe worked. A
+separate window-message experiment reached the cross-origin button locally;
+the real HTTPS result must be verified on a later hosted run.
 
 The embedded session is a synthetic server-side cookie requirement, not a real
 identity-provider integration. It reports whether the test cookies arrived

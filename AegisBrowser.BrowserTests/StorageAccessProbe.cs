@@ -1,6 +1,7 @@
 using AegisBrowser;
 using CefSharp;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace AegisBrowser.BrowserTests;
@@ -9,9 +10,14 @@ internal static partial class Program
 {
     // DevTools input is sent only to the controlled test browser. Unlike a
     // Runtime.evaluate userGesture override, this dispatches mouse input.
-    private static async Task ClickStorageControl(BrowserView browser)
+    private static async Task ClickStorageControl(BrowserView browser, bool useOwnedWindow = false)
     {
         browser.Focus();
+        if (useOwnedWindow)
+        {
+            OwnedWindowInput.Click(browser, 80, 60);
+            return;
+        }
         using var client = browser.GetDevToolsClient();
         var move = await client.Input.DispatchMouseEventAsync(CefSharp.DevTools.Input.DispatchMouseEventType.MouseMoved, 80, 60);
         var down = await client.Input.DispatchMouseEventAsync(CefSharp.DevTools.Input.DispatchMouseEventType.MousePressed,
@@ -19,6 +25,45 @@ internal static partial class Program
         var up = await client.Input.DispatchMouseEventAsync(CefSharp.DevTools.Input.DispatchMouseEventType.MouseReleased,
             80, 60, button: CefSharp.DevTools.Input.MouseButton.Left, buttons: 0, clickCount: 1);
         if (!move.Success || !down.Success || !up.Success) throw new InvalidOperationException("Controlled mouse input was not accepted.");
+    }
+
+    // Posts only to a window owned by this test process and rooted in its
+    // disposable form. It does not move the user's cursor or use SendInput.
+    private static class OwnedWindowInput
+    {
+        [StructLayout(LayoutKind.Sequential)] private struct Point { public int X; public int Y; }
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+        [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+        [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+        [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsChild(IntPtr parent, IntPtr child);
+        [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ClientToScreen(IntPtr window, ref Point point);
+        [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ScreenToClient(IntPtr window, ref Point point);
+        [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        internal static void Click(BrowserView browser, int x, int y)
+        {
+            var form = browser.FindForm() ?? throw new InvalidOperationException("Test browser form is unavailable.");
+            var browserWindow = browser.GetBrowserHost().GetWindowHandle();
+            _ = GetWindowThreadProcessId(browserWindow, out var browserOwner);
+            if (browserWindow == IntPtr.Zero || browserOwner != (uint)Environment.ProcessId
+                || GetAncestor(browserWindow, 2) != form.Handle)
+                throw new InvalidOperationException("Test browser window identity could not be established.");
+            var point = new Point { X = x, Y = y };
+            if (!ClientToScreen(browserWindow, ref point)) throw new InvalidOperationException("Could not map test input coordinates.");
+            var target = WindowFromPoint(point);
+            _ = GetWindowThreadProcessId(target, out var targetOwner);
+            if (target == IntPtr.Zero || targetOwner != (uint)Environment.ProcessId || GetAncestor(target, 2) != form.Handle
+                || (target != browserWindow && !IsChild(browserWindow, target)))
+                throw new InvalidOperationException("The test input point is not on a test-owned window.");
+            if (!ScreenToClient(target, ref point) || point.X < 0 || point.Y < 0 || point.X > 32767 || point.Y > 32767)
+                throw new InvalidOperationException("Test input coordinates are invalid.");
+            var position = new IntPtr((point.Y << 16) | point.X);
+            if (!PostMessageW(target, 0x0200, IntPtr.Zero, position)
+                || !PostMessageW(target, 0x0201, new IntPtr(1), position)
+                || !PostMessageW(target, 0x0202, IntPtr.Zero, position))
+                throw new InvalidOperationException("Could not post input to the test-owned browser window.");
+        }
     }
 
     // Local CEF-only input qualification; no trust-store or permission changes.
@@ -43,11 +88,7 @@ internal static partial class Program
             "controlled CEF mouse input produced a trusted click with transient activation");
         Console.WriteLine("P404_INPUT: trusted=true transient_activation=true scope=local_cef_only");
 
-        const string child = """
-            <!doctype html><style>body{margin:0}button{width:260px;height:90px}</style><button>Request storage access</button><script>
-            document.querySelector('button').addEventListener('click',e=>parent.postMessage({kind:'p404-input',trusted:e.isTrusted,active:navigator.userActivation?.isActive===true},'*'));
-            parent.postMessage({kind:'p404-input-ready'},'*');</script>
-            """;
+        var child = StorageInputFramePage();
         await Js(browser, "document.body.innerHTML='';window.p404frame='pending';window.p404frameReady=false;"
             + "const f=document.createElement('iframe');f.style='position:fixed;left:20px;top:20px;width:350px;height:120px;border:0';"
             + "addEventListener('message',e=>{if(e.source===f.contentWindow&&e.data){if(e.data.kind==='p404-input-ready')window.p404frameReady=true;"
@@ -60,7 +101,30 @@ internal static partial class Program
         using var frame = JsonDocument.Parse(await Js(browser, "window.p404frame"));
         Check(frame.RootElement.GetProperty("trusted").GetBoolean() && frame.RootElement.GetProperty("active").GetBoolean(),
             "controlled CEF mouse input activates the visible iframe button");
+
+        // This is still an in-process scheme fixture; it tests cross-origin
+        // input routing, not HTTPS sockets or storage permission behavior.
+        await LoadReady(browser, StorageTopA);
+        await Js(browser, "window.p404frame='pending';window.p404frameReady=false;"
+            + "const f=document.createElement('iframe');f.style='position:fixed;left:20px;top:20px;width:350px;height:120px;border:0';"
+            + "addEventListener('message',e=>{if(e.source===f.contentWindow&&e.origin==='" + StorageThird.TrimEnd('/')
+            + "'&&e.data){if(e.data.kind==='p404-input-ready')window.p404frameReady=true;"
+            + "if(e.data.kind==='p404-input')window.p404frame=JSON.stringify(e.data);}});"
+            + "f.src='" + StorageThird + "p404-input';document.body.appendChild(f);'ready'");
+        await WaitForAsync(async () => await Js(browser, "window.p404frameReady") == "True", "cross-origin iframe input readiness");
+        Check(await Js(browser, "document.elementFromPoint(80,60)?.tagName") == "IFRAME", "cross-origin iframe is the input target");
+        await ClickStorageControl(browser, useOwnedWindow: true);
+        await WaitForAsync(async () => await Js(browser, "window.p404frame") != "pending", "cross-origin iframe input preflight");
+        using var crossFrame = JsonDocument.Parse(await Js(browser, "window.p404frame"));
+        Check(crossFrame.RootElement.GetProperty("trusted").GetBoolean() && crossFrame.RootElement.GetProperty("active").GetBoolean(),
+            "controlled CEF mouse input activates the cross-origin iframe button");
     }
+
+    private static string StorageInputFramePage() => """
+        <!doctype html><style>body{margin:0}button{width:260px;height:90px}</style><button>Request storage access</button><script>
+        document.querySelector('button').addEventListener('click',e=>parent.postMessage({kind:'p404-input',trusted:e.isTrusted,active:navigator.userActivation?.isActive===true},'*'));
+        requestAnimationFrame(()=>requestAnimationFrame(()=>parent.postMessage({kind:'p404-input-ready'},'*')));</script>
+        """;
 
     private sealed class StoragePermissionJournal
     {
@@ -109,10 +173,13 @@ internal static partial class Program
         const supported=typeof document.hasStorageAccess==='function' && typeof document.requestStorageAccess==='function';
         (async()=>{
           if(supported){try{before=String(await document.hasStorageAccess());}catch(e){before='error:'+e.name;}}
-          parent.postMessage({kind:'p404-ready',supported,before},'*');
+          await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+          const target=document.elementFromPoint(60,40)?.id||'none';
+          parent.postMessage({kind:'p404-ready',supported,before,target},'*');
         })();
         document.getElementById('p404-request').addEventListener('click',e=>{
           const trusted=e.isTrusted, active=navigator.userActivation?.isActive===true;
+          parent.postMessage({kind:'p404-click',trusted,active},'*');
           let request;
           try { request=supported ? document.requestStorageAccess() : null; }
           catch(err) { request=Promise.reject(err); }
@@ -121,8 +188,8 @@ internal static partial class Program
             if(request) result=await Promise.race([
               request.then(()=> 'resolved',err=>'rejected:'+err.name),
               new Promise(resolve=>setTimeout(()=>resolve('timeout'),5000))]);
-            if(supported){try{after=String(await document.hasStorageAccess());}catch(err){after='error:'+err.name;}}
-            try { await fetch('/p404-cookie-check',{credentials:'include',cache:'no-store'}); fetchResult='completed'; }
+            if(supported){try{after=await Promise.race([document.hasStorageAccess().then(String),new Promise(resolve=>setTimeout(()=>resolve('timeout'),5000))]);}catch(err){after='error:'+err.name;}}
+            try { fetchResult=await Promise.race([fetch('/p404-cookie-check',{credentials:'include',cache:'no-store'}).then(()=> 'completed'),new Promise(resolve=>setTimeout(()=>resolve('timeout'),5000))]); }
             catch(err) { fetchResult='error:'+err.name; }
             parent.postMessage({kind:'p404-result',trusted,active,before,result,after,fetchResult},'*');
           })();
@@ -134,10 +201,11 @@ internal static partial class Program
     {
         server.Take("/p404-access");
         await LoadReady(browser, top);
-        await Js(browser, "window.p404ready='pending';window.p404result='pending';"
+        await Js(browser, "window.p404ready='pending';window.p404click='pending';window.p404result='pending';"
             + "const f=document.createElement('iframe');f.style='position:fixed;left:20px;top:20px;width:350px;height:120px;border:0;z-index:1000';"
             + "addEventListener('message',e=>{if(e.source===f.contentWindow&&e.origin==='" + server.Third.TrimEnd('/')
             + "'&&e.data){if(e.data.kind==='p404-ready')window.p404ready=JSON.stringify(e.data);"
+            + "if(e.data.kind==='p404-click')window.p404click=JSON.stringify(e.data);"
             + "if(e.data.kind==='p404-result')window.p404result=JSON.stringify(e.data);}});"
             + (sandboxed ? "f.setAttribute('sandbox','allow-scripts allow-same-origin');" : "")
             + "f.src='" + server.Third + "p404-access';document.body.appendChild(f);'started'");
@@ -176,8 +244,12 @@ internal static partial class Program
         var readyRoot = ready.RootElement;
         var supported = readyRoot.GetProperty("supported").GetBoolean();
         var before = readyRoot.GetProperty("before").GetString();
+        Check(readyRoot.GetProperty("target").GetString() == "p404-request", "iframe button is ready at the controlled input point");
         Check(await Js(browser, "document.elementFromPoint(80,60)?.tagName") == "IFRAME", "visible storage-access iframe is the input target");
-        await ClickStorageControl(browser);
+        await ClickStorageControl(browser, useOwnedWindow: true);
+        await WaitForAsync(async () => await Js(browser, "window.p404click") != "pending", "Storage Access controlled click not observed");
+        using var click = JsonDocument.Parse(await Js(browser, "window.p404click"));
+        permissions.Record("INPUT_EVENT", $"scenario={label} trusted={click.RootElement.GetProperty("trusted").GetBoolean()} active={click.RootElement.GetProperty("active").GetBoolean()}");
         await WaitForAsync(async () => await Js(browser, "window.p404result") != "pending", "Storage Access user-input result");
         using var data = JsonDocument.Parse(await Js(browser, "window.p404result"));
         var root = data.RootElement;
