@@ -106,7 +106,9 @@ internal static partial class Program
             using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
             store.Open(OpenFlags.ReadWrite | OpenFlags.OpenExistingOnly);
             if (Matches(store, certificate) != 0) throw new InvalidOperationException("The new test root already exists.");
+            Console.WriteLine("P403_STAGE: add_disposable_user_root");
             store.Add(certificate);
+            Console.WriteLine("P403_STAGE: disposable_user_root_added");
             installed = true;
             if (Matches(store, certificate) != 1) throw new InvalidOperationException("Could not verify test root installation.");
         }
@@ -130,7 +132,8 @@ internal static partial class Program
         }
     }
 
-    private readonly record struct HttpsCookieObservation(bool Normal, bool HttpOnly, bool Lax, bool Strict, bool SetCookie);
+    private readonly record struct HttpsCookieObservation(bool Normal, bool HttpOnly, bool Lax, bool Strict,
+        bool SetCookie, bool ChipA, bool ChipB);
 
     // Actual TLS and HTTP over loopback sockets. Only booleans for known
     // synthetic cookie markers are retained; raw request headers are dropped.
@@ -204,6 +207,7 @@ internal static partial class Program
                     if (parts.Length < 2 || parts[0] != "GET") return;
                     var path = parts[1].Split('?')[0];
                     var normal = false; var httpOnly = false; var lax = false; var strict = false; var set = false;
+                    var chipA = false; var chipB = false;
                     for (var i = 0; i < 100; i++)
                     {
                         var header = await reader.ReadLineAsync(timeout.Token);
@@ -214,9 +218,13 @@ internal static partial class Program
                         lax = header.Contains("p403lax=1", StringComparison.Ordinal);
                         strict = header.Contains("p403strict=1", StringComparison.Ordinal);
                         set = header.Contains("p403embedded=1", StringComparison.Ordinal);
+                        chipA = header.Contains("p403chip=A", StringComparison.Ordinal);
+                        chipB = header.Contains("p403chip=B", StringComparison.Ordinal);
                     }
-                    observations.GetOrAdd(path, _ => new()).Enqueue(new(normal, httpOnly, lax, strict, set));
-                    var body = path == "/embedded" || path == "/early-child"
+                    observations.GetOrAdd(path, _ => new()).Enqueue(new(normal, httpOnly, lax, strict, set, chipA, chipB));
+                    var body = path.StartsWith("/storage-", StringComparison.Ordinal)
+                        ? StorageFixturePage(path)
+                        : path == "/embedded" || path == "/early-child" || path.StartsWith("/chips-", StringComparison.Ordinal)
                         ? "<!doctype html><script>parent.postMessage('p403:done','*');</script>"
                         : path == "/early-top"
                         ? "<!doctype html><script>window.p403early=false;addEventListener('message',e=>{if(e.origin==='"
@@ -233,6 +241,13 @@ internal static partial class Program
                             + "Set-Cookie: p403embedded=; Max-Age=0; Path=/; SameSite=None; Secure\r\n";
                     if (path is "/embedded" or "/early-child")
                         headers += "Set-Cookie: p403embedded=1; Max-Age=3600; Path=/; SameSite=None; Secure\r\n";
+                    if (path is "/chips-a" or "/chips-b" or "/chips-clear")
+                    {
+                        var value = path == "/chips-a" ? "A" : path == "/chips-b" ? "B" : "";
+                        var age = path == "/chips-clear" ? "0" : "3600";
+                        headers += "Set-Cookie: p403chip=" + value + "; Max-Age=" + age
+                            + "; Path=/; SameSite=None; Secure; Partitioned\r\n";
+                    }
                     var prefix = Encoding.ASCII.GetBytes(headers + "Content-Length: " + bytes.Length + "\r\n\r\n");
                     await stream.WriteAsync(prefix, timeout.Token); await stream.WriteAsync(bytes, timeout.Token);
                 }

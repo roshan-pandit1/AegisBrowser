@@ -81,9 +81,10 @@ jobs:
         timeout-minutes: 5
         run: |
           foreach ($phase in @('https-privacy-write', 'https-privacy-read')) {
-            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $env:P403_PROFILE_DIR $env:P403_TRUST_DIR 2>&1
+            $logFile = Join-Path $env:RUNNER_TEMP ($phase + '.log')
+            & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $env:P403_PROFILE_DIR $env:P403_TRUST_DIR 2>&1 | Tee-Object -FilePath $logFile
             $code = $LASTEXITCODE
-            $output | Write-Output
+            $output = Get-Content -LiteralPath $logFile -Raw
             if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
             if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: real HTTPS privacy probe completed')) {
               throw "HTTPS privacy probe $phase failed or was incomplete"

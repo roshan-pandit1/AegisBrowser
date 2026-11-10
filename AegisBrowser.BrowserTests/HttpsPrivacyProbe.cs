@@ -92,7 +92,9 @@ internal static partial class Program
             var portPath = Path.Combine(root, "p403-port.txt");
             var port = phase == "https-privacy-read" ? int.Parse(File.ReadAllText(portPath)) : 0;
             certificates = new PrivacyCertificates();
+            Console.WriteLine("P403_STAGE: certificates_created");
             trust = new DisposableRunnerTrust(certificates.Root, trustDirectory, certificates.Id);
+            Console.WriteLine("P403_STAGE: trust_ready");
             server = new PrivacyHttpsServer(certificates.Server, port);
             if (phase == "https-privacy-write")
             {
@@ -113,6 +115,7 @@ internal static partial class Program
                 CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef-https-privacy.log")
             });
             if (!initialized) throw new InvalidOperationException("CEF initialization failed.");
+            Console.WriteLine("P403_STAGE: cef_initialized");
             using var context = Cef.GetGlobalRequestContext();
             using var host = new Form { Width = 800, Height = 600 };
             host.Shown += async (_, _) =>
@@ -142,6 +145,8 @@ internal static partial class Program
                         Check(first.Length == 1 && first[0].Normal && first[0].HttpOnly,
                             "first-party normal and HttpOnly HTTPS cookies survived restart");
                         await HttpsScenario(browser, server, false, "restart-enabled");
+                        await HttpsChips(browser, server, "restart-enabled", true);
+                        await HttpsStorage(browser, server, "restart-enabled", true);
                     }
                     else
                     {
@@ -152,9 +157,14 @@ internal static partial class Program
                         });
                         Check(baseline, "baseline cookie preference selected");
                         await HttpsScenario(browser, server, true, "baseline");
+                        await HttpsChips(browser, server, "baseline", false);
+                        await HttpsStorage(browser, server, "baseline", false);
                         var applied = await Cef.UIThreadTaskFactory.StartNew(() => ThirdPartyCookiePolicy.ApplyOnUiThread(context, true));
                         Check(applied.Succeeded, "production cookie preference applied and read back");
                         await HttpsScenario(browser, server, false, "enabled");
+                        await HttpsChips(browser, server, "enabled", false);
+                        await HttpsStorage(browser, server, "enabled", false);
+                        await HttpsStorageAccessNoGesture(browser, server);
                         await RejectFixtureCertificates(host, certificates);
                         new PrivacySettingsStore(root).Save(new PrivacyConfiguration { BlockThirdPartyCookies = true });
                         using var manager = context.GetCookieManager(null);
