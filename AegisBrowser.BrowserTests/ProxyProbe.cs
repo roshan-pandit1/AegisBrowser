@@ -17,6 +17,7 @@ internal static partial class Program
         Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(profileRoot); Directory.CreateDirectory(root);
         var initialized = false; var result = 0;
+        var socksTrace = new SocksTrace();
         try
         {
             Cef.EnableWaitForBrowsersToClose();
@@ -26,6 +27,7 @@ internal static partial class Program
                 CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef-proxy-probe.log")
             });
             if (!initialized) throw new IOException("CEF initialization failed.");
+            socksTrace.Add("CEF_LIFECYCLE_EVENT", "INITIALIZED");
             using var context = Cef.GetGlobalRequestContext();
             using var origin = new LocalHttpFixture("origin");
             // The test-only proxy can connect only to this one loopback origin.
@@ -112,7 +114,8 @@ internal static partial class Program
                     }
                     finally { browser.LoadError -= onError; }
                     await ObserveHttpsThroughProxy(browser, context);
-                    await ObserveSocksThroughProxy(browser, context);
+                    await ObserveSocksThroughProxy(browser, context, socksTrace);
+                    await ObserveSocksCancellation(browser, context, socksTrace);
                     await ObserveHttpsProxyCertificate(browser, context);
                     Console.WriteLine($"PASS: {checks} CEF proxy probe checks");
                 }
@@ -121,8 +124,9 @@ internal static partial class Program
                 {
                     if (browser is not null && browser.IsBrowserInitialized)
                     {
-                        try { await CloseWeb(browser); }
+                        try { socksTrace.Add("CEF_LIFECYCLE_EVENT", "BROWSER_CLOSE_REQUESTED"); await CloseWeb(browser); socksTrace.Add("CEF_LIFECYCLE_EVENT", "BROWSER_CLOSED"); }
                         catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
+                        finally { socksTrace.Detach(); }
                     }
                     host.Close();
                 }
@@ -130,7 +134,11 @@ internal static partial class Program
             Application.Run(host);
         }
         catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
-        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
+        finally
+        {
+            try { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); socksTrace.Add("CEF_LIFECYCLE_EVENT", "SHUTDOWN_RETURNED"); } }
+            finally { socksTrace.Print(); }
+        }
         if (result == 0) Console.WriteLine("PASS: CEF proxy probe shutdown completed");
         return result;
     }

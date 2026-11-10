@@ -16,6 +16,7 @@ internal static partial class Program
         {
             StorageFixturePage("/storage-clear"), StorageFixturePage("/storage-set-a"),
             StorageFixturePage("/storage-read"), StorageFixturePage("/storage-access-no-gesture"),
+            StorageAccessGesturePage(),
             ServiceWorkerPage("/sw/frame-clear"), ServiceWorkerPage("/sw/frame-a"),
             ServiceWorkerPage("/sw/frame-read")
         };
@@ -47,8 +48,14 @@ internal static partial class Program
             addEventListener('message',e=>{if(e.origin===location.origin && e.data==='p403-oauth-ok')window.p403authDone=true;});
             'ready'
             """);
-        await Cef.UIThreadTaskFactory.StartNew(() => browser.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate",
-            new Dictionary<string, object> { ["expression"] = "window.open('" + server.Third + "auth-provider','p403-auth')", ["userGesture"] = true }));
+        await Cef.UIThreadTaskFactory.StartNew(() =>
+        {
+            var host = browser.GetBrowserHost();
+            var id = host.GetNextDevToolsMessageId();
+            if (host.ExecuteDevToolsMethod(id, "Runtime.evaluate",
+                new Dictionary<string, object> { ["expression"] = "window.open('" + server.Third + "auth-provider','p403-auth')", ["userGesture"] = true }) != id)
+                throw new InvalidOperationException("The test popup command was not submitted with its expected ID.");
+        });
         await WaitForAsync(async () => await Js(browser, "window.p403authDone") == "True", "HTTPS OAuth-style popup");
         var provider = server.Take("/auth-provider");
         var callback = server.Take("/auth-callback");
@@ -235,7 +242,7 @@ internal static partial class Program
                   if(typeof document.requestStorageAccess==='function') {
                     try {
                       result=await Promise.race([
-                        document.requestStorageAccess().then(()=> 'granted',e=>'rejected:'+e.name),
+                        document.requestStorageAccess().then(()=> 'resolved',e=>'rejected:'+e.name),
                         new Promise(resolve=>setTimeout(()=>resolve('timeout'),5000))]);
                     } catch(e) { result='error:'+e.name; }
                   }
@@ -299,7 +306,7 @@ internal static partial class Program
             """;
     }
 
-    private static async Task HttpsStorageAccessNoGesture(BrowserView browser, PrivacyHttpsServer server)
+    private static async Task HttpsStorageAccessNoGesture(BrowserView browser, PrivacyHttpsServer server, string label)
     {
         const string path = "/storage-access-no-gesture";
         server.Take(path);
@@ -316,7 +323,12 @@ internal static partial class Program
         var before = root.GetProperty("before").GetString();
         var result = root.GetProperty("result").GetString();
         var after = root.GetProperty("after").GetString();
-        Console.WriteLine($"P403_STORAGE_ACCESS: gesture=false before={before} request={result} after={after}");
+        Console.WriteLine($"P403_STORAGE_ACCESS: scenario={label} gesture=false before={before} request={result} after={after}");
+        Check(result != "timeout" && !(result?.StartsWith("error:", StringComparison.Ordinal) ?? true),
+            "Storage Access no-gesture observation completed without an unexpected error");
+        if (label == "enabled" && before == "false" && result != "unsupported")
+            Check(result == "rejected:NotAllowedError" && after == "false",
+                "no-gesture storage request without access was rejected");
     }
 
     private static async Task<StorageObservation> HttpsStorageFrame(BrowserView browser, PrivacyHttpsServer server, string top, string path)

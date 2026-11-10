@@ -192,6 +192,11 @@ internal static partial class Program
     // synthetic cookie markers are retained; raw request headers are dropped.
     private sealed class PrivacyHttpsServer : IDisposable
     {
+        // P4-04 adds several HTTPS navigations and bounded observation windows
+        // to the P4-03 fixture. Chromium can also open speculative sockets.
+        // Keep a hard total limit and report actual use rather than relying on
+        // the previous 256-connection budget for the smaller fixture.
+        private const int ConnectionLimit = 512;
         private readonly TcpListener ipv4;
         private readonly TcpListener ipv6;
         private readonly X509Certificate2 certificate;
@@ -199,7 +204,7 @@ internal static partial class Program
         private readonly ConcurrentBag<Task> clients = new();
         private readonly ConcurrentDictionary<string, ConcurrentQueue<HttpsCookieObservation>> observations = new();
         private readonly Task[] loops;
-        private int accepted;
+        private int accepted, requests, cancelled, tlsErrors, ioErrors;
         public int Port { get; }
         public string TopA => $"https://127.0.0.1:{Port}/";
         public string TopB => $"https://[::1]:{Port}/";
@@ -232,7 +237,7 @@ internal static partial class Program
                 while (!stop.IsCancellationRequested)
                 {
                     var client = await listener.AcceptTcpClientAsync(stop.Token);
-                    if (Interlocked.Increment(ref accepted) > 256)
+                    if (Interlocked.Increment(ref accepted) > ConnectionLimit)
                     {
                         client.Dispose();
                         throw new InvalidOperationException("HTTPS fixture connection limit exceeded.");
@@ -260,6 +265,7 @@ internal static partial class Program
                     if (line is null) return;
                     var parts = line.Split(' ');
                     if (parts.Length < 2 || parts[0] != "GET") return;
+                    Interlocked.Increment(ref requests);
                     var path = parts[1].Split('?')[0];
                     var normal = false; var httpOnly = false; var lax = false; var strict = false; var set = false;
                     var chipA = false; var chipB = false; var authSession = false;
@@ -293,7 +299,11 @@ internal static partial class Program
                         await stream.WriteAsync(redirect, timeout.Token);
                         return;
                     }
-                    var body = path == "/auth-callback"
+                    var body = path == "/p404-access" ? StorageAccessGesturePage()
+                        : path == "/p404-embedded-auth"
+                        ? "<!doctype html><script>parent.postMessage({kind:'p404-embedded-auth',signedIn:"
+                            + ((normal && httpOnly) ? "true" : "false") + "},'*');</script>"
+                        : path == "/auth-callback"
                         ? "<!doctype html><script>if(window.opener){window.opener.postMessage('p403-oauth-ok','"
                             + TopA.TrimEnd('/') + "');window.close();}</script>"
                         : path == "/sw/worker.js" ? ServiceWorkerScript()
@@ -336,10 +346,10 @@ internal static partial class Program
                     var prefix = Encoding.ASCII.GetBytes(headers + "Content-Length: " + bytes.Length + "\r\n\r\n");
                     await stream.WriteAsync(prefix, timeout.Token); await stream.WriteAsync(bytes, timeout.Token);
                 }
-                catch (OperationCanceledException) { }
-                catch (AuthenticationException) { }
-                catch (IOException) { }
-                catch (SocketException) { }
+                catch (OperationCanceledException) { Interlocked.Increment(ref cancelled); }
+                catch (AuthenticationException) { Interlocked.Increment(ref tlsErrors); }
+                catch (IOException) { Interlocked.Increment(ref ioErrors); }
+                catch (SocketException) { Interlocked.Increment(ref ioErrors); }
             }
         }
 
@@ -347,7 +357,11 @@ internal static partial class Program
         {
             stop.Cancel(); ipv4.Stop(); ipv6.Stop();
             try { Task.WhenAll(loops).GetAwaiter().GetResult(); Task.WhenAll(clients.ToArray()).GetAwaiter().GetResult(); }
-            finally { stop.Dispose(); }
+            finally
+            {
+                Console.WriteLine($"P404_HTTPS_FIXTURE: accepted={accepted} requests={requests} cancelled={cancelled} tls_errors={tlsErrors} io_errors={ioErrors} limit={ConnectionLimit}");
+                stop.Dispose();
+            }
         }
     }
 }

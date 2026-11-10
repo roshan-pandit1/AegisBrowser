@@ -180,6 +180,7 @@ internal static partial class Program
             if (!initialized) throw new InvalidOperationException("CEF initialization failed.");
             Console.WriteLine("P403_STAGE: cef_initialized");
             using var context = Cef.GetGlobalRequestContext();
+            var permissionJournal = new StoragePermissionJournal();
             using var host = new Form { Width = 800, Height = 600 };
             host.Shown += async (_, _) =>
             {
@@ -199,7 +200,7 @@ internal static partial class Program
                     {
                         Dock = DockStyle.Fill,
                         RequestHandler = new SafeRequests(Console.WriteLine),
-                        PermissionHandler = new OriginPermissions(Console.WriteLine)
+                        PermissionHandler = new OriginPermissions(permissionJournal.Report)
                     };
                     Observe(browser); host.Controls.Add(browser);
                     await Ready(browser);
@@ -213,6 +214,7 @@ internal static partial class Program
                         var first = server.Take("/inspect");
                         Check(first.Length == 1 && first[0].Normal && first[0].HttpOnly,
                             "first-party normal and HttpOnly HTTPS cookies survived restart");
+                        await StorageAccessAfterRestart(browser, server, permissionJournal);
                         await HttpsScenario(browser, server, false, "restart-enabled");
                         await HttpsSubresources(browser, server, false, "restart-enabled");
                         await HttpsChips(browser, server, "restart-enabled", true);
@@ -242,7 +244,21 @@ internal static partial class Program
                         await HttpsStorage(browser, server, "enabled", false);
                         await HttpsServiceWorker(browser, server, "enabled", false);
                         await HttpsAuthentication(browser, server, "enabled");
-                        await HttpsStorageAccessNoGesture(browser, server);
+                        await HttpsStorageAccessNoGesture(browser, server, "enabled");
+                        var accessBaseline = await Cef.UIThreadTaskFactory.StartNew(() =>
+                        {
+                            var ok = context.SetPreference(ThirdPartyCookiePolicy.Preference, 0, out _);
+                            return ok && context.GetPreference(ThirdPartyCookiePolicy.Preference) is 0;
+                        });
+                        Check(accessBaseline, "controlled Storage Access baseline cookie mode selected");
+                        await HttpsStorageAccessNoGesture(browser, server, "baseline");
+                        await EmbeddedAuthentication(browser, server, permissionJournal, true, "baseline");
+                        await StorageAccessGesture(browser, server, permissionJournal, "baseline");
+                        var accessEnabled = await Cef.UIThreadTaskFactory.StartNew(() => ThirdPartyCookiePolicy.ApplyOnUiThread(context, true));
+                        Check(accessEnabled.Succeeded, "production cookie policy restored for Storage Access test");
+                        await EmbeddedAuthentication(browser, server, permissionJournal, false, "enabled");
+                        await StorageAccessGesture(browser, server, permissionJournal, "enabled");
+                        await StorageAccessGesture(browser, server, permissionJournal, "sandboxed_enabled", sandboxed: true);
                         await RejectFixtureCertificates(host, certificates, () => closeIncomplete = true);
                         new PrivacySettingsStore(root).Save(new PrivacyConfiguration { BlockThirdPartyCookies = true });
                         using var manager = context.GetCookieManager(null);
@@ -251,6 +267,7 @@ internal static partial class Program
                         await flush.Done.Task.WaitAsync(TimeSpan.FromSeconds(10));
                     }
                     closeAttempted = true;
+                    permissionJournal.Print();
                     await CloseWeb(browser); host.Controls.Remove(browser); browser = null;
                     Console.WriteLine("PASS: real HTTPS privacy probe completed");
                     result = 0;

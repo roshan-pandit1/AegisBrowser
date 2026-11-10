@@ -64,6 +64,23 @@ jobs:
               throw "Cookie probe $phase did not complete CEF shutdown"
             }
           }
+      - name: Controlled CEF storage input preflight
+        timeout-minutes: 3
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-p404-input-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe storage-policy-probe $profileRoot 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
+              ($output -join "`n") -notmatch 'PASS: isolated CEF storage policy probe shutdown completed') {
+            throw 'CEF input preflight failed or did not complete shutdown.'
+          }
+          $inputResults = [regex]::Matches(($output -join "`n"), 'P404_CROSS_ORIGIN_INPUT: (VERIFIED|INCONCLUSIVE)\b')
+          if ($inputResults.Count -ne 2) { throw 'Missing cross-origin input preflight results.' }
+          if (($output -join "`n") -match 'P404_CROSS_ORIGIN_INPUT: INCONCLUSIVE') {
+            Write-Warning 'Cross-origin test input was not observed; Storage Access gesture qualification remains inconclusive.'
+            'P404 cross-origin input preflight: INCONCLUSIVE (see logs)' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
       - name: HTTPS fixture certificate preflight
         timeout-minutes: 2
         run: |
@@ -92,6 +109,18 @@ jobs:
             if (!(($output -join "`n") -match 'PASS: real HTTPS CEF shutdown completed') -or
                 !(($output -join "`n") -match 'P403_TRUST: temporary user root removed')) {
               throw "HTTPS privacy probe $phase did not finish shutdown and root removal"
+            }
+            $required = if ($phase -eq 'https-privacy-write') {
+              @('P404_AUTH_EVENT:.*scenario=baseline ', 'P404_AUTH_EVENT:.*scenario=enabled ',
+                'P404_STORAGE_ACCESS_EVENT:.*scenario=baseline ', 'P404_STORAGE_ACCESS_EVENT:.*scenario=enabled ',
+                'P404_STORAGE_ACCESS_EVENT:.*scenario=sandboxed_enabled ', 'P404_PERMISSION_SUMMARY:')
+            } else { @('P404_STORAGE_ACCESS_PERSISTENCE:.*scenario=restart_enabled ', 'P404_PERMISSION_SUMMARY:') }
+            foreach ($marker in $required) {
+              if ($output -notmatch $marker) { throw "Missing HTTPS research observation: $marker" }
+            }
+            if ($output -match 'P404_STORAGE_ACCESS_EVENT:.*result=INCONCLUSIVE') {
+              Write-Warning 'A real HTTPS Storage Access gesture was not observed; grant, denial and persistence are not verified.'
+              'P404 HTTPS Storage Access gesture: INCONCLUSIVE (see logs)' | Out-File $env:GITHUB_STEP_SUMMARY -Append
             }
           }
       - name: Remove disposable HTTPS test roots
