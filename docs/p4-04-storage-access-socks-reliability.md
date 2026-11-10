@@ -151,6 +151,16 @@ The same Windows run completed both concurrent proxy fixtures with exit code
 also completed successfully. These workflow conclusions include explicit
 inconclusive gesture results and are not full Storage Access qualification.
 
+The subsequent [push run at `f566c3f`](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42869339858)
+failed because the expanded HTTPS fixture exceeded its previous total limit of
+256 accepted connections, after recording the cookie and missing-input
+observations. The independent trust cleanup verified that test roots were
+absent. Its [pull-request counterpart](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42869353034)
+passed. The fixture now records bounded aggregate connection, request and
+error counts and has a hard limit of 512 for the additional navigations and
+observation windows. Exceeding the new limit remains a failure; its adequacy
+must be assessed from actual later runs, not assumed from this change.
+
 ## Verification and limitations
 
 The local x64 test project builds. The local in-process CEF input preflight
