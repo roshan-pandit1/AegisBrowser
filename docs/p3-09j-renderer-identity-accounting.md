@@ -62,6 +62,14 @@ and observed exit code 0 for each. One matched the CEF-claimed PID and had a
 handle-bound token snapshot; the tracker itself did not identify process
 roles. This is partial coverage, not proof that no other descendants existed.
 
+On hosted Windows Server 2022 x64, [research run 42751800810](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42751800810)
+at `9c047d348295d8c033858397e7a55388fd15ef4c` recorded fixture completion and
+parent exit 0. The renderer-side pipe open again returned error 5; the later
+candidate-primary-token/DACL `AccessCheck` returned `DACL_DENIED`. Twenty-six
+snapshots retained seven same-image direct children, all observed exited 0;
+one matched the CEF-claimed PID. No roles or complete coverage were established.
+The 10 synthetic pipe checks and 28 passive tracker checks passed in that run.
+
 The pinned [Chromium policy](https://github.com/chromium/chromium/blob/154.0.8037.98/sandbox/policy/win/sandbox_win.cc)
 configures token, integrity, job and Win32k restrictions conditionally. A
 candidate token snapshot is not independently verified renderer identity or
