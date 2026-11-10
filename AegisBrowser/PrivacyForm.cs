@@ -7,6 +7,7 @@ internal sealed class PrivacyForm : Form
     private readonly PrivacySession session;
     private readonly ComboBox mode = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly CheckBox customList = new() { Text = "Use tracking list in Custom", AutoSize = true };
+    private readonly CheckBox unknownSiteRules = new() { Name = "UnknownSiteRules", Text = "Apply third-party rules when site is unknown (may block content)", AutoSize = true };
     private readonly TextBox blocks = Editor(), allows = Editor(), sites = Editor(), rules = Editor(), list = Editor(), unsupported = Editor();
     private readonly Label summary = new() { AutoSize = true };
     private readonly DataGridView network = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false,
@@ -30,8 +31,9 @@ internal sealed class PrivacyForm : Form
         for (var i = 0; i < 4; i++) layout.RowStyles.Add(new(SizeType.Percent, 25));
         mode.Items.AddRange(Enum.GetNames<PrivacyMode>()); mode.SelectedItem = session.Configuration.Mode.ToString();
         customList.Checked = session.Configuration.UseListsInCustom;
+        unknownSiteRules.Checked = session.Configuration.ApplyThirdPartyRulesWhenSiteUnknown;
         var controls = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
-        controls.Controls.AddRange([mode, customList, Button("Apply settings", Apply)]);
+        controls.Controls.AddRange([mode, customList, unknownSiteRules, Button("Apply settings", Apply)]);
         var pause = new CheckBox { Text = "Pause filtering until resumed or browser exit", AutoSize = true, Checked = session.Paused };
         pause.CheckedChanged += (_, _) => session.Paused = pause.Checked;
         controls.Controls.Add(pause);
@@ -107,7 +109,8 @@ internal sealed class PrivacyForm : Form
     {
             string[] Domains(TextBox box) => box.Lines.Where(s => !string.IsNullOrWhiteSpace(s)).Select(NetworkFilterList.ValidateDomain).Distinct().ToArray();
             var config = new PrivacyConfiguration { Mode = Enum.Parse<PrivacyMode>((string)mode.SelectedItem!),
-                UseListsInCustom = customList.Checked, FilterList = list.Text, UserRules = rules.Text,
+                UseListsInCustom = customList.Checked, ApplyThirdPartyRulesWhenSiteUnknown = unknownSiteRules.Checked,
+                FilterList = list.Text, UserRules = rules.Text,
                 BlockedDomains = Domains(blocks), AllowedDomains = Domains(allows), SiteExceptions = Domains(sites) };
             apply(config);
     }

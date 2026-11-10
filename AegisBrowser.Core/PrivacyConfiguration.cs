@@ -6,6 +6,9 @@ public sealed record PrivacyConfiguration
 {
     public PrivacyMode Mode { get; init; } = PrivacyMode.Standard;
     public bool UseListsInCustom { get; init; }
+    // Opt-in: apply third-party-qualified network rules when the top-level
+    // site cannot be determined. Classification itself remains unknown.
+    public bool ApplyThirdPartyRulesWhenSiteUnknown { get; init; }
     public string FilterList { get; init; } = StarterList;
     public string UserRules { get; init; } = "";
     public string[] BlockedDomains { get; init; } = [];
