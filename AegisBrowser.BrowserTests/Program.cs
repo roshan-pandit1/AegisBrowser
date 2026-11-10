@@ -529,6 +529,10 @@ internal static partial class Program
         ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
         await Wait(() => tabs.TabCount == 1, "initial tab"); await Ready(Current());
         Check(await Js(Current(), "document.querySelector('#result').textContent.includes('userAgent')") == "True", "embedded diagnostics renders in CEF");
+        Check(await Js(Current(), "document.querySelector('#exposure').textContent.includes('Canvas 2D')") == "True",
+            "local fingerprint exposure audit renders in CEF");
+        Check(await Js(Current(), "Object.keys(JSON.parse(document.querySelector('#exposure').textContent)).length === 9") == "True",
+            "local exposure audit covers nine documented API surfaces");
         var navigating = Current();
         await LoadReady(navigating, Origin + "one");
         await LoadReady(navigating, Origin + "two");
