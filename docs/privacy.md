@@ -24,6 +24,31 @@ Top-level navigation always proceeds through the existing navigation/TLS policy.
 
 The profile-local **Apply third-party rules when site is unknown** option is off by default. When enabled, supported third-party-qualified list and user rules are evaluated as third-party for matching only when the top-level site is unavailable. The inspector still says **Unknown**; this does not prove the request is third-party. Explicit list exceptions and resource-domain allows retain precedence, and Strict mode does not blanket-block unlisted unknown-site resources. This can block legitimate content, including authentication resources whose context is unavailable; turn it off or use a narrowly scoped allow rule if needed. Reload to retry previously blocked requests.
 
+## Third-party cookies
+
+**Block third-party cookies** is an opt-in, profile-local setting, independent of
+network filtering. After applying the setting, close and restart the profile.
+Before opening its first tab, Aegis requests Chromium's third-party cookie
+blocking mode and checks that the preference was accepted. If that fails, no
+tabs open; the Privacy window remains available to turn the setting off and
+restart. The window shows the policy applied at startup rather than pretending
+that a saved change is already active.
+
+Turning the setting off after using it restores Chromium's default preference;
+that default, managed settings or site-specific browser rules may still block
+some cookies. Existing profiles without this setting retain their existing
+Chromium preference. If the attempted reset is unavailable, a warning says the
+existing Chromium policy remains in effect. Network-filter site exceptions and the pause control do
+not change the cookie policy. Partitioned cookies, storage-access grants and
+other Chromium exceptions may still be allowed. Embedded sign-in, payments or
+media can break; turn off the profile option and restart if necessary. This does
+not hide your IP address or fingerprint.
+
+The network inspector reports resource-filter decisions, not per-cookie
+decisions. It does not display cookie values or claim that an allowed request
+carried or omitted cookies. See [P4-02 verification](p4-02-third-party-storage-protection.md)
+for the controlled observations and their limitations.
+
 Decision order: internal resources and top-level navigation; temporary pause; per-site exception; resource-domain allow; ABP exception; resource-domain block; matching network block; Strict third-party fallback; allow. Site/domain exceptions include subdomains and use hostname-label boundaries. They do not override certificate errors or the browser's unsupported-scheme policy. CNAME cloaking, DNS/IP reputation, WebRTC traffic and DNS requests are outside this engine's scope.
 
 The starter list is a deliberately limited set of common analytics hosts. It is not a complete copy of EasyPrivacy. Filter lists are user-controlled snapshots, not silently downloaded subscriptions. Large lists may include unsupported syntax or compatibility-breaking rules. Review the unsupported-rule report after importing and after switching modes.
