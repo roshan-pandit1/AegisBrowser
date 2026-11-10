@@ -115,6 +115,7 @@ internal static partial class Program
                     finally { browser.LoadError -= onError; }
                     await ObserveHttpsThroughProxy(browser, context);
                     await ObserveSocksThroughProxy(browser, context, socksTrace);
+                    await ObserveSocksCancellation(browser, context, socksTrace);
                     await ObserveHttpsProxyCertificate(browser, context);
                     Console.WriteLine($"PASS: {checks} CEF proxy probe checks");
                 }

@@ -101,6 +101,34 @@ internal static partial class Program
         }
     }
 
+    private static async Task ObserveSocksCancellation(BrowserView browser, IRequestContext context, SocksTrace trace)
+    {
+        using var proxy = new SocksFixture(trace, holdRequest: true);
+        var configured = await Cef.UIThreadTaskFactory.StartNew(() =>
+        {
+            var settings = new Dictionary<string, object> { ["mode"] = "fixed_servers", ["server"] = "socks5://127.0.0.1:" + proxy.Port };
+            return context.SetPreference("proxy", settings, out _);
+        });
+        Check(configured, "controlled cancellation proxy preference was accepted");
+        const string url = "http://aegis-socks.invalid/hold";
+        var cancelled = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<LoadErrorEventArgs> onError = (_, e) =>
+        { if (e.Frame.IsMain && e.FailedUrl == url) cancelled.TrySetResult(e.ErrorCode); };
+        browser.LoadError += onError;
+        try
+        {
+            trace.Add("NAVIGATION_EVENT", "HOLD_LOAD_REQUESTED");
+            browser.Load(url);
+            await proxy.HeldRequest.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            trace.Add("NAVIGATION_EVENT", "STOP_REQUESTED_AFTER_SERVER_OBSERVATION");
+            browser.Stop();
+            var error = await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            trace.Add("NAVIGATION_EVENT", "CONTROLLED_CANCELLATION", error.ToString());
+            Check(error == CefErrorCode.Aborted, "a deliberately canceled SOCKS navigation is reported as Aborted");
+        }
+        finally { browser.LoadError -= onError; }
+    }
+
     // Test-only, bounded and monotonic. Event data contains no request URLs or credentials.
     private sealed class SocksTrace
     {
@@ -144,15 +172,18 @@ internal static partial class Program
         private readonly ConcurrentBag<Task> clients = new();
         private readonly Task loop;
         private readonly SocksTrace trace;
+        private readonly bool holdRequest;
+        internal TaskCompletionSource<bool> HeldRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int domainConnects, fixtureRequests;
         private bool stopped;
         public int Port { get; }
         public int DomainConnects => Volatile.Read(ref domainConnects);
         public int FixtureRequests => Volatile.Read(ref fixtureRequests);
 
-        public SocksFixture(SocksTrace trace)
+        public SocksFixture(SocksTrace trace, bool holdRequest = false)
         {
             this.trace = trace;
+            this.holdRequest = holdRequest;
             listener.Start(); Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             trace.Add("PROXY_EVENT", "LISTENER_READY");
             loop = Task.Run(AcceptLoop);
@@ -198,11 +229,19 @@ internal static partial class Program
                     await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 127, 0, 0, 1, 0, 0 }, token);
                     using var reader = new StreamReader(stream, Encoding.ASCII, false, 4096, leaveOpen: true);
                     var first = await reader.ReadLineAsync(token);
-                    if (first is null || !first.StartsWith("GET /fixture ", StringComparison.Ordinal)) return;
+                    var expected = holdRequest ? "GET /hold " : "GET /fixture ";
+                    if (first is null || !first.StartsWith(expected, StringComparison.Ordinal)) return;
                     for (var i = 0; i < 100; i++)
                     {
                         var line = await reader.ReadLineAsync(token); if (string.IsNullOrEmpty(line)) break;
                         if (line.Length > 8192) return;
+                    }
+                    if (holdRequest)
+                    {
+                        trace.Add("PROXY_EVENT", "HELD_REQUEST_RECEIVED");
+                        HeldRequest.TrySetResult(true);
+                        await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                        return;
                     }
                     Interlocked.Increment(ref fixtureRequests);
                     trace.Add("PROXY_EVENT", "FIXTURE_REQUEST_RECEIVED");

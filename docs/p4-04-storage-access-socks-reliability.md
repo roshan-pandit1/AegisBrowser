@@ -35,16 +35,25 @@ these later successes do not establish its cause or eliminate it. The
 [original failed hosted attempt](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42820221465/attempts/1)
 remains part of the evidence.
 
+A separate local test holds a SOCKS request until the fixture observes it,
+then deliberately stops that navigation. CEF reported `Aborted`; this is
+tested separately and is not accepted as the offline-proxy error. The held
+fixture is bounded by cancellation when disposed. This observation does not
+explain the intermittent missing offline callback.
+
 ## Storage Access research
 
 The P4-03 real TLS fixture is reused on a disposable hosted runner with its
 temporary test-user CA and exact-root cleanup. The experiment sends mouse
 input to visible test controls. It uses CEF's internal DevTools input client
-for the top-level control and posts window messages for the cross-origin
-iframe only after verifying that the target belongs to the test process and
-its browser window. It does not move the system cursor, set a JavaScript
-`userGesture` override for the Storage Access request, open a remote debugging
-port, or grant a permission. The page reports `event.isTrusted` and
+for the top-level control. For cross-origin input it validates that the target
+belongs to the test process and its browser window. Local preflight posts
+messages only to that window; the hosted-runner experiment instead moves the
+disposable runner's cursor and calls Windows `SendInput` after checking the
+test window is foreground and still owns the target. This path is guarded to
+declared GitHub-hosted CI. It does not set a JavaScript `userGesture` override
+for the Storage Access request, open a remote debugging port, or grant a
+permission. The page reports `event.isTrusted` and
 `navigator.userActivation.isActive` at the instant it calls the API. These are
 automated input events, not evidence of a physical user's action. A local
 CEF-only preflight observed both flags for a top-level button and an iframe;
@@ -79,7 +88,10 @@ reached the visible cross-site iframe but timed out without a completed input
 result; root removal was verified. A local cross-origin in-process CEF fixture
 reproduced the missing DevTools input while a same-origin iframe worked. A
 separate window-message experiment reached the cross-origin button locally;
-the real HTTPS result must be verified on a later hosted run.
+the [subsequent hosted preflight](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42862556342)
+also failed to deliver a cross-origin window-message click. It stopped before
+installing test trust. The runner-only `SendInput` path is a later experiment
+and does not by itself establish the real HTTPS result.
 
 The embedded session is a synthetic server-side cookie requirement, not a real
 identity-provider integration. It reports whether the test cookies arrived
