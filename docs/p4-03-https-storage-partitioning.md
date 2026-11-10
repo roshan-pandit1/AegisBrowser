@@ -155,6 +155,15 @@ proxy probes, published-browser smoke tests and the remaining Windows workflow
 checks. These are controlled test outcomes, not a review of every real OAuth
 provider or website. A previously observed concurrent SOCKS timeout remains an
 intermittent history, even though this run passed the concurrent probe.
+On [a later PR run, attempt 1](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42820221465/attempts/1)
+the SOCKS-offline probe timed out waiting for Chromium's load error; the same
+timeout was later observed locally. The original assertions were retained.
+Separately, a local Windows
+PowerShell 5.1 run printed both completion markers but its wrapper observed a
+missing child exit code. A diagnostic rerun retaining each test-owned process
+handle observed exit code 0 for both children and passed. The wrapper now
+retains those handles and continues to reject an unavailable exit code. This
+does not establish the cause of the hosted SOCKS timeout.
 
 ## Acceptance scope and remaining work
 

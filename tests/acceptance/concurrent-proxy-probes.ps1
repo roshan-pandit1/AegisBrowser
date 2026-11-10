@@ -20,6 +20,9 @@ try {
         $arguments = @('proxy-probe', ('"{0}"' -f $profile))
         $process = Start-Process -FilePath $testExecutable -ArgumentList $arguments -WorkingDirectory (Split-Path -Parent $testExecutable) `
             -RedirectStandardOutput $output -RedirectStandardError $errors -WindowStyle Hidden -PassThru
+        # Retain the test-owned process handle before it exits. In Windows
+        # PowerShell 5.1, ExitCode can otherwise be unavailable after Refresh.
+        [void]$process.Handle
         $processes += [pscustomobject]@{ Role = $role; Process = $process; Output = $output; Errors = $errors }
     }
     if ($processes[0].Process.Id -eq $processes[1].Process.Id) { throw 'Concurrent probes did not receive distinct process IDs.' }
@@ -36,7 +39,7 @@ try {
         $result = (Get-Content -LiteralPath $entry.Output -Raw) + "`n" + (Get-Content -LiteralPath $entry.Errors -Raw)
         Write-Output "Concurrent proxy fixture $($entry.Role):"
         Write-Output $result
-        if ($entry.Process.ExitCode -ne 0 -or $result -match 'Check failed:' -or
+        if ($null -eq $entry.Process.ExitCode -or $entry.Process.ExitCode -ne 0 -or $result -match 'Check failed:' -or
             $result -notmatch 'PASS: both independent CEF proxy fixtures initialized before routing tests' -or
             $result -notmatch 'PASS: \d+ CEF proxy probe checks' -or
             $result -notmatch 'PASS: CEF proxy probe shutdown completed') {
