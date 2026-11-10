@@ -9,6 +9,9 @@ public sealed record PrivacyConfiguration
     // Opt-in: apply third-party-qualified network rules when the top-level
     // site cannot be determined. Classification itself remains unknown.
     public bool ApplyThirdPartyRulesWhenSiteUnknown { get; init; }
+    // Null preserves the existing Chromium preference for older profiles.
+    // False explicitly restores Chromium's default after an opt-in is removed.
+    public bool? BlockThirdPartyCookies { get; init; }
     public string FilterList { get; init; } = StarterList;
     public string UserRules { get; init; } = "";
     public string[] BlockedDomains { get; init; } = [];

@@ -16,6 +16,8 @@ public sealed class MainForm : Form
     private bool closeComplete;
     private readonly PrivacySession privacy;
     private readonly PrivacySettingsStore? privacyStore;
+    private readonly ThirdPartyCookiePolicy.Result cookiePolicy;
+    private readonly bool cookiePolicyBlocksTabs;
     private PrivacyForm? privacyWindow;
     private SearchSettings searchSettings = new();
     private readonly SearchSettingsStore? searchStore;
@@ -38,7 +40,14 @@ public sealed class MainForm : Form
             catch (IOException ex) { privacyWarning = ex.Message; }
         }
         privacy = new(configuration);
+        cookiePolicy = ThirdPartyCookiePolicy.ApplyAtStartup(configuration.BlockThirdPartyCookies);
+        cookiePolicyBlocksTabs = ThirdPartyCookiePolicy.PreventBrowsing(configuration.BlockThirdPartyCookies, cookiePolicy);
         if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
+        if (!cookiePolicy.Succeeded) Shown += (_, _) => MessageBox.Show(this,
+            cookiePolicy.Error + (cookiePolicyBlocksTabs
+                ? "\n\nNo browser tabs will open. Disable the setting in Privacy and restart this profile."
+                : "\n\nThe existing Chromium cookie policy remains in effect; it could not be restored to the default."),
+            "Cookie protection could not be applied");
         Text = $"Aegis Browser — {profile}";
         Width = 1250;
         Height = 850;
@@ -61,7 +70,7 @@ public sealed class MainForm : Form
         bar.Controls.Add(MakeButton("Privacy", () =>
         {
             if (privacyWindow is null || privacyWindow.IsDisposed)
-                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save));
+                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save), cookiePolicy.Status);
             privacyWindow.Show(this); privacyWindow.BringToFront();
         }), 8, 0);
         bar.Controls.Add(MakeButton("Search", () =>
@@ -158,6 +167,11 @@ public sealed class MainForm : Form
     private void NewTab(string url)
     {
         if (closing) return;
+        if (cookiePolicyBlocksTabs)
+        {
+            status.Text = "Cookie protection unavailable; change the setting in Privacy and restart.";
+            return;
+        }
         var page = new TabPage("New tab") { Tag = "Loading…" };
         var browser = new BrowserView(url) { Dock = DockStyle.Fill };
         void Report(string message) => Post(() =>

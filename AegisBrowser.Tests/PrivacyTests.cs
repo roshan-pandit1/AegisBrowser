@@ -31,6 +31,7 @@ internal static class PrivacyTests
         Check(!Test(BrowserPolicy.DiagnosticsUrl).Blocked, "internal diagnostics");
         Check(!Test("data:text/plain,hello").Blocked, "nonnetwork resources");
         var config = new PrivacyConfiguration();
+        Check(config.BlockThirdPartyCookies is null, "legacy profiles retain Chromium's existing cookie preference");
         var standard = new RequestFilter(config);
         var tracking = new NetworkRequest("https://google-analytics.com/collect", "https://example.com", "ping");
         Check(standard.Evaluate(tracking).Blocked, "Standard starter tracking list");
@@ -100,12 +101,15 @@ internal static class PrivacyTests
         {
             var store = new PrivacySettingsStore(folder);
             Check(store.Load().Mode == PrivacyMode.Standard, "missing settings defaults");
-            var saved = config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"], UserRules = "||tracker.test^", ApplyThirdPartyRulesWhenSiteUnknown = true };
+            var saved = config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"], UserRules = "||tracker.test^", ApplyThirdPartyRulesWhenSiteUnknown = true, BlockThirdPartyCookies = true };
             store.Save(saved);
             var restored = new PrivacySettingsStore(folder).Load();
-            Check(restored.Mode == PrivacyMode.Strict && restored.ApplyThirdPartyRulesWhenSiteUnknown && restored.SiteExceptions.SequenceEqual(saved.SiteExceptions)
+            Check(restored.Mode == PrivacyMode.Strict && restored.ApplyThirdPartyRulesWhenSiteUnknown && restored.BlockThirdPartyCookies == true && restored.SiteExceptions.SequenceEqual(saved.SiteExceptions)
                 && restored.UserRules == saved.UserRules, "settings round trip");
-            Check(new PrivacySettingsStore(Path.Combine(folder, "other")).Load().SiteExceptions.Length == 0, "profile settings isolation");
+            Check(new PrivacySettingsStore(Path.Combine(folder, "other")).Load() is { BlockThirdPartyCookies: null, SiteExceptions.Length: 0 }, "profile settings isolation");
+            store.Save(saved with { BlockThirdPartyCookies = false });
+            Check(new PrivacySettingsStore(folder).Load().BlockThirdPartyCookies == false, "explicit cookie opt-out persists");
+            store.Save(saved);
             var fresh = new PrivacySession(restored);
             Check(!fresh.Paused && fresh.Snapshot().Requests.Length == 0, "pause and inspector never persist");
             var copy = fresh.Configuration; copy.SiteExceptions[0] = "evil.test";
@@ -116,6 +120,8 @@ internal static class PrivacyTests
             File.WriteAllText(Path.Combine(folder, "privacy.json"), "{\"UserRules\":\"||old.test^\"}");
             Check(!new PrivacySettingsStore(folder).Load().ApplyThirdPartyRulesWhenSiteUnknown,
                 "older settings keep unknown-site rule behavior disabled");
+            Check(new PrivacySettingsStore(folder).Load().BlockThirdPartyCookies is null,
+                "older settings do not override Chromium's cookie preference");
             File.WriteAllText(Path.Combine(folder, "privacy.json"), "{broken");
             var corrupt = new PrivacySettingsStore(folder);
             rejected = false;

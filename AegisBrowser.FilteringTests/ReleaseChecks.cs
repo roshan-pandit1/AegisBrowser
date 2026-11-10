@@ -38,19 +38,24 @@ internal static partial class Program
         var settings = form.OwnedForms.OfType<PrivacyForm>().Single();
         var mode = Named<ComboBox>(settings, "PrivacyMode"); var rules = Named<TextBox>(settings, "UserRules");
         var unknownRules = Named<CheckBox>(settings, "UnknownSiteRules");
+        var cookieProtection = Named<CheckBox>(settings, "BlockThirdPartyCookies");
         var pause = All(settings).OfType<CheckBox>().Single(c => c.Text.StartsWith("Pause filtering"));
         if (write)
         {
             mode.SelectedItem = "Strict"; rules.Text = "||persisted.test^";
             unknownRules.Checked = true;
+            cookieProtection.Checked = true;
             Named<TextBox>(settings, "SiteExceptions").Text = "example.com";
             settings.ApplyEdits(); pause.Checked = true;
             Check(File.Exists(Path.Combine(root, "privacy.json")), "browser settings saved to profile");
         }
         else
         {
-            Check((string?)mode.SelectedItem == "Strict" && unknownRules.Checked && rules.Text == "||persisted.test^"
+            Check((string?)mode.SelectedItem == "Strict" && unknownRules.Checked && cookieProtection.Checked && rules.Text == "||persisted.test^"
                 && Named<TextBox>(settings, "SiteExceptions").Text == "example.com", "settings survive actual browser process restart");
+            using var context = Cef.GetGlobalRequestContext();
+            var cookieMode = await Cef.UIThreadTaskFactory.StartNew(() => context.GetPreference("profile.cookie_controls_mode"));
+            Check(cookieMode is int value && value == 1, "cookie preference is applied on profile restart");
             Check(!pause.Checked && Named<DataGridView>(settings, "Requests").Rows.Count <= 1, "restart clears pause and previous request history");
         }
         settings.Close();
@@ -80,6 +85,13 @@ internal static partial class Program
                 Check(session.RuleCount == 1 && session.Unsupported.Count == 1, "list import and unsupported syntax report");
                 Named<CheckBox>(settings, "UnknownSiteRules").Checked = true; settings.ApplyEdits();
                 Check(session.Configuration.ApplyThirdPartyRulesWhenSiteUnknown, "unknown-site rule control applies to profile session");
+                var cookieControl = Named<CheckBox>(settings, "BlockThirdPartyCookies");
+                Check(session.Configuration.BlockThirdPartyCookies is null && !cookieControl.Checked,
+                    "older profile settings leave the cookie preference unchanged");
+                cookieControl.Checked = true; settings.ApplyEdits();
+                Check(session.Configuration.BlockThirdPartyCookies == true, "cookie protection opt-in is saved for restart");
+                cookieControl.Checked = false; settings.ApplyEdits();
+                Check(session.Configuration.BlockThirdPartyCookies == false, "cookie protection opt-out is saved for restart");
                 Named<ComboBox>(settings, "PrivacyMode").SelectedItem = "Custom";
                 Named<TextBox>(settings, "UserRules").Text = "||custom.test^"; settings.ApplyEdits();
                 var request = new NetworkRequest("https://custom.test/a", "https://example.com", "script");

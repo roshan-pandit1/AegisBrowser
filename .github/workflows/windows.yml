@@ -48,6 +48,22 @@ jobs:
               throw "Browser $phase phase did not complete CEF shutdown"
             }
           }
+      - name: Controlled cross-site cookie and restart probe
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-cookie-probe-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('storage-policy-write', 'storage-policy-read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+            if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: isolated CEF storage policy probe completed')) {
+              throw "Cookie probe $phase failed or was incomplete"
+            }
+            if (!(($output -join "`n") -match 'PASS: isolated CEF storage policy probe shutdown completed')) {
+              throw "Cookie probe $phase did not complete CEF shutdown"
+            }
+          }
       - name: Controlled CEF proxy routing and bypass probe
         timeout-minutes: 3
         run: |
