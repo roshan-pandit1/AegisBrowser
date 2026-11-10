@@ -144,7 +144,10 @@ not a claim that all partitioned cookies are blocked. The synthetic popup,
 redirect and `postMessage` sign-in completed in both modes; its first-party
 session cookie survived restart and was removed by the fixture's sign-out.
 The no-gesture Storage Access API request was rejected, but the user-gesture,
-permission and grant-persistence paths were not tested.
+permission and grant-persistence paths were not tested. That run used the
+fixture's default permission handling; the current fixture explicitly attaches
+the application's `OriginPermissions` handler before browser creation. Check
+the exact-head CI run for the result with that handler.
 
 The same run passed the existing two-context cookie/localStorage isolation
 tests, 72 core privacy checks, 26 Chromium filtering checks, the concurrent

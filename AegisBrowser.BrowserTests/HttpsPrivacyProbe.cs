@@ -195,7 +195,12 @@ internal static partial class Program
                             "production cookie policy applied before first browser creation");
                     }
                     var firstUrl = phase == "https-privacy-read" ? server.TopA + "early-top" : server.Third + "seed";
-                    browser = new BrowserView(firstUrl) { Dock = DockStyle.Fill, RequestHandler = new SafeRequests(Console.WriteLine) };
+                    browser = new BrowserView(firstUrl)
+                    {
+                        Dock = DockStyle.Fill,
+                        RequestHandler = new SafeRequests(Console.WriteLine),
+                        PermissionHandler = new OriginPermissions(Console.WriteLine)
+                    };
                     Observe(browser); host.Controls.Add(browser);
                     await Ready(browser);
                     if (phase == "https-privacy-read")
