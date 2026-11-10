@@ -40,11 +40,26 @@ internal static class Program
                 PlatformNotSupportedException or System.ComponentModel.Win32Exception or System.Security.SecurityException)
             { observerFailure = "OBSERVER_CREATE_FAILED_" + e.GetType().Name; }
             using var observerLifetime = observer;
+            AegisBrowser.P309J.PassiveTrackingSession? tracking = null;
+            string trackingFailure = "TRACKING_NOT_STARTED";
             var result = await ProcessRunner.RunAsync(bootstrap, bundle.BootstrapHash, new[] { "--module=p309f_client" }, dir, timeout, true,
                 (id, handle) => {
                     Console.WriteLine(JsonSerializer.Serialize(new { kind = "PROCESS_IDENTITY", identity = id }));
                     observer?.Start(id, handle);
+                    try { tracking = AegisBrowser.P309J.PassiveTrackingSession.Start(handle, checked((uint)id.Pid), id.CreationFileTimeUtc, id.ImagePath); }
+                    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
+                    { trackingFailure = "TRACKING_START_FAILED_" + ex.GetType().Name; }
                 }, observer?.FullName, line => observer?.AcceptLine(line));
+            AegisBrowser.P309J.PassiveProcessTracker.Report? trackingReport = null;
+            if (tracking != null)
+            {
+                try { trackingReport = await tracking.FinishAsync(); }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or
+                    System.ComponentModel.Win32Exception or UnauthorizedAccessException or System.Security.SecurityException)
+                { trackingFailure = "TRACKING_FINISH_FAILED_" + ex.GetType().Name; }
+            }
+            Console.WriteLine(JsonSerializer.Serialize(new { kind = "PROCESS_DISCOVERY", report = trackingReport,
+                error = trackingReport == null ? trackingFailure : "", SubprocessCleanup = "INCONCLUSIVE" }));
             var evidence = observer != null ? await observer.FinishAsync() : RendererPipeObserver.Failure(observerFailure);
             if (evidence.RoleEvidence == "CLIENT_PID_CLAIM" && !result.OutputComplete)
                 evidence = RendererPipeObserver.Failure("PID_CLAIM_OUTPUT_INCOMPLETE");
@@ -95,7 +110,13 @@ internal static class Program
             case "renderer-claim-parent":
             case "renderer-claim-duplicate":
             case "renderer-claim-oversized":
-                using (var child = Process.Start(SelfTest.HelperStartInfo("timeout"))
+                if (!OperatingSystem.IsWindows() || args.Length != 1 ||
+                    !args[0].StartsWith(@"Local\aegis-p309j-claim-", StringComparison.Ordinal) || args[0].Length > 120) return 9;
+                using (var release = EventWaitHandle.OpenExisting(args[0]))
+                {
+                var childStart = SelfTest.HelperStartInfo("renderer-hold");
+                childStart.RedirectStandardInput = true;
+                using (var child = Process.Start(childStart)
                     ?? throw new InvalidOperationException("CLAIM_CHILD_START_FAILED"))
                 {
                     Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
@@ -103,9 +124,13 @@ internal static class Program
                         Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
                     if (mode == "renderer-claim-oversized")
                         Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + new string('9', 300));
+                    bool released = await Task.Run(() => release.WaitOne(TimeSpan.FromSeconds(15)));
+                    child.StandardInput.WriteLine("RELEASE");
+                    child.StandardInput.Close();
                     await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    return released && child.ExitCode == 0 ? 0 : 20;
                 }
-                return 0;
+                }
             case "renderer-pipe":
             case "renderer-pipe-bad":
                 if (args.Length != 1 || !args[0].StartsWith(@"\\.\pipe\aegis-p309i-", StringComparison.Ordinal)) return 9;
@@ -116,9 +141,18 @@ internal static class Program
                     byte[] message = Encoding.ASCII.GetBytes(mode == "renderer-pipe" ? "P309I_RENDERER_V1\n" : "X309I_RENDERER_V1\n");
                     await pipe.WriteAsync(message);
                     await pipe.FlushAsync();
-                    await Task.Delay(1200);
+                    // The test owns this helper's redirected stdin. Keep its
+                    // process and pipe alive until the observer explicitly
+                    // releases it; EOF or a bounded timeout is a failed test.
+                    try
+                    {
+                        return await Console.In.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(20)) == "RELEASE" ? 0 : 19;
+                    }
+                    catch (TimeoutException) { return 20; }
                 }
-                return 0;
+            case "renderer-hold":
+                try { return await Console.In.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(20)) == "RELEASE" ? 0 : 19; }
+                catch (TimeoutException) { return 20; }
             default: return 9;
         }
     }
