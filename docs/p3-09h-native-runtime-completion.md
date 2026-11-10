@@ -38,6 +38,14 @@ native hash checks, exit 0. That local timing does not establish hosted x64
 performance. The workflow reports stage outcomes and durations separately;
 hosted results must be read from the exact final-head run.
 
+On hosted Windows Server 2022 x64, [research run 42740641689](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42740641689)
+at commit `68478a08a023067e8772161d2e4a66ee5d59cf84` verified the archive,
+inspected 1,001 entries and selected 236 files. It reported 13.281 seconds for
+streaming extraction and 13.766 seconds through required native hash checks;
+the preparation and diagnostic steps completed. This measurement shows that
+the replacement worked in this run, but does not prove the cause of the earlier
+`tar.exe` timeout.
+
 ## Lifecycle and renderer evidence
 
 The standalone research client records a bounded, allowlisted child-launch
@@ -94,6 +102,14 @@ hypothesis but does not prove that the renderer's environment was the cause.
 One local run is not hosted Windows x64 verification or a guarantee of
 repeatable shutdown; child-process accounting and renderer tokens were not
 observed.
+
+The same hosted run reached the actual CEF diagnostic. The client reported
+the fixture load, normal close callbacks and `CefShutdown` return. The
+supervisor matched its retained parent identity and observed native exit 0;
+no parent termination was requested. This is a client-reported lifecycle
+sequence plus a handle-bound parent exit, not independently verified renderer
+identity, sandbox enforcement or descendant cleanup. The diagnostic output
+keeps all of those latter claims inconclusive.
 
 ## Acceptance and boundaries
 
