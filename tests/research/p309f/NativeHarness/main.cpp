@@ -2,11 +2,13 @@
 // It never supplies a no-sandbox fallback and does not touch browser profiles.
 #include <windows.h>
 #include <atomic>
+#include <climits>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
 #include <string>
+#include <utility>
 #include "FixtureGate.h"
 
 #include "include/cef_app.h"
@@ -14,8 +16,11 @@
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_frame.h"
+#include "include/cef_process_message.h"
 #include "include/cef_request_handler.h"
+#include "include/cef_render_process_handler.h"
 #include "include/cef_sandbox_win.h"
+#include "include/cef_task.h"
 #include "include/cef_version_info.h"
 #include "include/cef_version.h"
 
@@ -42,13 +47,60 @@ bool IsFixtureFrame(CefRefPtr<CefFrame> frame) {
   return p309g::IsFixtureUrl(frame->GetURL().ToString());
 }
 
+// Runs on the CEF browser UI thread. It never waits for the observer: an
+// expired observation window permits normal close but cannot imply evidence.
+class FinishObservation final : public CefTask {
+ public:
+  FinishObservation(State* state, CefRefPtr<CefBrowser> browser)
+      : state_(state), browser_(browser) {}
+  void Execute() override {
+    if (state_->close_started || state_->closed) return;
+    state_->close_started = true;
+    std::puts("EVENT: CLOSE_REQUESTED");
+    browser_->GetHost()->CloseBrowser(false);
+  }
+ private:
+  State* const state_;
+  CefRefPtr<CefBrowser> browser_;
+  IMPLEMENT_REFCOUNTING(FinishObservation);
+};
+
 class Client final : public CefClient, public CefLifeSpanHandler, public CefLoadHandler,
                      public CefRequestHandler {
  public:
-  explicit Client(State* state) : state_(state) {}
+  explicit Client(State* state, bool observe) : state_(state), observe_(observe) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+  bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
+                                CefProcessId source, CefRefPtr<CefProcessMessage> message) override {
+    // Renderer messages are debugging claims only, can be lost and are not
+    // evidence of process identity, pipe ownership or sandbox enforcement.
+    if (source != PID_RENDERER || !frame || !frame->IsMain() || !message) return false;
+    const std::string name = message->GetName().ToString();
+    const char* stage = name == "P309I_PID" ? "PID" :
+                        name == "P309I_CONTEXT" ? "CONTEXT" :
+                        name == "P309I_PIPE_MISSING" ? "PIPE_MISSING" :
+                        name == "P309I_PIPE_OPEN_FAILED" ? "PIPE_OPEN_FAILED" :
+                        name == "P309I_PIPE_MODE_FAILED" ? "PIPE_MODE_FAILED" :
+                        name == "P309I_PIPE_WRITE_FAILED" ? "PIPE_WRITE_FAILED" :
+                        name == "P309I_PIPE_SENT" ? "PIPE_SENT" : nullptr;
+    if (!stage || ipc_diagnostics_ >= 32) return false;
+    CefRefPtr<CefListValue> args = message->GetArgumentList();
+    if (!args || args->GetSize() != 1 || args->GetType(0) != VTYPE_INT) return false;
+    if (name == "P309I_PID") {
+      const int pid = args->GetInt(0);
+      if (pid <= 0) return false;
+      ++ipc_diagnostics_;
+      // This is an unauthenticated renderer-side PID claim, not a process
+      // handle, lineage verification or an authorization to inspect a PID.
+      std::printf("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=%d\n", pid);
+      return true;
+    }
+    ++ipc_diagnostics_;
+    std::printf("NATIVE_DIAGNOSTIC: RENDERER_IPC stage=%s code=%d\n", stage, args->GetInt(0));
+    return true;
+  }
   // This baseline uses a single static fixture with no popup behavior. Reject
   // any unexpected popup and record the lifetime as uncertain; this policy
   // belongs only to this standalone test, not to AegisBrowser.
@@ -111,10 +163,18 @@ class Client final : public CefClient, public CefLifeSpanHandler, public CefLoad
       return;
     }
     state_->loaded = true;
-    state_->close_started = true;
     std::puts("EVENT: MAIN_FRAME_LOAD_END");
-    std::puts("EVENT: CLOSE_REQUESTED");
-    browser->GetHost()->CloseBrowser(false);
+    // Keep a live page long enough for the independent observer to run. A
+    // delayed task does not block CEF's UI thread; scheduling failure is a
+    // failed observation, never native-closure evidence.
+    if (observe_ && CefPostDelayedTask(TID_UI, new FinishObservation(state_, browser), 3000)) {
+      std::puts("NATIVE_DIAGNOSTIC: OBSERVATION_WINDOW_STARTED");
+    } else {
+      if (observe_) { state_->failed = true; std::puts("NATIVE_DIAGNOSTIC: OBSERVATION_WINDOW_SCHEDULING_FAILED"); }
+      state_->close_started = true;
+      std::puts("EVENT: CLOSE_REQUESTED");
+      browser->GetHost()->CloseBrowser(false);
+    }
   }
   void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                    ErrorCode error, const CefString&, const CefString& failed_url) override {
@@ -169,19 +229,60 @@ class Client final : public CefClient, public CefLifeSpanHandler, public CefLoad
   }
  private:
   State* const state_;
+  const bool observe_;
+  unsigned int ipc_diagnostics_ = 0;  // browser UI thread only
   IMPLEMENT_REFCOUNTING(Client);
 };
 
-class App final : public CefApp, public CefBrowserProcessHandler {
+class App final : public CefApp, public CefBrowserProcessHandler, public CefRenderProcessHandler {
  public:
-  explicit App(State* state) : state_(state) {}
+  App(State* state, std::string pipe) : state_(state), pipe_(std::move(pipe)) {}
+  ~App() override { if (pipe_handle_ != INVALID_HANDLE_VALUE) CloseHandle(pipe_handle_); }
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+  CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
+  void OnContextCreated(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
+                        CefRefPtr<CefV8Context>) override {
+    // CEF documents this callback on the renderer main thread after V8
+    // context creation. It does not prove that sandbox lockdown is complete.
+    if (!frame || !frame->IsMain() || attempted_) return;
+    attempted_ = true;
+    auto diagnostic = [frame](const char* name, DWORD code) {
+      CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(name);
+      if (!message) return;
+      CefRefPtr<CefListValue> args = message->GetArgumentList();
+      if (!args || !args->SetInt(0, static_cast<int>(code))) return;
+      frame->SendProcessMessage(PID_BROWSER, message);
+    };
+    diagnostic("P309I_CONTEXT", 0);
+    const DWORD pid = GetCurrentProcessId();
+    if (pid > 0 && pid <= INT_MAX) diagnostic("P309I_PID", pid);
+    if (!p309g::IsObservationPipe(pipe_)) { diagnostic("P309I_PIPE_MISSING", 0); return; }
+    HANDLE pipe = CreateFileA(pipe_.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (pipe == INVALID_HANDLE_VALUE) { diagnostic("P309I_PIPE_OPEN_FAILED", GetLastError()); return; }
+    DWORD mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
+    if (!SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr)) {
+      DWORD error = GetLastError(); CloseHandle(pipe); diagnostic("P309I_PIPE_MODE_FAILED", error); return;
+    }
+    constexpr char marker[] = "P309I_RENDERER_V1\n";
+    DWORD written = 0;
+    const BOOL ok = WriteFile(pipe, marker, sizeof(marker) - 1, &written, nullptr);
+    if (!ok || written != sizeof(marker) - 1) {
+      DWORD error = ok ? ERROR_WRITE_FAULT : GetLastError(); CloseHandle(pipe); diagnostic("P309I_PIPE_WRITE_FAILED", error); return;
+    }
+    // The observer obtains a kernel-supplied client PID and retains its own
+    // process handle. The marker/pipe name alone never authenticates a role.
+    pipe_handle_ = pipe;
+    diagnostic("P309I_PIPE_SENT", 0);
+  }
   void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command_line) override {
     // The initial browser passed the explicit environment opt-in before CEF
     // was initialized. Propagate test intent if Chromium filters child
     // environments; the marker is spoofable and is never security evidence.
     // Every child still passes the sandbox-info and forbidden-switch gates.
     command_line->AppendSwitch("aegis-p309f-child-opt-in");
+    if (p309g::IsObservationPipe(pipe_) && command_line->GetSwitchValue("type").ToString() == "renderer")
+      command_line->AppendSwitchWithValue("aegis-p309i-pipe", pipe_);
     // CEF may invoke this on UI or IO threads. Bound output without retaining
     // the command line or emitting its potentially sensitive arguments. This
     // records a launch request, not a process identity or sandbox proof.
@@ -200,7 +301,7 @@ class App final : public CefApp, public CefBrowserProcessHandler {
     window.SetAsPopup(nullptr, L"AegisBrowser P3-09F research");
     window.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
     CefBrowserSettings settings;
-    CefRefPtr<Client> client = new Client(state_);
+    CefRefPtr<Client> client = new Client(state_, p309g::IsObservationPipe(pipe_));
     if (!CefBrowserHost::CreateBrowser(window, client, p309g::kFixtureUrl, settings, nullptr, nullptr)) {
       state_->failed = true;
       std::puts("EVENT: CREATE_BROWSER_FAILED");
@@ -209,6 +310,9 @@ class App final : public CefApp, public CefBrowserProcessHandler {
   }
  private:
   State* const state_;
+  const std::string pipe_;
+  bool attempted_ = false;  // renderer-main-thread only
+  HANDLE pipe_handle_ = INVALID_HANDLE_VALUE;
   std::atomic<unsigned int> launch_diagnostics_{0};
   IMPLEMENT_REFCOUNTING(App);
 };
@@ -262,8 +366,16 @@ CEF_BOOTSTRAP_EXPORT int RunConsoleMain(int argc, char* argv[], void* sandbox_in
     std::fprintf(stderr, "BLOCKED: CEF_RUNTIME_VERSION role=%s\n", p309g::ProcessRole(argc, argv));
     return 12;
   }
+  std::string pipe = p309g::ObservationPipeArgument(argc, argv);
+  if (std::strcmp(p309g::ProcessRole(argc, argv), "browser") == 0) {
+    char value[128] = {};
+    DWORD length = GetEnvironmentVariableA("AEGIS_P309I_PIPE", value, sizeof(value));
+    pipe = length > 0 && length < sizeof(value) && p309g::IsObservationPipe(value) ? value : "";
+  }
+  State state;
+  CefRefPtr<App> app = new App(&state, pipe);
   CefMainArgs main_args(GetModuleHandleW(nullptr));
-  const int subprocess = CefExecuteProcess(main_args, nullptr, sandbox_info);
+  const int subprocess = CefExecuteProcess(main_args, app, sandbox_info);
   if (subprocess >= 0) return subprocess;
   std::wstring cache;
   if (!CreateTemporaryCache(cache)) { std::fputs("BLOCKED: TEMP_CACHE\n", stderr); return 13; }
@@ -271,8 +383,6 @@ CEF_BOOTSTRAP_EXPORT int RunConsoleMain(int argc, char* argv[], void* sandbox_in
   settings.no_sandbox = false;
   settings.log_severity = LOGSEVERITY_DISABLE;
   CefString(&settings.root_cache_path) = cache;
-  State state;
-  CefRefPtr<App> app = new App(&state);
   if (!CefInitialize(main_args, settings, app, sandbox_info)) {
     std::fputs("CEF_STARTUP: FAIL\n", stderr);
     return 14;

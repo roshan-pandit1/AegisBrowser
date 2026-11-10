@@ -8,6 +8,31 @@ namespace p309g {
 constexpr char kFixtureMarker[] = "AEGIS_P309G_FIXTURE_V1";
 constexpr char kFixtureUrl[] = "data:text/html,AEGIS_P309G_FIXTURE_V1";
 
+// Only a locally addressed per-run pipe with an opaque 128-bit lowercase hex
+// suffix is accepted. This is a routing constraint, not authentication.
+inline bool IsObservationPipe(const std::string& name) {
+  constexpr char prefix[] = "\\\\.\\pipe\\aegis-p309i-";
+  constexpr size_t size = sizeof(prefix) - 1;
+  if (name.size() != size + 32 || name.compare(0, size, prefix) != 0) return false;
+  for (size_t i = size; i < name.size(); ++i)
+    if (!((name[i] >= '0' && name[i] <= '9') || (name[i] >= 'a' && name[i] <= 'f'))) return false;
+  return true;
+}
+
+inline std::string ObservationPipeArgument(int argc, char* const argv[]) {
+  constexpr char prefix[] = "--aegis-p309i-pipe=";
+  constexpr size_t size = sizeof(prefix) - 1;
+  std::string result;
+  for (int i = 0; i < argc; ++i) {
+    if (argv[i] && std::strncmp(argv[i], prefix, size) == 0) {
+      if (!result.empty()) return {};
+      result = argv[i] + size;
+      if (!IsObservationPipe(result)) return {};
+    }
+  }
+  return result;
+}
+
 // This marker is a test fixture selector, not an authentication primitive.
 inline bool IsFixtureUrl(const std::string& url) {
   constexpr char prefix[] = "data:text/html";
