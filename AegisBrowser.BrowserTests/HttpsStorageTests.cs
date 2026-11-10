@@ -48,8 +48,14 @@ internal static partial class Program
             addEventListener('message',e=>{if(e.origin===location.origin && e.data==='p403-oauth-ok')window.p403authDone=true;});
             'ready'
             """);
-        await Cef.UIThreadTaskFactory.StartNew(() => browser.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate",
-            new Dictionary<string, object> { ["expression"] = "window.open('" + server.Third + "auth-provider','p403-auth')", ["userGesture"] = true }));
+        await Cef.UIThreadTaskFactory.StartNew(() =>
+        {
+            var host = browser.GetBrowserHost();
+            var id = host.GetNextDevToolsMessageId();
+            if (host.ExecuteDevToolsMethod(id, "Runtime.evaluate",
+                new Dictionary<string, object> { ["expression"] = "window.open('" + server.Third + "auth-provider','p403-auth')", ["userGesture"] = true }) != id)
+                throw new InvalidOperationException("The test popup command was not submitted with its expected ID.");
+        });
         await WaitForAsync(async () => await Js(browser, "window.p403authDone") == "True", "HTTPS OAuth-style popup");
         var provider = server.Take("/auth-provider");
         var callback = server.Take("/auth-callback");
@@ -236,7 +242,7 @@ internal static partial class Program
                   if(typeof document.requestStorageAccess==='function') {
                     try {
                       result=await Promise.race([
-                        document.requestStorageAccess().then(()=> 'granted',e=>'rejected:'+e.name),
+                        document.requestStorageAccess().then(()=> 'resolved',e=>'rejected:'+e.name),
                         new Promise(resolve=>setTimeout(()=>resolve('timeout'),5000))]);
                     } catch(e) { result='error:'+e.name; }
                   }

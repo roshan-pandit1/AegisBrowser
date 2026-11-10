@@ -57,6 +57,19 @@ presence. The application handler denies permission types outside its existing
 supported set if CEF invokes it; the experiment does not infer a callback when
 none is reported.
 
+The first hosted [push run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42857319748)
+observed that a no-gesture request was rejected with blocking enabled but
+resolved when cookies were already allowed. It then failed before the gesture
+test: a typed DevTools client expected a different message ID after the older
+popup fixture had submitted an automatically numbered command. Exact test-root
+removal and independent cleanup were verified. The test now obtains IDs from
+the same CefSharp browser-host wrapper for the popup command, keeping its
+counter aligned with the input client. A local preflight exercised the input
+both before and after that popup command. The existing popup fixture uses a
+DevTools gesture flag; it is not evidence of a physical user action. The new
+Storage Access request itself uses a visible button and separately observed
+trusted mouse input and activation.
+
 The embedded session is a synthetic server-side cookie requirement, not a real
 identity-provider integration. It reports whether the test cookies arrived
 before and after the API request. The fixture also exercises a sandboxed iframe

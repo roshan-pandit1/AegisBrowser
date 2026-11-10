@@ -97,6 +97,7 @@ internal static partial class Program
                         var blocked = await StorageScenario(browser, fixture, server, "protection-enabled");
                         CheckBlocked(blocked);
                         await CookiePolicyOAuth(browser);
+                        if (phase == "storage-policy-probe") await StorageInputPreflight(browser);
                         if (phase == "storage-policy-write")
                         {
                             new PrivacySettingsStore(root).Save(new PrivacyConfiguration { BlockThirdPartyCookies = true });
@@ -192,8 +193,14 @@ internal static partial class Program
             });
             'ready'
             """);
-        await Cef.UIThreadTaskFactory.StartNew(() => browser.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate",
-            new Dictionary<string, object> { ["expression"] = "window.open('https://provider-tests.invalid/authorize','p402-oauth')", ["userGesture"] = true }));
+        await Cef.UIThreadTaskFactory.StartNew(() =>
+        {
+            var host = browser.GetBrowserHost();
+            var id = host.GetNextDevToolsMessageId();
+            if (host.ExecuteDevToolsMethod(id, "Runtime.evaluate",
+                new Dictionary<string, object> { ["expression"] = "window.open('https://provider-tests.invalid/authorize','p402-oauth')", ["userGesture"] = true }) != id)
+                throw new InvalidOperationException("The test popup command was not submitted with its expected ID.");
+        });
         var deadline = DateTime.UtcNow.AddSeconds(20);
         while (await Js(browser, "window.oauthDone") != "True")
         {
