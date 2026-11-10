@@ -28,11 +28,20 @@ public sealed class TokenObservation
     // A zero count does not prove an unrestricted token: restrictions may
     // also derive from disabled SIDs, deleted privileges, jobs or mitigations.
     public uint? RestrictingSidCount { get; internal set; }
+    // IsTokenRestricted checks restricting SIDs only; it does not decide
+    // whether a token has been restricted by other mechanisms.
+    public bool? HasRestrictingSids { get; internal set; }
     public uint? PrivilegeCount { get; internal set; }
     public uint? EnabledPrivilegeCount { get; internal set; }
     public string[] EnabledPrivilegeNames { get; internal set; } = Array.Empty<string>();
     public bool? InAnyJob { get; internal set; }
     public bool? Win32kSystemCallsDisabled { get; internal set; }
+    // Raw OS-reported flags; null means the corresponding query failed.
+    // These are configuration observations, never sandbox-verification claims.
+    public uint? SystemCallMitigationFlags { get; internal set; }
+    public uint? AslrMitigationFlags { get; internal set; }
+    public uint? ExtensionPointMitigationFlags { get; internal set; }
+    public uint? ImageLoadMitigationFlags { get; internal set; }
 }
 
 public static class TokenObserver
@@ -70,6 +79,8 @@ public static class TokenObserver
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool GetTokenInformation(SafeAccessTokenHandle token, int tokenClass,
         IntPtr information, int length, out int returned);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool IsTokenRestricted(SafeAccessTokenHandle token);
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool IsValidSid(IntPtr sid);
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -121,6 +132,9 @@ public static class TokenObserver
                 result.GroupCount = groups.count;
                 result.DenyOnlyGroupCount = groups.denyOnly;
                 result.RestrictingSidCount = WithTokenInfo(token, TokenRestrictedSids, ReadGroupCounts).count;
+                // SetLastError=true resets the native last-error before the
+                // call on .NET. False plus an error is unknown, not false.
+                result.HasRestrictingSids = ReadRestrictingSidIndicator(token);
                 var privileges = WithTokenInfo(token, TokenPrivileges, ReadPrivilegeCounts);
                 result.PrivilegeCount = privileges.count;
                 result.EnabledPrivilegeCount = (uint)privileges.names.Length;
@@ -129,7 +143,11 @@ public static class TokenObserver
 
             // Optional observations are not converted to false on access/API failure.
             result.InAnyJob = IsProcessInJob(process, IntPtr.Zero, out bool inJob) ? inJob : null;
-            result.Win32kSystemCallsDisabled = GetProcessMitigationPolicy(process, 4, out uint flags, sizeof(uint))
+            result.SystemCallMitigationFlags = ReadMitigationFlags(process, 4);
+            result.AslrMitigationFlags = ReadMitigationFlags(process, 1);
+            result.ExtensionPointMitigationFlags = ReadMitigationFlags(process, 6);
+            result.ImageLoadMitigationFlags = ReadMitigationFlags(process, 10);
+            result.Win32kSystemCallsDisabled = result.SystemCallMitigationFlags is uint flags
                 ? (flags & 1) != 0 : null;
             RequireAlive(process);
             if (!GetProcessTimes(process, out long rechecked, out _, out _, out _) || rechecked != created)
@@ -148,6 +166,16 @@ public static class TokenObserver
 
     private static TokenObservation Fail(TokenObservation result, string reason)
     { result.Status = "INCONCLUSIVE"; result.Reason = reason; return result; }
+
+    private static uint? ReadMitigationFlags(SafeProcessHandle process, int policy) =>
+        GetProcessMitigationPolicy(process, policy, out uint flags, sizeof(uint)) ? flags : null;
+
+    private static bool? ReadRestrictingSidIndicator(SafeAccessTokenHandle token)
+    {
+        bool restricted = IsTokenRestricted(token);
+        int error = Marshal.GetLastWin32Error();
+        return restricted ? true : error == 0 ? false : null;
+    }
 
     private static void RequireAlive(SafeProcessHandle process)
     {

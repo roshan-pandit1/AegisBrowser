@@ -13,6 +13,7 @@ internal static class Program
     {
         if (args.Length >= 2 && args[0] == "--fixture-helper") return await Helper(args[1], args.Skip(2).ToArray());
         if (args.Length == 1 && args[0] == "--self-test") return await SelfTest.Run();
+        if (args.Length == 1 && args[0] == "--renderer-self-test") return await RendererPipeTests.Run();
         if (args.Length == 1 && args[0] == "--fixture-wire-selftest") return await SelfTest.WireFixture();
         if (args.Length != 5 || args[0] != "supervise" || !int.TryParse(args[4], out int timeout))
         {
@@ -32,8 +33,23 @@ internal static class Program
             using var bundle = BundlePins.Open(dir, args[2], args[3]);
             if (!string.Equals(FileVersionInfo.GetVersionInfo(Path.Combine(dir, "libcef.dll")).FileVersion,
                 RuntimeVersion, StringComparison.Ordinal)) throw new InvalidDataException("CEF_VERSION_MISMATCH");
+            RendererPipeObserver? observer = null;
+            string observerFailure = "OBSERVER_UNAVAILABLE";
+            try { observer = RendererPipeObserver.Create(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or
+                PlatformNotSupportedException or System.ComponentModel.Win32Exception or System.Security.SecurityException)
+            { observerFailure = "OBSERVER_CREATE_FAILED_" + e.GetType().Name; }
+            using var observerLifetime = observer;
             var result = await ProcessRunner.RunAsync(bootstrap, bundle.BootstrapHash, new[] { "--module=p309f_client" }, dir, timeout, true,
-                (id, _) => Console.WriteLine(JsonSerializer.Serialize(new { kind = "PROCESS_IDENTITY", identity = id })));
+                (id, handle) => {
+                    Console.WriteLine(JsonSerializer.Serialize(new { kind = "PROCESS_IDENTITY", identity = id }));
+                    observer?.Start(id, handle);
+                }, observer?.FullName, line => observer?.AcceptLine(line));
+            var evidence = observer != null ? await observer.FinishAsync() : RendererPipeObserver.Failure(observerFailure);
+            if (evidence.RoleEvidence == "CLIENT_PID_CLAIM" && !result.OutputComplete)
+                evidence = RendererPipeObserver.Failure("PID_CLAIM_OUTPUT_INCOMPLETE");
+            var policy = P309i.PolicyEvidence.Assess(evidence.Token);
+            Console.WriteLine(JsonSerializer.Serialize(new { kind = "RENDERER_OBSERVATION", evidence, policy }));
             Console.WriteLine(JsonSerializer.Serialize(new { kind = "PROCESS_RESULT", result, DependencyCoverage = "PINNED_BUNDLE_FILES_NOT_SYSTEM_DEPENDENCIES", OverallQualification = "INCONCLUSIVE" }));
             return result.ProcessExit == "NORMAL" && result.OutputComplete && !result.Stdout.Truncated && !result.Stderr.Truncated ? 0 : 1;
         }
@@ -75,6 +91,33 @@ internal static class Program
                 var psi = SelfTest.HelperStartInfo("delay");
                 using (var child = Process.Start(psi) ?? throw new InvalidOperationException("child start"))
                     Console.Write("child-started");
+                return 0;
+            case "renderer-claim-parent":
+            case "renderer-claim-duplicate":
+            case "renderer-claim-oversized":
+                using (var child = Process.Start(SelfTest.HelperStartInfo("timeout"))
+                    ?? throw new InvalidOperationException("CLAIM_CHILD_START_FAILED"))
+                {
+                    Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
+                    if (mode == "renderer-claim-duplicate")
+                        Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
+                    if (mode == "renderer-claim-oversized")
+                        Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + new string('9', 300));
+                    await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                return 0;
+            case "renderer-pipe":
+            case "renderer-pipe-bad":
+                if (args.Length != 1 || !args[0].StartsWith(@"\\.\pipe\aegis-p309i-", StringComparison.Ordinal)) return 9;
+                using (var pipe = new System.IO.Pipes.NamedPipeClientStream(".", args[0].Substring(@"\\.\pipe\".Length),
+                           System.IO.Pipes.PipeDirection.Out, System.IO.Pipes.PipeOptions.Asynchronous))
+                {
+                    await pipe.ConnectAsync(5000);
+                    byte[] message = Encoding.ASCII.GetBytes(mode == "renderer-pipe" ? "P309I_RENDERER_V1\n" : "X309I_RENDERER_V1\n");
+                    await pipe.WriteAsync(message);
+                    await pipe.FlushAsync();
+                    await Task.Delay(1200);
+                }
                 return 0;
             default: return 9;
         }

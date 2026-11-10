@@ -6,4 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../p309h/OwnedProcessLineage/OwnedProcessLineage.csproj" />
+    <ProjectReference Include="../../p309i/PolicyEvidence/PolicyEvidence.csproj" />
+  </ItemGroup>
 </Project>

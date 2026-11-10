@@ -121,10 +121,11 @@ $decoded = @($output | ForEach-Object {
     try { $_.ToString() | ConvertFrom-Json -ErrorAction Stop }
     catch { throw 'Supervisor returned malformed or unexpected output.' }
 })
-if (@($decoded | Where-Object { $_.kind -notin @('PROCESS_IDENTITY','PROCESS_RESULT') }).Count -ne 0) { throw 'Supervisor returned an unknown record kind.' }
+if (@($decoded | Where-Object { $_.kind -notin @('PROCESS_IDENTITY','PROCESS_RESULT','RENDERER_OBSERVATION') }).Count -ne 0) { throw 'Supervisor returned an unknown record kind.' }
 $records = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_RESULT' })
 $identities = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_IDENTITY' })
-if ($records.Count -ne 1 -or $identities.Count -gt 1 -or $supervisorExit -notin @(0,1)) { throw 'Supervisor did not produce an unambiguous diagnostic result.' }
+$renderers = @($decoded | Where-Object { $_.kind -ceq 'RENDERER_OBSERVATION' })
+if ($records.Count -ne 1 -or $identities.Count -gt 1 -or $renderers.Count -ne 1 -or $supervisorExit -notin @(0,1)) { throw 'Supervisor did not produce an unambiguous diagnostic result.' }
 $record = $records[0]
 if ($record.OverallQualification -cne 'INCONCLUSIVE' -or $record.result.SubprocessCleanup -cne 'INCONCLUSIVE' -or
     $record.result.SandboxEnforcement -cne 'INCONCLUSIVE' -or $record.result.ProcessExit -notin @('NORMAL','NONZERO','TIMEOUT','UNAVAILABLE')) { throw 'Unexpected supervisor classification.' }
@@ -142,7 +143,22 @@ Write-Output "PARENT_TERMINATION_REQUESTED: $($record.result.ParentTerminationRe
 Write-Output "OUTPUT_COMPLETE: $($record.result.OutputComplete)"
 Write-Output "SUPERVISED_RESULT: $($correlated.Disposition) ($($correlated.Reason))"
 foreach ($line in @(($record.result.Stdout.Text + "`n" + $record.result.Stderr.Text) -split "`r?`n" | Where-Object { $_ -match '^(EVENT:|NATIVE_DIAGNOSTIC:|BLOCKED:|CEF_|SANDBOX_|FIXTURE_|OWNER_)' } | Select-Object -First 100)) { Write-Output $line }
-Write-Output 'RENDERER_TOKEN_EVIDENCE: NOT_OBSERVED'
+$renderer = $renderers[0].evidence
+$policy = $renderers[0].policy
+if ($renderer.RendererIdentity -cne 'INCONCLUSIVE' -or $renderer.SandboxEnforcement -cne 'INCONCLUSIVE' -or
+    $renderer.SubprocessAccounting -cne 'INCONCLUSIVE' -or $renderer.SubprocessCleanup -cne 'INCONCLUSIVE' -or
+    $renderer.Status -notin @('OBSERVED','INCONCLUSIVE') -or $policy.RendererSandboxPolicy -cne 'INCONCLUSIVE' -or
+    $policy.SandboxEnforcement -cne 'INCONCLUSIVE') { throw 'Unexpected renderer-evidence classification.' }
+Write-Output "RENDERER_OBSERVATION: $($renderer.Status) ($($renderer.Reason))"
+Write-Output "RENDERER_ROLE_EVIDENCE: $($renderer.RoleEvidence)"
+Write-Output ('RENDERER_EVIDENCE_JSON: ' + ([ordered]@{ observation = $renderer; policy = $policy } | ConvertTo-Json -Depth 8 -Compress))
+if ($renderer.Status -ceq 'OBSERVED' -and $null -ne $renderer.Token -and $renderer.Token.Status -ceq 'OBSERVED') {
+    Write-Output "CANDIDATE_IDENTITY: PID=$($renderer.CandidatePid) CREATION_FILETIME_UTC=$($renderer.CandidateCreationFileTimeUtc)"
+    Write-Output "CANDIDATE_TOKEN: INTEGRITY_RID=$($renderer.Token.IntegrityRid) RESTRICTING_SIDS=$($renderer.Token.RestrictingSidCount) HAS_RESTRICTING_SIDS=$($renderer.Token.HasRestrictingSids) APPCONTAINER=$($renderer.Token.IsAppContainer) IN_JOB=$($renderer.Token.InAnyJob) WIN32K_DISABLED=$($renderer.Token.Win32kSystemCallsDisabled)"
+    Write-Output 'RENDERER_TOKEN_EVIDENCE: INCONCLUSIVE (live direct-child token; renderer role remains a client claim)'
+} else { Write-Output 'RENDERER_TOKEN_EVIDENCE: NOT_OBSERVED' }
+Write-Output 'RENDERER_IDENTITY: INCONCLUSIVE'
+Write-Output 'SUBPROCESS_ACCOUNTING: INCONCLUSIVE'
 Write-Output 'SUBPROCESS_CLEANUP: INCONCLUSIVE'
 Write-Output 'SANDBOX_ENFORCEMENT: INCONCLUSIVE'
 Write-Output 'NATIVE_LIFECYCLE_ACCEPTANCE: INCOMPLETE'

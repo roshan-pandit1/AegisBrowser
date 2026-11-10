@@ -92,14 +92,50 @@ internal static class ProcessRunner
         }
     }
 
-    private static async Task DrainAsync(Stream stream, CaptureState state)
+    // Observe bounded ASCII lines while still draining the entire stream.
+    // A line is a producer claim; inherited stdout may be written by children.
+    private static async Task DrainAsync(Stream stream, CaptureState state, Action<string>? onLine = null)
     {
         byte[] buffer = new byte[8192];
+        byte[] line = new byte[256];
+        int used = 0, lines = 0;
+        bool invalid = false;
         while (true)
         {
             int count = await stream.ReadAsync(buffer);
-            if (count == 0) break;
+            if (count == 0)
+            {
+                if (onLine != null && used > 0)
+                    onLine(Encoding.ASCII.GetString(line, 0, used) + "<unterminated>");
+                break;
+            }
             state.Append(buffer, count);
+            if (onLine == null || lines >= 10000) continue;
+            for (int i = 0; i < count; i++)
+            {
+                byte value = buffer[i];
+                if (value == (byte)'\n')
+                {
+                    lines++;
+                    if (!invalid)
+                    {
+                        int length = used > 0 && line[used - 1] == (byte)'\r' ? used - 1 : used;
+                        onLine(Encoding.ASCII.GetString(line, 0, length));
+                    }
+                    else if (used > 0)
+                        // Preserve a malformed marker prefix for rejection;
+                        // do not let a truncated marker become invisible.
+                        onLine(Encoding.ASCII.GetString(line, 0, used) + "<invalid-or-oversized>");
+                    used = 0; invalid = false;
+                    if (lines >= 10000)
+                    {
+                        onLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=<line-limit>");
+                        break;
+                    }
+                }
+                else if (value > 127 || used == line.Length) invalid = true;
+                else if (!invalid) line[used++] = value;
+            }
         }
     }
 
@@ -107,7 +143,8 @@ internal static class ProcessRunner
         new("", false, false), new("", false, false), "INCONCLUSIVE", "INCONCLUSIVE", error);
 
     internal static async Task<Result> RunAsync(string executable, string expectedHash, IReadOnlyList<string> arguments,
-        string workingDirectory, int timeoutMs, bool terminateParentOnTimeout, Action<Identity, SafeProcessHandle>? onIdentity = null)
+        string workingDirectory, int timeoutMs, bool terminateParentOnTimeout, Action<Identity, SafeProcessHandle>? onIdentity = null,
+        string? observationPipeName = null, Action<string>? onStdoutLine = null)
     {
         if (!OperatingSystem.IsWindows() || timeoutMs is < 1 or > 120000) return Empty("UNAVAILABLE", "UNSUPPORTED_OR_INVALID_TIMEOUT");
         FileStream? pinned = null;
@@ -125,6 +162,8 @@ internal static class ProcessRunner
             };
             foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
             process.StartInfo.Environment["AEGIS_P309F_EXECUTE_SANDBOX_TEST"] = "YES";
+            if (observationPipeName != null)
+                process.StartInfo.Environment["AEGIS_P309I_PIPE"] = observationPipeName;
             try { if (!process.Start()) return Empty("UNAVAILABLE", "PROCESS_START_FAILED"); }
             catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
             { return Empty("UNAVAILABLE", "PROCESS_START_FAILED:" + e.GetType().Name); }
@@ -133,7 +172,7 @@ internal static class ProcessRunner
             // discarded after the capture cap, but pipes continue draining.
             var stdoutState = new CaptureState();
             var stderrState = new CaptureState();
-            var stdout = DrainAsync(process.StandardOutput.BaseStream, stdoutState);
+            var stdout = DrainAsync(process.StandardOutput.BaseStream, stdoutState, onStdoutLine);
             var stderr = DrainAsync(process.StandardError.BaseStream, stderrState);
             Identity? identity = null;
             string error = "";

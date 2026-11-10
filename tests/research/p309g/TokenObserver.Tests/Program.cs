@@ -13,6 +13,12 @@ internal static class Program
         out long exit, out long kernel, out long user);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern SafeProcessHandle OpenProcess(uint access, bool inherit, uint processId);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetProcessMitigationPolicy(SafeProcessHandle process, int policy, out uint flags, int size);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(SafeProcessHandle process, uint access, out SafeAccessTokenHandle token);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool IsTokenRestricted(SafeAccessTokenHandle token);
 
     private static int count;
     private static void Check(bool condition, string message)
@@ -46,6 +52,25 @@ internal static class Program
             Check(observed.ProcessId == pid && observed.CreationFileTimeUtc == creation, "snapshot is bound to PID and exact creation FILETIME");
             Check(observed.IntegrityRid.HasValue && observed.IsAppContainer.HasValue, "integrity and AppContainer state are observed without assumptions");
             Check(observed.GroupCount.HasValue && observed.RestrictingSidCount.HasValue && observed.PrivilegeCount.HasValue, "group, restricting-SID and privilege counts are returned");
+            if (!OpenProcessToken(handle, 0x0008, out var token)) throw new InvalidOperationException("Cannot open owned test token.");
+            using (token)
+            {
+                bool direct = IsTokenRestricted(token);
+                int error = Marshal.GetLastWin32Error();
+                Check(observed.HasRestrictingSids == (direct ? true : error == 0 ? false : null),
+                    "restricted SID indicator agrees with direct Windows API including unknown errors");
+            }
+            foreach (var item in new (int policy, uint? value, string name)[] {
+                (1, observed.AslrMitigationFlags, "ASLR"),
+                (4, observed.SystemCallMitigationFlags, "system call"),
+                (6, observed.ExtensionPointMitigationFlags, "extension point"),
+                (10, observed.ImageLoadMitigationFlags, "image load") })
+            {
+                bool available = GetProcessMitigationPolicy(handle, item.policy, out uint direct, sizeof(uint));
+                Check(item.value == (available ? direct : null), item.name + " flags agree with direct query or remain unknown");
+            }
+            Check(observed.Win32kSystemCallsDisabled == (observed.SystemCallMitigationFlags is uint flags ? (flags & 1) != 0 : null),
+                "win32k status derives only from a successful system-call policy query");
             Check(observed.EnabledPrivilegeCount == observed.EnabledPrivilegeNames.Length, "enabled privilege count agrees with reported names");
             Check(observed.SandboxEnforcement == "INCONCLUSIVE" && observed.ProcessRole == "NOT_ESTABLISHED", "token snapshot alone never verifies a renderer or sandbox");
             Check(TokenObserver.Observe(handle, pid + 1, creation, path).Reason == "PID_MISMATCH", "wrong PID is rejected");
@@ -56,6 +81,11 @@ internal static class Program
             Check(TokenObserver.Observe(null, pid, creation, path).Reason == "INVALID_IDENTITY_INPUT", "missing process handle is rejected");
             using var invalid = new SafeProcessHandle(IntPtr.Zero, false);
             Check(TokenObserver.Observe(invalid, pid, creation, path).Reason == "INVALID_IDENTITY_INPUT", "invalid process handle is rejected");
+            var readRestricted = typeof(TokenObserver).GetMethod("ReadRestrictingSidIndicator", BindingFlags.NonPublic | BindingFlags.Static)
+                ?? throw new InvalidOperationException("Restricted SID reader missing.");
+            using var invalidToken = new SafeAccessTokenHandle(IntPtr.Zero);
+            Check(readRestricted.Invoke(null, new object[] { invalidToken }) is null,
+                "restricted-SID query failure remains unknown instead of false");
             // Synthetic buffers exercise bounds and SID-authority failure paths
             // without creating or modifying any Windows security token.
             IntPtr synthetic = Marshal.AllocHGlobal(64);
@@ -81,6 +111,12 @@ internal static class Program
             using var limited = OpenProcess(0x1000, false, pid);
             if (limited.IsInvalid) throw new InvalidOperationException("Cannot open limited test-process handle.");
             Check(TokenObserver.Observe(limited, pid, creation, path).Status == "INCONCLUSIVE", "missing process synchronization access is inconclusive");
+            var readMitigation = typeof(TokenObserver).GetMethod("ReadMitigationFlags", BindingFlags.NonPublic | BindingFlags.Static)
+                ?? throw new InvalidOperationException("Mitigation reader missing.");
+            using var syncOnly = OpenProcess(0x100000, false, pid);
+            if (syncOnly.IsInvalid) throw new InvalidOperationException("Cannot open synchronization-only process handle.");
+            Check(readMitigation.Invoke(null, new object[] { syncOnly, 4 }) is null,
+                "mitigation access failure remains unknown instead of false");
 
             var command = Environment.GetEnvironmentVariable("ComSpec") ?? throw new InvalidOperationException("ComSpec unavailable.");
             using var child = new Process { StartInfo = new ProcessStartInfo {

@@ -84,6 +84,16 @@ int main() {
   ok &= check(!p309g::IsFixtureAbort(true, "about:blank"), "unrelated aborted navigation is not fixture failure");
   ok &= check(!p309g::IsFixtureAbort(false, p309g::kFixtureUrl), "non-abort not classified as cancellation");
   ok &= check(!p309g::IsFixtureAbort(true, ""), "missing failed URL does not invent fixture identity");
+  const std::string pipe = "\\\\.\\pipe\\aegis-p309i-0123456789abcdef0123456789abcdef";
+  ok &= check(p309g::IsObservationPipe(pipe), "local per-run observation pipe accepted");
+  ok &= check(!p309g::IsObservationPipe("\\\\remote\\pipe\\aegis-p309i-0123456789abcdef0123456789abcdef"), "remote pipe rejected");
+  ok &= check(!p309g::IsObservationPipe(pipe + "x"), "overlong pipe rejected");
+  ok &= check(!p309g::IsObservationPipe("\\\\.\\pipe\\aegis-p309i-0123456789ABCDEF0123456789abcdef"), "noncanonical pipe suffix rejected");
+  std::string pipe_arg = "--aegis-p309i-pipe=" + pipe;
+  char* one_pipe[] = {app, pipe_arg.data()};
+  char* two_pipes[] = {app, pipe_arg.data(), pipe_arg.data()};
+  ok &= check(p309g::ObservationPipeArgument(2, one_pipe) == pipe, "single pipe argument parsed");
+  ok &= check(p309g::ObservationPipeArgument(3, two_pipes).empty(), "duplicate pipe arguments rejected");
   if (!ok) return 1;
   std::printf("PASS: %d synthetic fixture and sandbox-gate checks; no CEF execution\n", checks);
   return 0;
