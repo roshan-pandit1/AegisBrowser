@@ -16,6 +16,7 @@ internal static partial class Program
         {
             StorageFixturePage("/storage-clear"), StorageFixturePage("/storage-set-a"),
             StorageFixturePage("/storage-read"), StorageFixturePage("/storage-access-no-gesture"),
+            StorageAccessGesturePage(),
             ServiceWorkerPage("/sw/frame-clear"), ServiceWorkerPage("/sw/frame-a"),
             ServiceWorkerPage("/sw/frame-read")
         };
@@ -299,7 +300,7 @@ internal static partial class Program
             """;
     }
 
-    private static async Task HttpsStorageAccessNoGesture(BrowserView browser, PrivacyHttpsServer server)
+    private static async Task HttpsStorageAccessNoGesture(BrowserView browser, PrivacyHttpsServer server, string label)
     {
         const string path = "/storage-access-no-gesture";
         server.Take(path);
@@ -316,7 +317,7 @@ internal static partial class Program
         var before = root.GetProperty("before").GetString();
         var result = root.GetProperty("result").GetString();
         var after = root.GetProperty("after").GetString();
-        Console.WriteLine($"P403_STORAGE_ACCESS: gesture=false before={before} request={result} after={after}");
+        Console.WriteLine($"P403_STORAGE_ACCESS: scenario={label} gesture=false before={before} request={result} after={after}");
     }
 
     private static async Task<StorageObservation> HttpsStorageFrame(BrowserView browser, PrivacyHttpsServer server, string top, string path)

@@ -93,6 +93,14 @@ jobs:
                 !(($output -join "`n") -match 'P403_TRUST: temporary user root removed')) {
               throw "HTTPS privacy probe $phase did not finish shutdown and root removal"
             }
+            $required = if ($phase -eq 'https-privacy-write') {
+              @('P404_AUTH_EVENT:.*scenario=baseline ', 'P404_AUTH_EVENT:.*scenario=enabled ',
+                'P404_STORAGE_ACCESS_EVENT:.*scenario=baseline ', 'P404_STORAGE_ACCESS_EVENT:.*scenario=enabled ',
+                'P404_STORAGE_ACCESS_EVENT:.*scenario=sandboxed_enabled ', 'P404_PERMISSION_SUMMARY:')
+            } else { @('P404_STORAGE_ACCESS_PERSISTENCE:.*scenario=restart_enabled ', 'P404_PERMISSION_SUMMARY:') }
+            foreach ($marker in $required) {
+              if ($output -notmatch $marker) { throw "Missing HTTPS research observation: $marker" }
+            }
           }
       - name: Remove disposable HTTPS test roots
         if: ${{ always() }}

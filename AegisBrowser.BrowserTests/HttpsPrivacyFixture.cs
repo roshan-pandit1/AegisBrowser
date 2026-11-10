@@ -293,7 +293,11 @@ internal static partial class Program
                         await stream.WriteAsync(redirect, timeout.Token);
                         return;
                     }
-                    var body = path == "/auth-callback"
+                    var body = path == "/p404-access" ? StorageAccessGesturePage()
+                        : path == "/p404-embedded-auth"
+                        ? "<!doctype html><script>parent.postMessage({kind:'p404-embedded-auth',signedIn:"
+                            + ((normal && httpOnly) ? "true" : "false") + "},'*');</script>"
+                        : path == "/auth-callback"
                         ? "<!doctype html><script>if(window.opener){window.opener.postMessage('p403-oauth-ok','"
                             + TopA.TrimEnd('/') + "');window.close();}</script>"
                         : path == "/sw/worker.js" ? ServiceWorkerScript()

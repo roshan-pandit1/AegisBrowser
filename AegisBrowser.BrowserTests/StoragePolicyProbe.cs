@@ -64,6 +64,7 @@ internal static partial class Program
                     host.Controls.Add(browser);
                     await Ready(browser);
                     await CompileHttpsFixtureScripts(browser);
+                    if (phase == "storage-policy-probe") await StorageInputPreflight(browser);
                     var initial = await Cef.UIThreadTaskFactory.StartNew(() =>
                         (exists: context.HasPreference(CookieModePreference),
                          writable: context.CanSetPreference(CookieModePreference),

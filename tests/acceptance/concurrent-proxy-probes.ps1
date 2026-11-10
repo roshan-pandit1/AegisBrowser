@@ -32,6 +32,7 @@ try {
         if (($processes | Where-Object { -not $_.Process.HasExited }).Count -eq 0) { break }
         Start-Sleep -Milliseconds 250
     }
+    $failedRoles = [Collections.Generic.List[string]]::new()
     foreach ($entry in $processes) {
         $entry.Process.Refresh()
         if (-not $entry.Process.HasExited) { throw "Concurrent $($entry.Role) fixture did not exit within three minutes." }
@@ -39,13 +40,16 @@ try {
         $result = (Get-Content -LiteralPath $entry.Output -Raw) + "`n" + (Get-Content -LiteralPath $entry.Errors -Raw)
         Write-Output "Concurrent proxy fixture $($entry.Role):"
         Write-Output $result
+        $exitStatus = if ($null -eq $entry.Process.ExitCode) { 'unavailable' } else { [string]$entry.Process.ExitCode }
+        Write-Output "P404_PROCESS_EVENT: role=$($entry.Role) exit=$exitStatus"
         if ($null -eq $entry.Process.ExitCode -or $entry.Process.ExitCode -ne 0 -or $result -match 'Check failed:' -or
             $result -notmatch 'PASS: both independent CEF proxy fixtures initialized before routing tests' -or
             $result -notmatch 'PASS: \d+ CEF proxy probe checks' -or
             $result -notmatch 'PASS: CEF proxy probe shutdown completed') {
-            throw "Concurrent $($entry.Role) fixture failed or did not complete native shutdown."
+            $failedRoles.Add($entry.Role)
         }
     }
+    if ($failedRoles.Count -ne 0) { throw "Concurrent proxy fixtures failed or did not complete native shutdown: $($failedRoles -join ', ')." }
     Write-Output 'PASS: two independent CEF proxy fixture processes completed concurrently'
 }
 finally {
