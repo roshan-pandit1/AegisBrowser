@@ -69,10 +69,11 @@ internal static partial class Program
 
     // A missing click is a measured capability limitation, not a permission
     // decision. Other errors still fail the probe; no API request is faked.
-    private static async Task<bool> ObserveControlledClick(BrowserView browser, string variable)
+    private static async Task<bool> ObserveControlledClick(BrowserView browser, string variable, TimeSpan? timeout = null)
     {
+        var limit = timeout ?? TimeSpan.FromSeconds(10);
         var elapsed = Stopwatch.StartNew();
-        while (elapsed.Elapsed < TimeSpan.FromSeconds(10))
+        while (elapsed.Elapsed < limit)
         {
             if (await Js(browser, variable) != "pending") return true;
             await Task.Delay(100);
@@ -83,6 +84,9 @@ internal static partial class Program
     // Local CEF-only input qualification; no trust-store or permission changes.
     private static async Task StorageInputPreflight(BrowserView browser)
     {
+        await Js(browser, "window.p404never='pending';'ready'");
+        Check(!await ObserveControlledClick(browser, "window.p404never", TimeSpan.FromMilliseconds(300)),
+            "a missing input event remains unobserved");
         await Js(browser, """
             document.body.innerHTML='<button id="p404button" style="position:fixed;left:20px;top:20px;width:250px;height:100px">Request storage access</button>';
             window.p404input='pending';
@@ -152,6 +156,7 @@ internal static partial class Program
         private int storageCallbacks;
         private int otherCallbacks;
         internal int StorageCallbacks => Volatile.Read(ref storageCallbacks);
+        internal int OtherCallbacks => Volatile.Read(ref otherCallbacks);
         internal void Record(string category, string details) =>
             Console.WriteLine($"P404_{category}: run={run} elapsed_ms={elapsed.ElapsedMilliseconds} {details}");
         internal void Report(string message)
@@ -259,6 +264,7 @@ internal static partial class Program
         await InteractWithRequestingSite(browser, server);
         server.Take("/p404-cookie-check");
         var beforeCallbacks = permissions.StorageCallbacks;
+        var beforeOtherCallbacks = permissions.OtherCallbacks;
         using var ready = await OpenStorageAccessFrame(browser, server, server.TopA, sandboxed);
         var readyRoot = ready.RootElement;
         var supported = readyRoot.GetProperty("supported").GetBoolean();
@@ -287,7 +293,7 @@ internal static partial class Program
         var fetch = root.GetProperty("fetchResult").GetString();
         var requests = server.Take("/p404-cookie-check");
         Check(fetch == "completed" && requests.Length == 1, "post-request cookie observation reached the HTTPS server");
-        permissions.Record("STORAGE_ACCESS_EVENT", $"scenario={label} supported={supported} trusted={trusted} active={active} before={before} api={result} after={after} permission_callbacks={permissions.StorageCallbacks - beforeCallbacks}");
+        permissions.Record("STORAGE_ACCESS_EVENT", $"scenario={label} supported={supported} trusted={trusted} active={active} before={before} api={result} after={after} storage_named_callbacks={permissions.StorageCallbacks - beforeCallbacks} other_callbacks={permissions.OtherCallbacks - beforeOtherCallbacks}");
         permissions.Record("COOKIE_OBSERVATION", $"scenario={label} request_received=true ordinary_cookie={requests[0].Normal} httponly_cookie={requests[0].HttpOnly}");
         if (!sandboxed) await EmbeddedAuthentication(browser, server, permissions, null, label + "_after_access", seed: false);
         using var siteA = await OpenStorageAccessFrame(browser, server, server.TopA);

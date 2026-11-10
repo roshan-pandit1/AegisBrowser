@@ -73,7 +73,10 @@ request and separately records production `OriginPermissions` reports,
 promise results, `hasStorageAccess`, and server-observed synthetic cookie
 presence. The application handler denies permission types outside its existing
 supported set if CEF invokes it; the experiment does not infer a callback when
-none is reported.
+none is reported. Callback labels come from the existing handler's sanitized
+report; an unrecognized or numeric permission type is counted as `other`, so
+the absence of a storage-named callback alone does not prove that Chromium
+never exposed a related permission event.
 
 The first hosted [push run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42857319748)
 observed that a no-gesture request was rejected with blocking enabled but
@@ -109,13 +112,44 @@ cookie, browser-close and shutdown errors still fail their tests. A completed
 workflow with an inconclusive input marker is not a Storage Access grant or
 denial qualification. If a click is observed, both the trusted-event and
 transient-activation checks are mandatory before reporting a result.
+The input preflight also checks a deliberately unchanged pending marker, which
+must remain unobserved; this is a synthetic negative test, not a browser
+permission decision.
 
 The embedded session is a synthetic server-side cookie requirement, not a real
 identity-provider integration. It reports whether the test cookies arrived
-before and after the API request. The fixture also exercises a sandboxed iframe
-without the storage-access sandbox token and queries both top-level test sites
-again after navigation and restart. Grant, denial and persistence outcomes
-remain unverified until the hosted HTTPS run supplies those observations.
+before and, when an API request occurs, after that request. The fixture also
+prepares a sandboxed iframe without the storage-access sandbox token and
+queries both top-level test sites again after navigation and restart. A
+sandboxed-iframe rejection requires an observed click and API result; grant,
+denial and grant-persistence outcomes remain unverified.
+
+On hosted Windows x64 [push run 42867102027](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42867102027)
+at commit `1778caf9f9fa944931af115eff150a58113fd01f`, the verified HTTPS
+server received one cross-site request in each cookie scenario. With the
+setting disabled, both synthetic ordinary and HttpOnly cookies arrived and the
+synthetic response cookie was stored. With it enabled, neither test cookie
+arrived and the response cookie was not stored. The embedded-session fixture
+accordingly reported `true` without blocking and `false` with blocking. This
+is a compatibility failure for that controlled embedded-cookie-dependent
+flow, not evidence about every authentication provider.
+
+Without transient activation, the enabled case reported `before=false`,
+`rejected:NotAllowedError`, `after=false`; the baseline reported
+`before=true`, `resolved`, `after=true`. Resolution with access already
+available is not evidence of a newly granted permission. The browser requested
+the visible iframe control in three gesture scenarios, but no click was
+observed in the bounded window; all three were recorded as inconclusive and no
+Storage Access request or permission decision was inferred from them. After
+restart, both queried sites reported access unavailable in that profile; since
+no grant was established, this is not a grant-persistence test. The HTTPS
+write and read phases both observed normal CEF shutdown and removed the
+temporary test-user root. The independent cleanup step also completed.
+
+The same Windows run completed both concurrent proxy fixtures with exit code
+0. Its [pull-request counterpart](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42867116258)
+also completed successfully. These workflow conclusions include explicit
+inconclusive gesture results and are not full Storage Access qualification.
 
 ## Verification and limitations
 
@@ -129,3 +163,26 @@ from this branch's CI, not inferred from the local preflight.
 No experiment changes real user certificate trust or profiles. No synthetic
 result establishes full network containment, universal embedded sign-in
 compatibility, a user-approved storage grant, or production readiness.
+
+## Acceptance at the recorded hosted run
+
+| Area | Result and scope |
+| --- | --- |
+| `SOCKS_TIMEOUT_REPRODUCTION` | VERIFIED in the earlier P4-03 local and hosted failures; not reproduced in the later traced runs. |
+| `SOCKS_ROOT_CAUSE` | INCONCLUSIVE; the historical failure had no P4-04 trace. |
+| `SOCKS_CALLBACK_ORDERING` | VERIFIED for the observed offline and deliberate-cancellation sequences only. |
+| `SOCKS_TERMINAL_NAVIGATION` | VERIFIED for the observed fixtures; no successful offline response was accepted. |
+| `SOCKS_TEST_RELIABILITY` | INCOMPLETE; the intermittent failure is not explained. |
+| `STORAGE_ACCESS_API_SUPPORT` | SUPPORTED for the tested HTTPS iframe API. |
+| `STORAGE_ACCESS_NO_GESTURE` | VERIFIED for the controlled blocked and baseline cases described above. |
+| `STORAGE_ACCESS_USER_GESTURE` | INCONCLUSIVE for real HTTPS; local trusted-input preflight is not an API outcome. |
+| `STORAGE_ACCESS_PERMISSION_DENIAL` | INCONCLUSIVE; no user-mediated denial was observed. |
+| `STORAGE_ACCESS_PERMISSION_GRANT` | INCONCLUSIVE; no user-mediated grant was observed. |
+| `STORAGE_ACCESS_PERSISTENCE` | INCONCLUSIVE for grants; no grant was established. |
+| `HTTPS_COOKIE_BEHAVIOR` | VERIFIED for the controlled loopback HTTPS cookies and selected modes. |
+| `EMBEDDED_AUTH_COMPATIBILITY` | FAILED for the synthetic cookie-dependent iframe with protection enabled. |
+| `OAUTH_POPUP_COMPATIBILITY` | VERIFIED for the controlled synthetic popup/redirect fixture. |
+| `PROFILE_ISOLATION` | VERIFIED only for the existing disposable-profile tests. |
+| `TLS_VALIDATION` | VERIFIED for the controlled trusted, untrusted and wrong-host fixtures. |
+| `NETWORK_LEAK_COVERAGE` | INCOMPLETE; proxy fixtures do not establish system-wide containment. |
+| `PRODUCTION_READINESS` | NOT_APPROVED. |
