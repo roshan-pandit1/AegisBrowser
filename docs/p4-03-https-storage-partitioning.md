@@ -24,8 +24,14 @@ GitHub-hosted Windows CI runner and the manifest directory is under
 `RUNNER_TEMP`. On that disposable runner it adds only the new public CA
 certificate to the current test user's Root store before CEF starts. The
 official Windows `certutil` user-store command runs in a bounded child
-process; if it stalls, only that test-owned installer is terminated and CEF
-has not started. Chromium
+process. On the disposable runner only, the harness attempts to confirm a
+Windows trust dialog only when it belongs to that exact child process and its
+window class, title, generated CA subject, SHA-1 certificate thumbprint and
+Yes button all match. A mismatch is not confirmed. Local synthetic negative
+tests cover several mismatches. This automates the explicitly requested
+temporary test trust; it does not change Windows policy or browser TLS
+validation. If installation stalls, only that test-owned installer is
+terminated and CEF has not started. Chromium
 uses its ordinary certificate validation and the production request handler;
 there is no certificate-error override.
 
@@ -58,6 +64,10 @@ reported the exact temporary root absent. Windows documents a confirmation
 dialog for that operation in [dotnet/runtime #24160](https://github.com/dotnet/runtime/issues/24160).
 The dialog itself was not observed on that runner, so it is a plausible cause,
 not an established observation. The bounded utility is a subsequent experiment.
+On [run 42808253542](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42808253542),
+the bounded utility also timed out after 20 seconds and the cleanup step
+verified the test root absent. Exact-dialog confirmation is a subsequent
+experiment and its result must be read from later CI.
 
 The fixture also exercises partitioned cookies, IndexedDB, CacheStorage and
 service-worker registration under two top-level sites, a Storage Access API

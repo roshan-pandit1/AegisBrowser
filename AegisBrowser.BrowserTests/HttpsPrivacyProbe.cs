@@ -18,6 +18,19 @@ internal static partial class Program
         try
         {
             using var certificates = new PrivacyCertificates();
+            var subject = certificates.Root.GetNameInfo(X509NameType.SimpleName, false);
+            var fingerprint = certificates.Root.Thumbprint;
+            var spaced = string.Join(" ", Enumerable.Range(0, fingerprint.Length / 2).Select(i => fingerprint.Substring(i * 2, 2)));
+            var prompt = subject + " thumbprint " + spaced;
+            bool Matches(uint owner = 17, string windowClass = "#32770", string title = "Security Warning", string content = "", bool yes = true) =>
+                RunnerTrustConfirmation.IsExactPrompt(owner, 17, windowClass, title,
+                    content.Length == 0 ? prompt : content, subject, fingerprint, yes);
+            Check(Matches(), "test CA confirmation matches the exact subject and fingerprint");
+            Check(!Matches(owner: 18) && !Matches(windowClass: "Other") && !Matches(title: "Other") && !Matches(yes: false),
+                "test CA confirmation rejects the wrong process, window class, title or button");
+            Check(!Matches(content: subject + " " + new string('0', fingerprint.Length))
+                && !Matches(content: "different subject " + spaced),
+                "test CA confirmation rejects an incorrect subject or fingerprint");
             using var server = new PrivacyHttpsServer(certificates.Server);
             var valid = ClientHandshake(server.Port, "localhost", certificates.Root).GetAwaiter().GetResult();
             var wrongHost = ClientHandshake(server.Port, "wrong.invalid", certificates.Root).GetAwaiter().GetResult();

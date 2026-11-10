@@ -110,7 +110,7 @@ internal static partial class Program
                 if (Matches(existing, certificate) != 0) throw new InvalidOperationException("The new test root already exists.");
             }
             Console.WriteLine("P403_STAGE: add_disposable_user_root");
-            AddUsingCertutil(path);
+            AddUsingCertutil(path, certificate);
             Console.WriteLine("P403_STAGE: disposable_user_root_added");
             installed = true;
             using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
@@ -118,7 +118,7 @@ internal static partial class Program
             if (Matches(store, certificate) != 1) throw new InvalidOperationException("Could not verify test root installation.");
         }
 
-        private static void AddUsingCertutil(string path)
+        private static void AddUsingCertutil(string path, X509Certificate2 certificate)
         {
             // The managed Root-store Add call can wait indefinitely on a Windows
             // trust confirmation UI. Run the official user-store utility in a
@@ -133,7 +133,8 @@ internal static partial class Program
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the test CA installer.");
             var stdout = process.StandardOutput.ReadToEndAsync();
             var stderr = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(20000))
+            _ = RunnerTrustConfirmation.WaitForInstaller(process, certificate);
+            if (!process.WaitForExit(5000))
             {
                 process.Kill(); // Only this test-owned installer; no browser exists yet.
                 process.WaitForExit();
