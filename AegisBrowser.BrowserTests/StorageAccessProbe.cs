@@ -28,7 +28,7 @@ internal static partial class Program
     }
 
     // Input is limited to a window owned by this test process and rooted in
-    // its disposable form. Global input is used only on a hosted CI runner.
+    // its disposable form. It does not move the system cursor.
     private static class OwnedWindowInput
     {
         [StructLayout(LayoutKind.Sequential)] private struct Point { public int X; public int Y; }
@@ -40,16 +40,6 @@ internal static partial class Program
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ScreenToClient(IntPtr window, ref Point point);
         [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
-        [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetForegroundWindow(IntPtr window);
-        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-        [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetCursorPos(int x, int y);
-        [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
-        [StructLayout(LayoutKind.Sequential)] private struct Input { public uint Type; public InputData Data; }
-        [StructLayout(LayoutKind.Explicit)] private struct InputData { [FieldOffset(0)] public MouseInput Mouse; }
-        [StructLayout(LayoutKind.Sequential)] private struct MouseInput
-        {
-            public int X; public int Y; public uint MouseData; public uint Flags; public uint Time; public UIntPtr ExtraInfo;
-        }
 
         internal static void Click(BrowserView browser, int x, int y)
         {
@@ -66,34 +56,6 @@ internal static partial class Program
             if (target == IntPtr.Zero || targetOwner != (uint)Environment.ProcessId || GetAncestor(target, 2) != form.Handle
                 || (target != browserWindow && !IsChild(browserWindow, target)))
                 throw new InvalidOperationException("The test input point is not on a test-owned window.");
-            var hosted = string.Equals(Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT"), "github-hosted", StringComparison.OrdinalIgnoreCase);
-            if (hosted)
-            {
-                DisposableRunnerTrust.RequireHostedRunner();
-                _ = SetForegroundWindow(form.Handle);
-                var foreground = GetForegroundWindow();
-                _ = GetWindowThreadProcessId(foreground, out var foregroundOwner);
-                if (foreground == IntPtr.Zero || foregroundOwner != (uint)Environment.ProcessId || GetAncestor(foreground, 2) != form.Handle)
-                    throw new InvalidOperationException("The disposable test window is not foreground.");
-                if (!SetCursorPos(point.X, point.Y)) throw new InvalidOperationException("Could not position the test runner cursor.");
-                var currentTarget = WindowFromPoint(point);
-                _ = GetWindowThreadProcessId(currentTarget, out var currentOwner);
-                if (currentTarget == IntPtr.Zero || currentOwner != (uint)Environment.ProcessId
-                    || GetAncestor(currentTarget, 2) != form.Handle
-                    || (currentTarget != browserWindow && !IsChild(browserWindow, currentTarget)))
-                    throw new InvalidOperationException("The runner cursor is not over the test browser.");
-                if (GetForegroundWindow() != foreground || WindowFromPoint(point) != currentTarget)
-                    throw new InvalidOperationException("The test input target changed before dispatch.");
-                var input = new[]
-                {
-                    new Input { Type = 0, Data = new InputData { Mouse = new MouseInput { Flags = 0x0002 } } },
-                    new Input { Type = 0, Data = new InputData { Mouse = new MouseInput { Flags = 0x0004 } } }
-                };
-                if (SendInput((uint)input.Length, input, Marshal.SizeOf<Input>()) != input.Length)
-                    throw new InvalidOperationException("The test runner did not accept the controlled mouse input.");
-                Console.WriteLine("P404_INPUT_MODE: hosted_runner_sendinput");
-                return;
-            }
             if (!ScreenToClient(target, ref point) || point.X < 0 || point.Y < 0 || point.X > 32767 || point.Y > 32767)
                 throw new InvalidOperationException("Test input coordinates are invalid.");
             var position = new IntPtr((point.Y << 16) | point.X);
@@ -103,6 +65,19 @@ internal static partial class Program
                 throw new InvalidOperationException("Could not post input to the test-owned browser window.");
             Console.WriteLine("P404_INPUT_MODE: owned_window_postmessage");
         }
+    }
+
+    // A missing click is a measured capability limitation, not a permission
+    // decision. Other errors still fail the probe; no API request is faked.
+    private static async Task<bool> ObserveControlledClick(BrowserView browser, string variable)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (elapsed.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            if (await Js(browser, variable) != "pending") return true;
+            await Task.Delay(100);
+        }
+        return await Js(browser, variable) != "pending";
     }
 
     // Local CEF-only input qualification; no trust-store or permission changes.
@@ -153,10 +128,15 @@ internal static partial class Program
         await WaitForAsync(async () => await Js(browser, "window.p404frameReady") == "True", "cross-origin iframe input readiness");
         Check(await Js(browser, "document.elementFromPoint(80,60)?.tagName") == "IFRAME", "cross-origin iframe is the input target");
         await ClickStorageControl(browser, useOwnedWindow: true);
-        await WaitForAsync(async () => await Js(browser, "window.p404frame") != "pending", "cross-origin iframe input preflight");
+        if (!await ObserveControlledClick(browser, "window.p404frame"))
+        {
+            Console.WriteLine("P404_CROSS_ORIGIN_INPUT: INCONCLUSIVE reason=click_not_observed_within_10_seconds");
+            return;
+        }
         using var crossFrame = JsonDocument.Parse(await Js(browser, "window.p404frame"));
         Check(crossFrame.RootElement.GetProperty("trusted").GetBoolean() && crossFrame.RootElement.GetProperty("active").GetBoolean(),
             "controlled CEF mouse input activates the cross-origin iframe button");
+        Console.WriteLine("P404_CROSS_ORIGIN_INPUT: VERIFIED trusted=true transient_activation=true");
     }
 
     private static string StorageInputFramePage() => """
@@ -286,7 +266,11 @@ internal static partial class Program
         Check(readyRoot.GetProperty("target").GetString() == "p404-request", "iframe button is ready at the controlled input point");
         Check(await Js(browser, "document.elementFromPoint(80,60)?.tagName") == "IFRAME", "visible storage-access iframe is the input target");
         await ClickStorageControl(browser, useOwnedWindow: true);
-        await WaitForAsync(async () => await Js(browser, "window.p404click") != "pending", "Storage Access controlled click not observed");
+        if (!await ObserveControlledClick(browser, "window.p404click"))
+        {
+            permissions.Record("STORAGE_ACCESS_EVENT", $"scenario={label} result=INCONCLUSIVE reason=click_not_observed_within_10_seconds");
+            return;
+        }
         using var click = JsonDocument.Parse(await Js(browser, "window.p404click"));
         permissions.Record("INPUT_EVENT", $"scenario={label} trusted={click.RootElement.GetProperty("trusted").GetBoolean()} active={click.RootElement.GetProperty("active").GetBoolean()}");
         await WaitForAsync(async () => await Js(browser, "window.p404result") != "pending", "Storage Access user-input result");

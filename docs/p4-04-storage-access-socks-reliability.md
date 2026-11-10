@@ -41,17 +41,22 @@ tested separately and is not accepted as the offline-proxy error. The held
 fixture is bounded by cancellation when disposed. This observation does not
 explain the intermittent missing offline callback.
 
+After adding that cancellation case, another local concurrent run completed
+both independent processes with exit code 0 and 19 proxy checks each. Both
+observed `ProxyConnectionFailed` for the offline request and `Aborted` for the
+separately held request. One process logged a GPU cache path-length error in
+the deeply nested local test directory; the test completed and this does not
+establish a cause for the earlier SOCKS callback timeout.
+
 ## Storage Access research
 
 The P4-03 real TLS fixture is reused on a disposable hosted runner with its
 temporary test-user CA and exact-root cleanup. The experiment sends mouse
 input to visible test controls. It uses CEF's internal DevTools input client
 for the top-level control. For cross-origin input it validates that the target
-belongs to the test process and its browser window. Local preflight posts
-messages only to that window; the hosted-runner experiment instead moves the
-disposable runner's cursor and calls Windows `SendInput` after checking the
-test window is foreground and still owns the target. This path is guarded to
-declared GitHub-hosted CI. It does not set a JavaScript `userGesture` override
+belongs to the test process and its browser window. The preflight posts
+messages only to that window and does not move the system cursor. It does not
+set a JavaScript `userGesture` override
 for the Storage Access request, open a remote debugging port, or grant a
 permission. The page reports `event.isTrusted` and
 `navigator.userActivation.isActive` at the instant it calls the API. These are
@@ -90,8 +95,20 @@ reproduced the missing DevTools input while a same-origin iframe worked. A
 separate window-message experiment reached the cross-origin button locally;
 the [subsequent hosted preflight](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42862556342)
 also failed to deliver a cross-origin window-message click. It stopped before
-installing test trust. The runner-only `SendInput` path is a later experiment
-and does not by itself establish the real HTTPS result.
+installing test trust. In the [runner-only `SendInput` experiment](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42864070119),
+Windows accepted the input after ownership and foreground checks, but the
+cross-origin click was still not observed. That unsuccessful global-input
+experiment was removed; it did not establish the cause of the missing click.
+
+The fixture now reports a distinct `INCONCLUSIVE` record when the controlled
+cross-origin click is not observed within ten seconds. It does not call the
+Storage Access API on behalf of that missing click. The workflow records a
+warning and a step summary, while continuing the independent HTTPS cookie,
+embedded-session, restart and proxy tests. Unexpected input, parsing, TLS,
+cookie, browser-close and shutdown errors still fail their tests. A completed
+workflow with an inconclusive input marker is not a Storage Access grant or
+denial qualification. If a click is observed, both the trusted-event and
+transient-activation checks are mandatory before reporting a result.
 
 The embedded session is a synthetic server-side cookie requirement, not a real
 identity-provider integration. It reports whether the test cookies arrived

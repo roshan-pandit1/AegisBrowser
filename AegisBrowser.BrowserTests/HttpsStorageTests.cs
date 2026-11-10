@@ -324,6 +324,11 @@ internal static partial class Program
         var result = root.GetProperty("result").GetString();
         var after = root.GetProperty("after").GetString();
         Console.WriteLine($"P403_STORAGE_ACCESS: scenario={label} gesture=false before={before} request={result} after={after}");
+        Check(result != "timeout" && !(result?.StartsWith("error:", StringComparison.Ordinal) ?? true),
+            "Storage Access no-gesture observation completed without an unexpected error");
+        if (label == "enabled" && before == "false" && result != "unsupported")
+            Check(result == "rejected:NotAllowedError" && after == "false",
+                "no-gesture storage request without access was rejected");
     }
 
     private static async Task<StorageObservation> HttpsStorageFrame(BrowserView browser, PrivacyHttpsServer server, string top, string path)
