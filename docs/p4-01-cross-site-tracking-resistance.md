@@ -46,17 +46,24 @@ reach the resource handler.
 The x64 browser filtering harness uses a disposable profile and loopback-only
 HTTP fixture. Its unknown-site scenario creates a fresh `about:blank` browser,
 requests the same listed image with the option off and on, checks the server's
-arrival count and checks that the inspector still reports Unknown. Existing
-scenarios check known first-party and third-party resources, redirects, site
-exceptions and pause/resume. The controlled measurement is specific to this
-fixture and is not a real-world tracking or anonymity score. See the exact
-final-head CI run for the observed counts and exit status.
+arrival count and checks that the inspector still reports Unknown. In [Windows
+PR run 42787868248](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42787868248)
+at `7380c6e078157fd54cff99ef7e1ba398e3802432`, the server observed **1**
+request with the option off and **0** with it on; the filter reported the latter
+blocked and Unknown. The same run passed 23 filtering checks, including known
+first-party and third-party resources, redirects, site exceptions and
+pause/resume. This small controlled measurement is not a real-world tracking
+or anonymity score.
 
 Core tests cover default compatibility, known first-party behavior, list and
 domain exceptions, Custom list opt-in, unknown document-domain restrictions,
 classification and profile settings persistence. The browser restart test
-also checks that the new setting persists. Broader authentication-provider,
-permission, storage-clearing and network-leak acceptance remain separate.
+also checks that the new setting persists. That PR run passed 69 privacy checks,
+the browser settings restart, controlled cross-profile cookie/localStorage
+isolation, a synthetic OAuth-style popup/redirect/postMessage case, untrusted
+TLS rejection and concurrent proxy probes. These are scoped fixture results.
+Broader authentication-provider, permission, storage-clearing and network-leak
+acceptance remain separate.
 
 The baseline push [run 42783182924](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42783182924)
 timed out waiting for the controlled SOCKS-offline load error in concurrent
