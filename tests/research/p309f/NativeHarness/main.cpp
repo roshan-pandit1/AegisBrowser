@@ -1,6 +1,7 @@
 // Isolated research only. This DLL is loaded by the matching CEF bootstrapc.
 // It never supplies a no-sandbox fallback and does not touch browser profiles.
 #include <windows.h>
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -11,7 +12,9 @@
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
+#include "include/cef_command_line.h"
 #include "include/cef_frame.h"
+#include "include/cef_request_handler.h"
 #include "include/cef_sandbox_win.h"
 #include "include/cef_version_info.h"
 #include "include/cef_version.h"
@@ -39,16 +42,18 @@ bool IsFixtureFrame(CefRefPtr<CefFrame> frame) {
   return p309g::IsFixtureUrl(frame->GetURL().ToString());
 }
 
-class Client final : public CefClient, public CefLifeSpanHandler, public CefLoadHandler {
+class Client final : public CefClient, public CefLifeSpanHandler, public CefLoadHandler,
+                     public CefRequestHandler {
  public:
   explicit Client(State* state) : state_(state) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+  CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
   // This baseline uses a single static fixture with no popup behavior. Reject
   // any unexpected popup and record the lifetime as uncertain; this policy
   // belongs only to this standalone test, not to AegisBrowser.
   bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
-                     const CefString&, const CefString&, WindowOpenDisposition,
+                     const CefString&, const CefString&, CefLifeSpanHandler::WindowOpenDisposition,
                      bool, const CefPopupFeatures&, CefWindowInfo&,
                      CefRefPtr<CefClient>&, CefBrowserSettings&,
                      CefRefPtr<CefDictionaryValue>&, bool*) override {
@@ -112,11 +117,19 @@ class Client final : public CefClient, public CefLifeSpanHandler, public CefLoad
     browser->GetHost()->CloseBrowser(false);
   }
   void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                   ErrorCode error, const CefString&, const CefString&) override {
+                   ErrorCode error, const CefString&, const CefString& failed_url) override {
     if (!frame->IsMain() || browser->IsPopup() || state_->close_started) return;
     // CEF can report a cancelled navigation while another load is pending.
     // A cancellation alone is neither fixture success nor native closure.
     if (error == ERR_ABORTED) {
+      if (p309g::IsFixtureAbort(true, failed_url.ToString())) {
+        state_->failed = true;
+        state_->close_started = true;
+        std::puts("EVENT: FIXTURE_NAVIGATION_ABORTED");
+        std::puts("EVENT: CLOSE_REQUESTED_AFTER_LOAD_ERROR");
+        browser->GetHost()->CloseBrowser(false);
+        return;
+      }
       std::puts("EVENT: MAIN_FRAME_NAVIGATION_ABORTED");
       return;
     }
@@ -125,6 +138,20 @@ class Client final : public CefClient, public CefLifeSpanHandler, public CefLoad
     std::printf("EVENT: MAIN_FRAME_LOAD_ERROR code=%d\n", static_cast<int>(error));
     std::puts("EVENT: CLOSE_REQUESTED_AFTER_LOAD_ERROR");
     browser->GetHost()->CloseBrowser(false);
+  }
+  void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+                                 TerminationStatus status, int error_code,
+                                 const CefString&) override {
+    // This callback is an observation, not proof of the process role, token,
+    // or cause of termination. Do not log CEF's free-form error string.
+    std::printf("EVENT: RENDERER_TERMINATED status=%d code=%d\n",
+                static_cast<int>(status), error_code);
+    state_->failed = true;
+    if (!state_->close_started && !state_->closed) {
+      state_->close_started = true;
+      std::puts("EVENT: CLOSE_REQUESTED_AFTER_LOAD_ERROR");
+      browser->GetHost()->CloseBrowser(false);
+    }
   }
   bool DoClose(CefRefPtr<CefBrowser>) override {
     std::puts("EVENT: DO_CLOSE");
@@ -149,6 +176,24 @@ class App final : public CefApp, public CefBrowserProcessHandler {
  public:
   explicit App(State* state) : state_(state) {}
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+  void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command_line) override {
+    // The initial browser passed the explicit environment opt-in before CEF
+    // was initialized. Propagate test intent if Chromium filters child
+    // environments; the marker is spoofable and is never security evidence.
+    // Every child still passes the sandbox-info and forbidden-switch gates.
+    command_line->AppendSwitch("aegis-p309f-child-opt-in");
+    // CEF may invoke this on UI or IO threads. Bound output without retaining
+    // the command line or emitting its potentially sensitive arguments. This
+    // records a launch request, not a process identity or sandbox proof.
+    if (launch_diagnostics_.fetch_add(1, std::memory_order_relaxed) >= 32) return;
+    const std::string type = command_line->GetSwitchValue("type").ToString();
+    const char* role = type == "renderer" ? "renderer" :
+                       type == "gpu-process" ? "gpu" :
+                       type == "utility" ? "utility" : "other";
+    std::printf("NATIVE_DIAGNOSTIC: CHILD_LAUNCH role=%s no_sandbox=%d disable_gpu_sandbox=%d\n",
+                role, command_line->HasSwitch("no-sandbox") ? 1 : 0,
+                command_line->HasSwitch("disable-gpu-sandbox") ? 1 : 0);
+  }
   void OnContextInitialized() override {
     std::puts("EVENT: CONTEXT_INITIALIZED");
     CefWindowInfo window;
@@ -164,6 +209,7 @@ class App final : public CefApp, public CefBrowserProcessHandler {
   }
  private:
   State* const state_;
+  std::atomic<unsigned int> launch_diagnostics_{0};
   IMPLEMENT_REFCOUNTING(App);
 };
 
@@ -191,7 +237,8 @@ CEF_BOOTSTRAP_EXPORT int RunConsoleMain(int argc, char* argv[], void* sandbox_in
   // still running. No buffered output is treated as a completion signal.
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   std::setvbuf(stderr, nullptr, _IONBF, 0);
-  switch (p309g::EvaluateGate(ExplicitOptIn(), sandbox_info != nullptr, argc, argv)) {
+  const bool opted_in = ExplicitOptIn() || p309g::HasChildOptIn(argc, argv);
+  switch (p309g::EvaluateGate(opted_in, sandbox_info != nullptr, argc, argv)) {
     case p309g::GateFailure::OptIn:
       std::fprintf(stderr, "BLOCKED: OPT_IN role=%s\n", p309g::ProcessRole(argc, argv)); return 10;
     case p309g::GateFailure::MissingSandboxInfo:

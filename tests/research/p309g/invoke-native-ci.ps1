@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ClientPath)
+param(
+    [Parameter(Mandatory)][string]$ClientPath,
+    [switch]$PrepareOnly,
+    [string]$PreparedRoot
+)
 
 # Hosted-runner diagnostic only. The fixed archive pin was calculated from an
 # official CEF distribution that matched its published index checksum; this
@@ -18,24 +22,39 @@ $runner = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\','/') + '\'
 $client = [IO.Path]::GetFullPath($ClientPath)
 if (-not $client.StartsWith($runner, [StringComparison]::OrdinalIgnoreCase) -or
     -not (Test-Path -LiteralPath $client -PathType Leaf)) { throw 'Client must be a runner-owned isolated build output.' }
-$root = Join-Path $runner ('aegis-p309g-run-' + [Guid]::NewGuid().ToString('N'))
+if ($PrepareOnly -and $PreparedRoot) { throw 'PrepareOnly and PreparedRoot are mutually exclusive.' }
+$root = if ($PreparedRoot) { [IO.Path]::GetFullPath($PreparedRoot) } else { Join-Path $runner ('aegis-p309h-run-' + [Guid]::NewGuid().ToString('N')) }
+if (-not $root.StartsWith($runner, [StringComparison]::OrdinalIgnoreCase)) { throw 'Research root must be under runner temporary directory.' }
 $bundle = Join-Path $root 'bundle'
 $unpack = Join-Path $root 'unpack'
 $archive = Join-Path $root 'cef.tar.bz2'
-New-Item -ItemType Directory -Path $bundle,$unpack -ErrorAction Stop | Out-Null
+if (-not $PreparedRoot) {
+New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
 Write-Output 'DIAGNOSTIC_STAGE: DOWNLOAD_PINNED_CEF'
+$timer = [Diagnostics.Stopwatch]::StartNew()
 Invoke-WebRequest -Uri $url -OutFile $archive -TimeoutSec 180
+Write-Output "DOWNLOAD_SECONDS: $($timer.Elapsed.TotalSeconds.ToString('F3', [Globalization.CultureInfo]::InvariantCulture))"
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -cne $expectedArchive) { throw 'Pinned CEF archive hash mismatch.' }
 Write-Output 'DIAGNOSTIC_STAGE: ARCHIVE_HASH_VERIFIED'
 
-# This exact SHA-256-pinned archive was separately audited: all 1,001 entries
-# stayed under the expected root and its tar listing contained no links. Do
-# not extract any other archive, even a newer CEF version. Two additional
-# full bzip2 scans timed out on hosted Windows; extract the two required pinned
-# directories in one pass into a fresh runner-owned root instead.
+# Python's streaming reader validates paths and types while extracting in one
+# sequential pass. The exact archive pin is checked again by the extractor.
+# CI provides the hard timeout; partial output is never reused as a prepared root.
 Write-Output 'DIAGNOSTIC_STAGE: EXTRACT_PINNED_CEF'
-& tar.exe -xf $archive -C $unpack "$name/Release" "$name/Resources"
-if ($LASTEXITCODE -ne 0) { throw 'CEF archive extraction failed.' }
+& python (Join-Path $PSScriptRoot 'prepare_cef_archive.py') $archive $unpack
+if ($LASTEXITCODE -ne 0) { throw 'CEF archive inspection or extraction failed.' }
+if ($PrepareOnly) {
+    if (-not $env:GITHUB_OUTPUT) { throw 'GITHUB_OUTPUT required for separated preparation.' }
+    "prepared_root=$root" >> $env:GITHUB_OUTPUT
+    Write-Output 'DIAGNOSTIC_STAGE: PREPARATION_COMPLETE'
+    exit 0
+}
+}
+foreach ($path in @($root, $unpack)) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Unsafe prepared research directory.' }
+}
+New-Item -ItemType Directory -Path $bundle -ErrorAction Stop | Out-Null
 $distribution = Join-Path $unpack $name
 $release = Join-Path $distribution 'Release'
 $resources = Join-Path $distribution 'Resources'
@@ -45,7 +64,16 @@ function Copy-BundleFile([IO.FileInfo]$File, [string]$Destination) {
     if (($File.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or (Test-Path -LiteralPath $Destination)) { throw 'Unsafe or duplicate bundle input.' }
     Copy-Item -LiteralPath $File.FullName -Destination $Destination -ErrorAction Stop
 }
-foreach ($file in @(Get-ChildItem -LiteralPath $release -File -Force)) { Copy-BundleFile $file (Join-Path $bundle $file.Name) }
+$releaseFiles = @('bootstrap.exe','bootstrapc.exe','chrome_elf.dll','d3dcompiler_47.dll',
+    'dxcompiler.dll','dxil.dll','libcef.dll','libcef.lib','v8_context_snapshot.bin',
+    'vk_swiftshader.dll','vk_swiftshader_icd.json','vulkan-1.dll')
+$releaseItems = @(Get-ChildItem -LiteralPath $release -Force)
+if ($releaseItems.Count -ne $releaseFiles.Count) { throw 'Unexpected CEF release file count.' }
+foreach ($file in $releaseItems) {
+    if ($file.PSIsContainer -or $releaseFiles -cnotcontains $file.Name) { throw 'Unknown CEF release entry.' }
+    if ($file.Name -cin @('bootstrap.exe','libcef.lib')) { continue }
+    Copy-BundleFile $file (Join-Path $bundle $file.Name)
+}
 foreach ($item in @(Get-ChildItem -LiteralPath $resources -Force)) {
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Resource link rejected.' }
     if ($item.PSIsContainer) {
@@ -113,7 +141,7 @@ else { Write-Output "NATIVE_EXIT_CODE: $($record.result.NativeExitCode)" }
 Write-Output "PARENT_TERMINATION_REQUESTED: $($record.result.ParentTerminationRequested)"
 Write-Output "OUTPUT_COMPLETE: $($record.result.OutputComplete)"
 Write-Output "SUPERVISED_RESULT: $($correlated.Disposition) ($($correlated.Reason))"
-foreach ($line in @(($record.result.Stdout.Text + "`n" + $record.result.Stderr.Text) -split "`r?`n" | Where-Object { $_ -match '^(EVENT:|BLOCKED:|CEF_|SANDBOX_|FIXTURE_|OWNER_)' } | Select-Object -First 100)) { Write-Output $line }
+foreach ($line in @(($record.result.Stdout.Text + "`n" + $record.result.Stderr.Text) -split "`r?`n" | Where-Object { $_ -match '^(EVENT:|NATIVE_DIAGNOSTIC:|BLOCKED:|CEF_|SANDBOX_|FIXTURE_|OWNER_)' } | Select-Object -First 100)) { Write-Output $line }
 Write-Output 'RENDERER_TOKEN_EVIDENCE: NOT_OBSERVED'
 Write-Output 'SUBPROCESS_CLEANUP: INCONCLUSIVE'
 Write-Output 'SANDBOX_ENFORCEMENT: INCONCLUSIVE'
