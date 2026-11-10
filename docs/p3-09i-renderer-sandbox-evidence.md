@@ -106,6 +106,15 @@ renderer role or a complete policy/cleanup verdict. The pipe still reported
 access denied. The record is at
 `%TEMP%\aegis-p309i-pid-bundle-80e1bc68c9764bcd858b2267c5c906ae\supervisor-native-i-output.jsonl`.
 
+On hosted Windows Server 2022 x64, [research run 42746046714](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42746046714)
+at `cf9a2a825ab950715ed2c36eb1f0aa8eaa55e21d` reported fixture completion,
+normal close and parent exit 0. The CEF client claimed candidate PID 776; the
+observer recorded a live direct-child token with integrity RID 0, one
+restricting SID, zero privileges, job membership and Win32k system-call
+disablement, then observed candidate exit 0. The pipe open failed with access
+denied. Role, sandbox enforcement and full descendant accounting remained
+inconclusive. This is one hosted execution, not a general security proof.
+
 ## Security boundary
 
 This research does not alter production CefSharp, profiles, network routing,
