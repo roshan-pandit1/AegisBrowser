@@ -253,6 +253,8 @@ internal static partial class Program
             "localhost and loopback IP are different test sites");
         await LoadReady(browser, server.Third + "seed");
         var firstParty = await Js(browser, "document.cookie.includes('p402net=1')");
+        Check(await Js(browser, "document.cookie.includes('p402lax=1') && document.cookie.includes('p402strict=1')") == "True",
+            "first-party SameSite=Lax and SameSite=Strict test cookies were set");
         server.Reset();
         await LoadReady(browser, server.Top);
         await Js(browser, """
