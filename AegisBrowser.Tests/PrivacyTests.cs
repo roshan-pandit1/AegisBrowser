@@ -41,6 +41,36 @@ internal static class PrivacyTests
         Check(!strict.Evaluate(cdn with { Url = "https://cdn.example.com/a.js" }).Blocked, "Strict permits first party");
         Check(!strict.Evaluate(cdn with { MainFrame = true }).Blocked, "Strict permits top-level OAuth navigation");
         Check(!strict.Evaluate(cdn with { TopUrl = "about:blank" }).Blocked, "Strict unknown site fail open");
+        var unknownTracker = tracking with { TopUrl = "about:blank" };
+        Check(!standard.Evaluate(unknownTracker).Blocked && standard.Evaluate(unknownTracker).ThirdParty is null,
+            "unknown site remains allowed by default and is not classified third party");
+        var cautious = new RequestFilter(config with { ApplyThirdPartyRulesWhenSiteUnknown = true });
+        Check(cautious.Evaluate(unknownTracker).Blocked && cautious.Evaluate(unknownTracker).ThirdParty is null,
+            "opt-in applies listed third-party rule without relabeling unknown site");
+        Check(!cautious.Evaluate(tracking with { TopUrl = "https://google-analytics.com" }).Blocked,
+            "opt-in preserves known first-party behavior");
+        Check(!cautious.Evaluate(cdn with { TopUrl = null }).Blocked,
+            "opt-in does not blanket-block unlisted unknown-context resources");
+        Check(!cautious.Evaluate(unknownTracker with { MainFrame = true }).Blocked,
+            "opt-in preserves top-level navigation");
+        var unknownException = new RequestFilter(config with { ApplyThirdPartyRulesWhenSiteUnknown = true,
+            FilterList = "||google-analytics.com^$third-party\n@@||google-analytics.com^$third-party" });
+        Check(!unknownException.Evaluate(unknownTracker).Blocked, "unknown-context list exception retains precedence");
+        Check(!new RequestFilter(config with { ApplyThirdPartyRulesWhenSiteUnknown = true,
+            AllowedDomains = ["google-analytics.com"] }).Evaluate(unknownTracker).Blocked,
+            "unknown-context resource allow retains precedence");
+        Check(!new RequestFilter(config with { Mode = PrivacyMode.Strict, ApplyThirdPartyRulesWhenSiteUnknown = true }).Evaluate(cdn with { TopUrl = null }).Blocked,
+            "Strict fallback remains fail-open for unlisted unknown-context resources");
+        Check(!new RequestFilter(config with { Mode = PrivacyMode.Custom, ApplyThirdPartyRulesWhenSiteUnknown = true }).Evaluate(unknownTracker).Blocked,
+            "Custom mode does not activate a disabled tracking list");
+        Check(new RequestFilter(config with { Mode = PrivacyMode.Custom, UseListsInCustom = true, ApplyThirdPartyRulesWhenSiteUnknown = true }).Evaluate(unknownTracker).Blocked,
+            "Custom mode applies enabled third-party list rules in unknown context");
+        Check(!new RequestFilter(config with { ApplyThirdPartyRulesWhenSiteUnknown = true,
+            FilterList = "||google-analytics.com^$third-party,domain=example.com" }).Evaluate(unknownTracker).Blocked,
+            "unknown site cannot satisfy a document-domain restriction");
+        var unknownSession = new PrivacySession(config with { ApplyThirdPartyRulesWhenSiteUnknown = true });
+        unknownSession.Evaluate(unknownTracker);
+        Check(unknownSession.Snapshot().Requests.Single().Party == "Unknown", "inspector preserves unknown classification");
         var excepted = new RequestFilter(config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"] });
         Check(!excepted.Evaluate(cdn).Blocked, "site exception overrides Strict");
         Check(excepted.Evaluate(cdn with { TopUrl = "https://example.com.evil.test" }).Blocked, "site exception hostname boundary");
@@ -70,10 +100,10 @@ internal static class PrivacyTests
         {
             var store = new PrivacySettingsStore(folder);
             Check(store.Load().Mode == PrivacyMode.Standard, "missing settings defaults");
-            var saved = config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"], UserRules = "||tracker.test^" };
+            var saved = config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"], UserRules = "||tracker.test^", ApplyThirdPartyRulesWhenSiteUnknown = true };
             store.Save(saved);
             var restored = new PrivacySettingsStore(folder).Load();
-            Check(restored.Mode == PrivacyMode.Strict && restored.SiteExceptions.SequenceEqual(saved.SiteExceptions)
+            Check(restored.Mode == PrivacyMode.Strict && restored.ApplyThirdPartyRulesWhenSiteUnknown && restored.SiteExceptions.SequenceEqual(saved.SiteExceptions)
                 && restored.UserRules == saved.UserRules, "settings round trip");
             Check(new PrivacySettingsStore(Path.Combine(folder, "other")).Load().SiteExceptions.Length == 0, "profile settings isolation");
             var fresh = new PrivacySession(restored);
@@ -83,6 +113,9 @@ internal static class PrivacyTests
             bool rejected = false;
             try { fresh.Apply(config, _ => throw new IOException("simulated disk failure")); } catch (IOException) { rejected = true; }
             Check(rejected && fresh.Configuration.Mode == PrivacyMode.Strict, "failed save preserves active policy");
+            File.WriteAllText(Path.Combine(folder, "privacy.json"), "{\"UserRules\":\"||old.test^\"}");
+            Check(!new PrivacySettingsStore(folder).Load().ApplyThirdPartyRulesWhenSiteUnknown,
+                "older settings keep unknown-site rule behavior disabled");
             File.WriteAllText(Path.Combine(folder, "privacy.json"), "{broken");
             var corrupt = new PrivacySettingsStore(folder);
             rejected = false;

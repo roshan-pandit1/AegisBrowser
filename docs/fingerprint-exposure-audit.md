@@ -26,6 +26,7 @@ The existing separate browser-values report continues to show local diagnostic o
 - Missing API availability does not guarantee fingerprint resistance; browsers can be identified through many combinations of rendering, network, timing, and behavior.
 - The local diagnostics page's Content Security Policy denies external connections, images, frames, and forms. The feature is bundled as an embedded resource; it does not upload data.
 - Strict privacy filtering can block some third-party subresources but does not cover every request path, first-party scripts, DNS, WebRTC networking, or fraud-detection mechanisms.
+- The optional unknown-site rule setting can apply matching third-party network rules when a document site is unavailable. It changes request filtering, not API values or fingerprint exposure.
 - Profiles separate local storage. They do not change public IP address, hardware, network identity or site-specific sign-in state.
 
 ## Verification

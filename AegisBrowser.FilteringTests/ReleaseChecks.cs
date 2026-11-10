@@ -37,17 +37,19 @@ internal static partial class Program
         All(form).OfType<Button>().Single(c => c.Text == "Privacy").PerformClick();
         var settings = form.OwnedForms.OfType<PrivacyForm>().Single();
         var mode = Named<ComboBox>(settings, "PrivacyMode"); var rules = Named<TextBox>(settings, "UserRules");
+        var unknownRules = Named<CheckBox>(settings, "UnknownSiteRules");
         var pause = All(settings).OfType<CheckBox>().Single(c => c.Text.StartsWith("Pause filtering"));
         if (write)
         {
             mode.SelectedItem = "Strict"; rules.Text = "||persisted.test^";
+            unknownRules.Checked = true;
             Named<TextBox>(settings, "SiteExceptions").Text = "example.com";
             settings.ApplyEdits(); pause.Checked = true;
             Check(File.Exists(Path.Combine(root, "privacy.json")), "browser settings saved to profile");
         }
         else
         {
-            Check((string?)mode.SelectedItem == "Strict" && rules.Text == "||persisted.test^"
+            Check((string?)mode.SelectedItem == "Strict" && unknownRules.Checked && rules.Text == "||persisted.test^"
                 && Named<TextBox>(settings, "SiteExceptions").Text == "example.com", "settings survive actual browser process restart");
             Check(!pause.Checked && Named<DataGridView>(settings, "Requests").Rows.Count <= 1, "restart clears pause and previous request history");
         }
@@ -76,6 +78,8 @@ internal static partial class Program
                 File.WriteAllText(file, "||tracker.test^\nexample.com##.ad"); settings.ImportFile(file);
                 Named<ComboBox>(settings, "PrivacyMode").SelectedItem = "Standard"; settings.ApplyEdits();
                 Check(session.RuleCount == 1 && session.Unsupported.Count == 1, "list import and unsupported syntax report");
+                Named<CheckBox>(settings, "UnknownSiteRules").Checked = true; settings.ApplyEdits();
+                Check(session.Configuration.ApplyThirdPartyRulesWhenSiteUnknown, "unknown-site rule control applies to profile session");
                 Named<ComboBox>(settings, "PrivacyMode").SelectedItem = "Custom";
                 Named<TextBox>(settings, "UserRules").Text = "||custom.test^"; settings.ApplyEdits();
                 var request = new NetworkRequest("https://custom.test/a", "https://example.com", "script");

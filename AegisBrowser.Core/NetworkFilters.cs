@@ -132,6 +132,7 @@ public sealed class RequestFilter
     private readonly string[] blocks;
     private readonly string[] allows;
     private readonly PrivacyMode mode;
+    private readonly bool applyThirdPartyRulesWhenSiteUnknown;
     private readonly string[] siteExceptions = [];
     public IReadOnlyList<string> Unsupported => list.Unsupported;
     public int RuleCount => list.RuleCount;
@@ -142,6 +143,7 @@ public sealed class RequestFilter
     {
         if (!Enum.IsDefined(configuration.Mode)) throw new ArgumentException("Unknown privacy mode.");
         mode = configuration.Mode;
+        applyThirdPartyRulesWhenSiteUnknown = configuration.ApplyThirdPartyRulesWhenSiteUnknown;
         siteExceptions = configuration.SiteExceptions.Select(NetworkFilterList.ValidateDomain).ToArray();
     }
     public RequestFilter(NetworkFilterList list, IEnumerable<string>? blockedDomains = null, IEnumerable<string>? allowedDomains = null)
@@ -167,9 +169,13 @@ public sealed class RequestFilter
         if (top is not null && siteExceptions.FirstOrDefault(d => SiteClassifier.DomainMatches(top, d)) is { } site)
             return Result(false, "Site exception: " + site);
         if (allows.FirstOrDefault(d => SiteClassifier.DomainMatches(host, d)) is { } allowed) return Result(false, "Allow domain: " + allowed);
-        if (list.Match(request, third, true) is { } exception) return Result(false, exception);
+        // This option changes only third-party-qualified rule matching. Do not
+        // relabel unknown requests or apply Strict's blanket third-party block.
+        // Apply it to exceptions too so explicit list allows retain precedence.
+        bool? ruleParty = third ?? (applyThirdPartyRulesWhenSiteUnknown ? true : null);
+        if (list.Match(request, ruleParty, true) is { } exception) return Result(false, exception);
         if (blocks.FirstOrDefault(d => SiteClassifier.DomainMatches(host, d)) is { } blocked) return Result(true, "Block domain: " + blocked);
-        if (list.Match(request, third, false) is { } match) return Result(true, match);
+        if (list.Match(request, ruleParty, false) is { } match) return Result(true, match);
         if (mode == PrivacyMode.Strict && third == true) return Result(true, "Strict: third-party request");
         return Result(false, third is null ? "Unknown document site: allowed" : "No matching rule");
     }
