@@ -127,12 +127,16 @@ internal static partial class Program
             var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "certutil.exe"))
             {
                 UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true
+                RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true
             };
             foreach (var argument in arguments) start.ArgumentList.Add(argument);
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the test CA installer.");
             var stdout = process.StandardOutput.ReadToEndAsync();
             var stderr = process.StandardError.ReadToEndAsync();
+            // This child receives only a previously verified, unique test-root
+            // thumbprint when deleting. Some certutil versions prompt on stdin.
+            if (arguments.Contains("-delstore", StringComparer.Ordinal)) process.StandardInput.WriteLine("Y");
+            process.StandardInput.Close();
             _ = RunnerTrustConfirmation.WaitForInstaller(process, certificate);
             if (!process.WaitForExit(5000))
             {
@@ -212,7 +216,9 @@ internal static partial class Program
                 ipv6.Start();
             }
             catch { ipv4.Stop(); throw; }
-            loops = [Accept(ipv4), Accept(ipv6)];
+            // Servers may be created on the WinForms UI thread. Their accept
+            // continuations must not depend on that thread during disposal.
+            loops = [Task.Run(() => Accept(ipv4)), Task.Run(() => Accept(ipv6))];
         }
 
         public HttpsCookieObservation[] Take(string path) =>

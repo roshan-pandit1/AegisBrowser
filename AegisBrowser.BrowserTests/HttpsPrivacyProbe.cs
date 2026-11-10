@@ -38,6 +38,18 @@ internal static partial class Program
             Check(valid, "HTTPS fixture accepts its explicitly trusted test root and matching hostname");
             Check(!wrongHost, "HTTPS fixture rejects a mismatched hostname");
             Check(!untrusted, "HTTPS fixture rejects its untrusted root");
+            var uiIndependent = Task.Run(() =>
+            {
+                var previous = SynchronizationContext.Current;
+                SynchronizationContext.SetSynchronizationContext(new UnpumpedTestContext());
+                try
+                {
+                    using var uiServer = new PrivacyHttpsServer(certificates.Server);
+                    return Task.Run(() => ClientHandshake(uiServer.Port, "localhost", certificates.Root)).GetAwaiter().GetResult();
+                }
+                finally { SynchronizationContext.SetSynchronizationContext(previous); }
+            }).WaitAsync(TimeSpan.FromSeconds(20)).GetAwaiter().GetResult();
+            Check(uiIndependent, "HTTPS server and disposal do not depend on a pumped UI synchronization context");
             if (!string.Equals(Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT"), "github-hosted", StringComparison.OrdinalIgnoreCase))
             {
                 var rejected = false;
@@ -48,6 +60,11 @@ internal static partial class Program
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    private sealed class UnpumpedTestContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state) { }
     }
 
     private static int HttpsPrivacyRemoveRoot(string manifest)
@@ -116,6 +133,7 @@ internal static partial class Program
         PrivacyHttpsServer? server = null;
         var initialized = false;
         var result = 1;
+        var closeIncomplete = false;
         var root = Path.GetFullPath(profileRoot);
         try
         {
@@ -158,6 +176,7 @@ internal static partial class Program
             host.Shown += async (_, _) =>
             {
                 BrowserView? browser = null;
+                var closeAttempted = false;
                 try
                 {
                     if (phase == "https-privacy-read")
@@ -211,13 +230,14 @@ internal static partial class Program
                         await HttpsServiceWorker(browser, server, "enabled", false);
                         await HttpsAuthentication(browser, server, "enabled");
                         await HttpsStorageAccessNoGesture(browser, server);
-                        await RejectFixtureCertificates(host, certificates);
+                        await RejectFixtureCertificates(host, certificates, () => closeIncomplete = true);
                         new PrivacySettingsStore(root).Save(new PrivacyConfiguration { BlockThirdPartyCookies = true });
                         using var manager = context.GetCookieManager(null);
                         using var flush = new Completion();
                         Check(manager.FlushStore(flush), "HTTPS test cookies flushed for restart");
                         await flush.Done.Task.WaitAsync(TimeSpan.FromSeconds(10));
                     }
+                    closeAttempted = true;
                     await CloseWeb(browser); host.Controls.Remove(browser); browser = null;
                     Console.WriteLine("PASS: real HTTPS privacy probe completed");
                     result = 0;
@@ -225,12 +245,14 @@ internal static partial class Program
                 catch (Exception ex) { Console.Error.WriteLine(ex); }
                 finally
                 {
-                    if (browser is { IsDisposed: false, IsBrowserInitialized: true })
+                    if (!closeAttempted && browser is { IsDisposed: false, IsBrowserInitialized: true })
                     {
                         try { await CloseWeb(browser); }
-                        catch (Exception ex) { Console.Error.WriteLine("HTTPS browser close incomplete: " + ex.Message); }
+                        catch (Exception ex) { closeIncomplete = true; Console.Error.WriteLine("HTTPS browser close incomplete: " + ex.Message); }
                     }
-                    host.Close();
+                    else if (browser is { IsDisposed: false }) closeIncomplete = true;
+                    if (!closeIncomplete) host.Close();
+                    else Console.Error.WriteLine("P403_CEF_SHUTDOWN: INCOMPLETE; live host retained for bounded CI timeout");
                 }
             };
             Application.Run(host);
@@ -275,12 +297,12 @@ internal static partial class Program
             "HTTPS server observed expected third-party send and save behavior");
     }
 
-    private static async Task RejectFixtureCertificates(Form host, PrivacyCertificates certificates)
+    private static async Task RejectFixtureCertificates(Form host, PrivacyCertificates certificates, Action onIncompleteClose)
     {
         using var wrong = new PrivacyHttpsServer(certificates.WrongHost);
         using var untrusted = new PrivacyHttpsServer(certificates.Untrusted);
-        using var web = new BrowserView("about:blank") { Dock = DockStyle.Fill, RequestHandler = new SafeRequests(Console.WriteLine) };
-        Observe(web); host.Controls.Add(web); await Ready(web);
+        var web = new BrowserView("about:blank") { Dock = DockStyle.Fill, RequestHandler = new SafeRequests(Console.WriteLine) };
+        Observe(web); host.Controls.Add(web);
         async Task Reject(string url, CefErrorCode expected)
         {
             var failed = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -291,9 +313,18 @@ internal static partial class Program
         }
         try
         {
+            await Ready(web);
             await Reject(wrong.TopA, CefErrorCode.CertCommonNameInvalid);
             await Reject(untrusted.Third, CefErrorCode.CertAuthorityInvalid);
         }
-        finally { await CloseWeb(web); host.Controls.Remove(web); }
+        finally
+        {
+            if (!web.IsBrowserInitialized) onIncompleteClose();
+            else
+            {
+                try { await CloseWeb(web); host.Controls.Remove(web); }
+                catch { onIncompleteClose(); throw; }
+            }
+        }
     }
 }

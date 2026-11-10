@@ -60,15 +60,22 @@ internal static partial class Program
             DisposableRunnerTrust.RequireHostedRunner();
             var stopwatch = Stopwatch.StartNew();
             var sawOwnedDialog = false; var sawSubject = false; var sawThumbprint = false; var sawYes = false;
+            var reportedTitle = false;
             var confirmed = false;
             while (stopwatch.Elapsed < TimeSpan.FromSeconds(20) && !process.HasExited)
             {
                 EnumWindow visit = (window, ignored) =>
                 {
                     _ = GetWindowThreadProcessId(window, out var owner);
-                    if (owner != (uint)process.Id || WindowClass(window) != "#32770"
-                        || WindowText(window) != "Security Warning") return true;
+                    if (owner != (uint)process.Id || WindowClass(window) != "#32770") return true;
                     sawOwnedDialog = true;
+                    var title = WindowText(window);
+                    if (!reportedTitle)
+                    {
+                        Console.WriteLine("P403_TRUST_DIALOG_TITLE: " + title);
+                        reportedTitle = true;
+                    }
+                    if (title != "Security Warning") return true;
                     var text = new StringBuilder(WindowText(window));
                     var yes = IntPtr.Zero;
                     EnumWindow child = (control, ignoredChild) =>

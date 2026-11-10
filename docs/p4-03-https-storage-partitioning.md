@@ -45,6 +45,12 @@ No private key or certificate is checked into the repository. Environment
 checks are an operational guard, not protection against a hostile runner
 administrator.
 
+The pinned [Chromium Windows trust-store implementation](https://raw.githubusercontent.com/chromium/chromium/154.0.8037.98/net/cert/internal/trust_store_win.cc)
+includes current-user roots but does not use current-user TrustedPeople
+certificates for server authentication. Moving the test certificate to that
+store would therefore not be an established equivalent. Machine-wide trust is
+outside this experiment.
+
 ## Measurements and limits
 
 The write/read processes use the same disposable profile and port. The write
@@ -76,9 +82,30 @@ runners could be retired. Certificate removal on those runs was not verified.
 The current cleanup implementation is bounded and reports failure if it cannot
 verify removal.
 
-The fixture also exercises partitioned cookies, IndexedDB, CacheStorage and
-service-worker registration under two top-level sites, a Storage Access API
-request without user activation, and a synthetic HTTPS popup/redirect flow.
-Those cases are not established until real CEF execution reaches them.
-Loopback measurements do not prove behavior for every public HTTPS site or
-network path.
+In [run 42814696839](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42814696839)
+the test installed its exact CA on the disposable runner and reached CEF using
+normal certificate validation. The server observed one cross-site iframe
+request with both ordinary and HttpOnly test cookies in the baseline, and one
+request with neither when the setting was enabled. The response cookie was
+stored in the baseline and absent with protection enabled. Lax and Strict
+cookies were not sent cross-site; first-party access succeeded. Image, script,
+fetch and redirect requests showed the same ordinary/HttpOnly comparison.
+The test also observed rejection of a wrong-host certificate and an untrusted
+certificate by the production CEF request handler.
+
+In that same process, separate Site A and Site B markers were observed for
+partitioned cookies, IndexedDB, CacheStorage and service-worker registration
+and cache use, both with the cookie option off and on. A synthetic HTTPS
+popup/redirect/postMessage flow retained its first-party Lax session cookie in
+both modes. The Storage Access API was present; without transient user
+activation, its request returned `NotAllowedError` and access remained false
+in the enabled case. This does not test the user-gesture or consent path.
+
+That run did not complete: after the invalid-certificate tests it timed out,
+and the bounded cleanup could not verify removal of the temporary user root.
+The process-restart phase did not execute. A test-server disposal deadlock was
+subsequently found: accept-loop continuations had captured the WinForms UI
+thread while disposal blocked that same thread. The accept loops now run on
+the thread pool. Root-removal confirmation remains a separate unresolved
+condition until a later hosted run verifies it. Loopback observations do not
+prove behavior for every public HTTPS site or network path.
