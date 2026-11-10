@@ -17,6 +17,13 @@ inline bool IsFixtureUrl(const std::string& url) {
          url.find(kFixtureMarker, length + 1) != std::string::npos;
 }
 
+// An unrelated preliminary cancellation can be followed by the fixture.
+// Cancellation of the fixture itself is a failed attempt, not a load or a
+// reason to keep a browser alive indefinitely waiting for that attempt.
+inline bool IsFixtureAbort(bool is_aborted, const std::string& failed_url) {
+  return is_aborted && IsFixtureUrl(failed_url);
+}
+
 // Only allowlisted process-type labels enter the diagnostics; raw arguments
 // can contain unrelated data and are intentionally not logged.
 inline const char* SwitchName(const char* arg) {
@@ -39,6 +46,30 @@ inline const char* ProcessRole(int argc, char* const argv[]) {
     return "other";
   }
   return "browser";
+}
+
+// Chromium may launch children with a filtered environment. The opted-in
+// browser copies this test-only marker to its children. It is spoofable and
+// expresses test intent only; it is not process-ownership or sandbox proof.
+// Permit it only for one explicitly named, recognized child role.
+inline bool HasChildOptIn(int argc, char* const argv[]) {
+  unsigned markers = 0, roles = 0;
+  bool recognized = false;
+  for (int i = 0; i < argc; ++i) {
+    const char* name = SwitchName(argv[i]);
+    if (!name) continue;
+    if (std::strcmp(name, "aegis-p309f-child-opt-in") == 0) ++markers;
+    if (_stricmp(name, "type") == 0 || _strnicmp(name, "type=", 5) == 0) {
+      ++roles;
+      if (_strnicmp(name, "type=", 5) == 0) {
+        const char* role = name + 5;
+        recognized = _stricmp(role, "renderer") == 0 ||
+                     _stricmp(role, "gpu-process") == 0 ||
+                     _stricmp(role, "utility") == 0;
+      }
+    }
+  }
+  return markers == 1 && roles == 1 && recognized;
 }
 
 enum class GateFailure { None, OptIn, MissingSandboxInfo, NoSandbox, DisableGpuSandbox };
