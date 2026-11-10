@@ -48,6 +48,9 @@ The network inspector reports resource-filter decisions, not per-cookie
 decisions. It does not display cookie values or claim that an allowed request
 carried or omitted cookies. See [P4-02 verification](p4-02-third-party-storage-protection.md)
 for the controlled observations and their limitations.
+The [P4-03 HTTPS verification](p4-03-https-storage-partitioning.md) adds
+real loopback TLS observations, including after a browser restart. Those
+measurements do not establish behavior for every website or network path.
 
 Decision order: internal resources and top-level navigation; temporary pause; per-site exception; resource-domain allow; ABP exception; resource-domain block; matching network block; Strict third-party fallback; allow. Site/domain exceptions include subdomains and use hostname-label boundaries. They do not override certificate errors or the browser's unsupported-scheme policy. CNAME cloaking, DNS/IP reputation, WebRTC traffic and DNS requests are outside this engine's scope.
 

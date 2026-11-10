@@ -64,6 +64,40 @@ jobs:
               throw "Cookie probe $phase did not complete CEF shutdown"
             }
           }
+      - name: HTTPS fixture certificate preflight
+        timeout-minutes: 2
+        run: |
+          & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe https-privacy-preflight $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'HTTPS certificate preflight failed' }
+      - name: Prepare disposable HTTPS trust directory
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'A disposable hosted runner is required' }
+          $trustDir = Join-Path $env:RUNNER_TEMP ('aegis-p403-trust-' + [guid]::NewGuid().ToString('N'))
+          $profileDir = Join-Path $env:RUNNER_TEMP ('aegis-p403-profile-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $trustDir -ErrorAction Stop | Out-Null
+          "P403_TRUST_DIR=$trustDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "P403_PROFILE_DIR=$profileDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Controlled real HTTPS cookie and startup probe
+        timeout-minutes: 5
+        run: |
+          foreach ($phase in @('https-privacy-write', 'https-privacy-read')) {
+            $logFile = Join-Path $env:RUNNER_TEMP ($phase + '.log')
+            & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $env:P403_PROFILE_DIR $env:P403_TRUST_DIR 2>&1 | Tee-Object -FilePath $logFile
+            $code = $LASTEXITCODE
+            $output = Get-Content -LiteralPath $logFile -Raw
+            if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+            if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: real HTTPS privacy probe completed')) {
+              throw "HTTPS privacy probe $phase failed or was incomplete"
+            }
+            if (!(($output -join "`n") -match 'PASS: real HTTPS CEF shutdown completed') -or
+                !(($output -join "`n") -match 'P403_TRUST: temporary user root removed')) {
+              throw "HTTPS privacy probe $phase did not finish shutdown and root removal"
+            }
+          }
+      - name: Remove disposable HTTPS test roots
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: ./tests/acceptance/p403-cleanup-test-ca.ps1 -TrustDirectory $env:P403_TRUST_DIR
       - name: Controlled CEF proxy routing and bypass probe
         timeout-minutes: 3
         run: |

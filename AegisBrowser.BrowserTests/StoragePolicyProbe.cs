@@ -63,6 +63,7 @@ internal static partial class Program
                     Observe(browser);
                     host.Controls.Add(browser);
                     await Ready(browser);
+                    await CompileHttpsFixtureScripts(browser);
                     var initial = await Cef.UIThreadTaskFactory.StartNew(() =>
                         (exists: context.HasPreference(CookieModePreference),
                          writable: context.CanSetPreference(CookieModePreference),
