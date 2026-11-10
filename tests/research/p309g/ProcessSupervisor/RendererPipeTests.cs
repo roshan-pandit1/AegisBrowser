@@ -19,6 +19,17 @@ internal static class RendererPipeTests
         count++;
         Console.WriteLine("PASS: " + name);
     }
+    private static Process StartControlled(string mode, params string[] args)
+    {
+        var start = global::SelfTest.HelperStartInfo(mode, args);
+        start.RedirectStandardInput = true;
+        return Process.Start(start) ?? throw new InvalidOperationException("CHILD_START_FAILED");
+    }
+    private static void Release(Process child)
+    {
+        child.StandardInput.WriteLine("RELEASE");
+        child.StandardInput.Close();
+    }
     internal static async Task<int> Run()
     {
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("NOT_RUN: Windows required"); return 2; }
@@ -32,8 +43,7 @@ internal static class RendererPipeTests
             using (var observer = RendererPipeObserver.Create())
             {
                 observer.Start(identity, self.SafeHandle);
-                using var child = Process.Start(global::SelfTest.HelperStartInfo("renderer-pipe", observer.FullName))
-                    ?? throw new InvalidOperationException("CHILD_START_FAILED");
+                using var child = StartControlled("renderer-pipe", observer.FullName);
                 var evidence = await observer.WaitForEvidenceAsync();
                 Check(evidence.Status == "OBSERVED", "owned direct-child token snapshot observed: " + evidence.Reason);
                 Check(evidence.CandidatePid == child.Id && evidence.CandidateCreationFileTimeUtc > created,
@@ -47,16 +57,17 @@ internal static class RendererPipeTests
                 Check(liveResult.CandidateExit == "STILL_RUNNING" && liveResult.CandidateExitCode == null,
                     "live retained candidate is not reported exited");
                 Check(observer.CandidateHandleClosedForTest, "live candidate handle is closed after observation finishes");
+                Release(child);
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Check(child.ExitCode == 0, "owned helper exited normally");
             }
             using (var observer = RendererPipeObserver.Create())
             {
                 observer.Start(identity, self.SafeHandle);
-                using var child = Process.Start(global::SelfTest.HelperStartInfo("renderer-pipe", observer.FullName))
-                    ?? throw new InvalidOperationException("CHILD_START_FAILED");
+                using var child = StartControlled("renderer-pipe", observer.FullName);
                 var evidence = await observer.WaitForEvidenceAsync();
                 Check(evidence.Status == "OBSERVED", "candidate is accepted before exit observation");
+                Release(child);
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 var exitedResult = await observer.FinishAsync();
                 Check(exitedResult.CandidateExit == "EXITED" && exitedResult.CandidateExitCode == 0,
@@ -68,28 +79,28 @@ internal static class RendererPipeTests
             using (var observer = RendererPipeObserver.Create())
             {
                 observer.Start(identity, self.SafeHandle);
-                using var child = Process.Start(global::SelfTest.HelperStartInfo("renderer-pipe-bad", observer.FullName))
-                    ?? throw new InvalidOperationException("CHILD_START_FAILED");
+                using var child = StartControlled("renderer-pipe-bad", observer.FullName);
                 var evidence = await observer.WaitForEvidenceAsync();
                 Check(evidence.Status == "INCONCLUSIVE" && evidence.Reason == "CLIENT_FRAME_INVALID" && evidence.Token == null,
                     "malformed claim cannot collect token evidence");
+                Release(child);
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Check(child.ExitCode == 0, "malformed-frame helper exited normally");
             }
             using (var observer = RendererPipeObserver.Create())
-            using (var otherParent = Process.Start(global::SelfTest.HelperStartInfo("timeout"))
-                ?? throw new InvalidOperationException("OTHER_PARENT_START_FAILED"))
+            using (var otherParent = StartControlled("renderer-hold"))
             {
                 if (!GetProcessTimes(otherParent.SafeHandle, out long otherCreated, out _, out _, out _))
                     throw new InvalidOperationException("OTHER_PARENT_CREATION_TIME_UNAVAILABLE");
                 var otherIdentity = new ProcessRunner.Identity(otherParent.Id, otherCreated, image, "SYNTHETIC");
                 observer.Start(otherIdentity, otherParent.SafeHandle);
-                using var child = Process.Start(global::SelfTest.HelperStartInfo("renderer-pipe", observer.FullName))
-                    ?? throw new InvalidOperationException("CHILD_START_FAILED");
+                using var child = StartControlled("renderer-pipe", observer.FullName);
                 var evidence = await observer.WaitForEvidenceAsync();
                 Check(evidence.Status == "INCONCLUSIVE" && evidence.Token == null &&
                     evidence.Reason == "PARENT_SNAPSHOT_MISMATCH",
                     "connected sibling is rejected before token collection");
+                Release(child);
+                Release(otherParent);
                 await Task.WhenAll(child.WaitForExitAsync(), otherParent.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(5));
                 Check(child.ExitCode == 0 && otherParent.ExitCode == 0, "owned sibling helpers exited normally");
             }
@@ -103,11 +114,17 @@ internal static class RendererPipeTests
             foreach (string mode in new[] { "renderer-claim-parent", "renderer-claim-duplicate", "renderer-claim-oversized" })
             {
                 using var observer = RendererPipeObserver.Create();
-                var helper = global::SelfTest.HelperStartInfo(mode);
+                string releaseName = @"Local\aegis-p309j-claim-" + Guid.NewGuid().ToString("N");
+                using var release = new EventWaitHandle(false, EventResetMode.ManualReset, releaseName);
+                var helper = global::SelfTest.HelperStartInfo(mode, releaseName);
                 string hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(helper.FileName)));
-                var run = await ProcessRunner.RunAsync(helper.FileName, hash, helper.ArgumentList.ToArray(),
-                    AppContext.BaseDirectory, 10000, true, (id, handle) => observer.Start(id, handle),
+                var runTask = ProcessRunner.RunAsync(helper.FileName, hash, helper.ArgumentList.ToArray(),
+                    AppContext.BaseDirectory, 20000, true, (id, handle) => observer.Start(id, handle),
                     onStdoutLine: observer.AcceptLine);
+                try { await observer.WaitForClaimEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(12)); }
+                catch { release.Set(); await runTask; throw; }
+                finally { release.Set(); }
+                var run = await runTask;
                 var claim = await observer.FinishAsync();
                 Check(run.ProcessExit == "NORMAL" && run.OutputComplete, mode + " helper completed with bounded output");
                 if (mode == "renderer-claim-parent")

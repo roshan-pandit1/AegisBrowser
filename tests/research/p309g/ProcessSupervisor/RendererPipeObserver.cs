@@ -19,7 +19,8 @@ internal sealed class RendererPipeObserver : IDisposable
         long? CandidateCreationFileTimeUtc, string RoleEvidence, TokenObservation? Token,
         string RendererIdentity = "INCONCLUSIVE", string SandboxEnforcement = "INCONCLUSIVE",
         string SubprocessAccounting = "INCONCLUSIVE", string SubprocessCleanup = "INCONCLUSIVE",
-        string CandidateExit = "NOT_OBSERVED", uint? CandidateExitCode = null);
+        string CandidateExit = "NOT_OBSERVED", uint? CandidateExitCode = null,
+        P309j.PipeDaclProbe.Result? PipeDaclDiagnostic = null);
 
     private const string Prefix = @"\\.\pipe\aegis-p309i-";
     private const string PidPrefix = "NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=";
@@ -77,6 +78,7 @@ internal sealed class RendererPipeObserver : IDisposable
     private ProcessRunner.Identity? sourceParent;
     private SafeProcessHandle? sourceParentHandle;
     private Task<Evidence>? claimTask;
+    private readonly TaskCompletionSource<Evidence> testClaimObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task<Evidence>? task;
     internal string FullName { get; }
 
@@ -146,7 +148,19 @@ internal sealed class RendererPipeObserver : IDisposable
         var parent = sourceParent;
         var handle = sourceParentHandle;
         uint pid = claimPid;
-        claimTask = Task.Run(() => ObservePid(pid, parent, handle, "CLIENT_PID_CLAIM"));
+        claimTask = Task.Run(() => {
+            try
+            {
+                var result = ObservePid(pid, parent, handle, "CLIENT_PID_CLAIM");
+                testClaimObserved.TrySetResult(result);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                testClaimObserved.TrySetException(ex);
+                throw;
+            }
+        });
     }
 
     private static bool SnapshotShowsParent(uint pid, uint parentPid)
@@ -227,6 +241,10 @@ internal sealed class RendererPipeObserver : IDisposable
                 var result = OwnedProcessLineage.Observe(parentHandle, parentId, candidate, childId);
                 if (result.Status != "OBSERVED" || result.Token?.Status != "OBSERVED")
                     return Failure("LINEAGE_OR_TOKEN_" + result.Reason);
+                // Comparison of the current pipe DACL against a copied primary
+                // token only. It cannot determine why the earlier renderer
+                // CreateFile failed, its effective thread token, MIC or broker.
+                var daclDiagnostic = P309j.PipeDaclProbe.Check(pipe.SafePipeHandle, candidate);
                 lock (candidateLock)
                 {
                     if (disposed) return Failure("OBSERVER_DISPOSED");
@@ -234,7 +252,7 @@ internal sealed class RendererPipeObserver : IDisposable
                     retained = true;
                 }
                 return new Evidence("OBSERVED", "LIVE_DIRECT_CHILD_TOKEN_AND_CLAIM", pid, created,
-                    channel, result.Token);
+                    channel, result.Token, PipeDaclDiagnostic: daclDiagnostic);
             }
             finally { if (!retained) candidate.Dispose(); }
         }
@@ -281,6 +299,10 @@ internal sealed class RendererPipeObserver : IDisposable
     // Used only by the owned-process test; production waits alongside the
     // normal CEF lifecycle and cancels at parent exit.
     internal Task<Evidence> WaitForEvidenceAsync() => task ?? Task.FromResult(Failure("PARENT_IDENTITY_UNAVAILABLE"));
+
+    // Tests coordinate an owned helper's release after its bounded claim
+    // observation. Production never awaits this synthetic barrier.
+    internal Task<Evidence> WaitForClaimEvidenceAsync() => testClaimObserved.Task;
 
     internal bool CandidateHandleClosedForTest
     { get { lock (candidateLock) return acceptedCandidate?.IsClosed == true; } }

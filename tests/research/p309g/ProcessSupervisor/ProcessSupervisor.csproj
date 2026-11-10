@@ -9,5 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="../../p309h/OwnedProcessLineage/OwnedProcessLineage.csproj" />
     <ProjectReference Include="../../p309i/PolicyEvidence/PolicyEvidence.csproj" />
+    <ProjectReference Include="../../p309j/PipeDaclProbe/PipeDaclProbe.csproj" />
+    <ProjectReference Include="../../p309j/PassiveProcessTracker/PassiveProcessTracker.csproj" />
   </ItemGroup>
 </Project>

@@ -121,11 +121,17 @@ $decoded = @($output | ForEach-Object {
     try { $_.ToString() | ConvertFrom-Json -ErrorAction Stop }
     catch { throw 'Supervisor returned malformed or unexpected output.' }
 })
-if (@($decoded | Where-Object { $_.kind -notin @('PROCESS_IDENTITY','PROCESS_RESULT','RENDERER_OBSERVATION') }).Count -ne 0) { throw 'Supervisor returned an unknown record kind.' }
+if (@($decoded | Where-Object { $_.kind -notin @('PROCESS_IDENTITY','PROCESS_RESULT','RENDERER_OBSERVATION','PROCESS_DISCOVERY') }).Count -ne 0) { throw 'Supervisor returned an unknown record kind.' }
 $records = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_RESULT' })
 $identities = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_IDENTITY' })
 $renderers = @($decoded | Where-Object { $_.kind -ceq 'RENDERER_OBSERVATION' })
-if ($records.Count -ne 1 -or $identities.Count -gt 1 -or $renderers.Count -ne 1 -or $supervisorExit -notin @(0,1)) { throw 'Supervisor did not produce an unambiguous diagnostic result.' }
+$discovery = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_DISCOVERY' })
+if ($records.Count -ne 1 -or $identities.Count -gt 1 -or $renderers.Count -ne 1 -or $discovery.Count -ne 1 -or $supervisorExit -notin @(0,1)) { throw 'Supervisor did not produce an unambiguous diagnostic result.' }
+$observedTree = $discovery[0]
+if ($observedTree.SubprocessCleanup -cne 'INCONCLUSIVE' -or ($null -ne $observedTree.report -and
+    ($observedTree.report.Discovery -notin @('PARTIAL','INCONCLUSIVE') -or $observedTree.report.Accounting -notin @('PARTIAL','INCONCLUSIVE') -or
+     $observedTree.report.Cleanup -cne 'INCONCLUSIVE'))) { throw 'Unexpected process-discovery classification.' }
+Write-Output ('PROCESS_DISCOVERY_JSON: ' + ($observedTree | ConvertTo-Json -Depth 8 -Compress))
 $record = $records[0]
 if ($record.OverallQualification -cne 'INCONCLUSIVE' -or $record.result.SubprocessCleanup -cne 'INCONCLUSIVE' -or
     $record.result.SandboxEnforcement -cne 'INCONCLUSIVE' -or $record.result.ProcessExit -notin @('NORMAL','NONZERO','TIMEOUT','UNAVAILABLE')) { throw 'Unexpected supervisor classification.' }
@@ -151,6 +157,14 @@ if ($renderer.RendererIdentity -cne 'INCONCLUSIVE' -or $renderer.SandboxEnforcem
     $policy.SandboxEnforcement -cne 'INCONCLUSIVE') { throw 'Unexpected renderer-evidence classification.' }
 Write-Output "RENDERER_OBSERVATION: $($renderer.Status) ($($renderer.Reason))"
 Write-Output "RENDERER_ROLE_EVIDENCE: $($renderer.RoleEvidence)"
+if ($null -ne $renderer.PipeDaclDiagnostic) {
+    if ($renderer.PipeDaclDiagnostic.ActualOpenCause -cne 'INCONCLUSIVE' -or
+        $renderer.PipeDaclDiagnostic.SandboxCompatibility -cne 'INCONCLUSIVE' -or
+        $renderer.PipeDaclDiagnostic.Status -notin @('DACL_ALLOWED','DACL_DENIED','UNAVAILABLE')) { throw 'Unexpected pipe DACL classification.' }
+    Write-Output "PIPE_DACL_DIAGNOSTIC: $($renderer.PipeDaclDiagnostic.Status) STAGE=$($renderer.PipeDaclDiagnostic.Stage) ERROR=$($renderer.PipeDaclDiagnostic.Error)"
+}
+Write-Output 'PIPE_ACCESS_DENIAL_CAUSE: INCONCLUSIVE'
+Write-Output 'PIPE_SANDBOX_COMPATIBILITY: INCONCLUSIVE'
 Write-Output ('RENDERER_EVIDENCE_JSON: ' + ([ordered]@{ observation = $renderer; policy = $policy } | ConvertTo-Json -Depth 8 -Compress))
 if ($renderer.Status -ceq 'OBSERVED' -and $null -ne $renderer.Token -and $renderer.Token.Status -ceq 'OBSERVED') {
     Write-Output "CANDIDATE_IDENTITY: PID=$($renderer.CandidatePid) CREATION_FILETIME_UTC=$($renderer.CandidateCreationFileTimeUtc)"
