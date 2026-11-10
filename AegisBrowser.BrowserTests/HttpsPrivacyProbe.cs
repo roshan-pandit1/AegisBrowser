@@ -31,6 +31,14 @@ internal static partial class Program
             Check(!Matches(content: subject + " " + new string('0', fingerprint.Length))
                 && !Matches(content: "different subject " + spaced),
                 "test CA confirmation rejects an incorrect subject or fingerprint");
+            var removePrompt = "Do you want to DELETE the following certificate? " + prompt;
+            bool RemovalMatches(uint owner = 17, string title = "Root Certificate Store", string? content = null, bool yes = true) =>
+                RunnerTrustConfirmation.IsExactPrompt(owner, 17, "#32770", title,
+                    content ?? removePrompt, subject, fingerprint, yes, removing: true);
+            Check(RemovalMatches(), "test CA removal confirmation matches the exact certificate");
+            Check(!RemovalMatches(owner: 18) && !RemovalMatches(title: "Security Warning") && !RemovalMatches(yes: false)
+                && !RemovalMatches(content: prompt) && !RemovalMatches(content: "DELETE " + subject + " " + new string('0', fingerprint.Length)),
+                "test CA removal rejects a wrong process, operation, button or fingerprint");
             using var server = new PrivacyHttpsServer(certificates.Server);
             var valid = ClientHandshake(server.Port, "localhost", certificates.Root).GetAwaiter().GetResult();
             var wrongHost = ClientHandshake(server.Port, "wrong.invalid", certificates.Root).GetAwaiter().GetResult();

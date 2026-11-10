@@ -47,15 +47,17 @@ internal static partial class Program
         }
 
         internal static bool IsExactPrompt(uint owner, uint expectedOwner, string windowClass, string title,
-            string content, string subject, string thumbprint, bool yesPresent)
+            string content, string subject, string thumbprint, bool yesPresent, bool removing = false)
         {
-            if (owner != expectedOwner || windowClass != "#32770" || title != "Security Warning" || !yesPresent
+            var expectedTitle = removing ? "Root Certificate Store" : "Security Warning";
+            if (owner != expectedOwner || windowClass != "#32770" || title != expectedTitle || !yesPresent
                 || !content.Contains(subject, StringComparison.Ordinal)) return false;
+            if (removing && !content.Contains("DELETE", StringComparison.OrdinalIgnoreCase)) return false;
             var hex = new string(content.Where(char.IsAsciiHexDigit).ToArray()).ToUpperInvariant();
             return hex.Contains(thumbprint, StringComparison.Ordinal);
         }
 
-        internal static bool WaitForInstaller(Process process, X509Certificate2 certificate)
+        internal static bool WaitForUtility(Process process, X509Certificate2 certificate, bool removing)
         {
             DisposableRunnerTrust.RequireHostedRunner();
             var stopwatch = Stopwatch.StartNew();
@@ -75,7 +77,7 @@ internal static partial class Program
                         Console.WriteLine("P403_TRUST_DIALOG_TITLE: " + title);
                         reportedTitle = true;
                     }
-                    if (title != "Security Warning") return true;
+                    if (title != (removing ? "Root Certificate Store" : "Security Warning")) return true;
                     var text = new StringBuilder(WindowText(window));
                     var yes = IntPtr.Zero;
                     EnumWindow child = (control, ignoredChild) =>
@@ -96,7 +98,7 @@ internal static partial class Program
                     var fingerprintMatches = hex.Contains(certificate.Thumbprint, StringComparison.Ordinal);
                     sawSubject |= subjectMatches; sawThumbprint |= fingerprintMatches; sawYes |= yes != IntPtr.Zero;
                     if (!IsExactPrompt(owner, (uint)process.Id, WindowClass(window), WindowText(window),
-                        content, subject, certificate.Thumbprint, yes != IntPtr.Zero)) return true;
+                        content, subject, certificate.Thumbprint, yes != IntPtr.Zero, removing)) return true;
                     if (SendMessageTimeoutW(yes, ButtonClick, IntPtr.Zero, IntPtr.Zero, AbortIfHung, 3000, out _) != IntPtr.Zero)
                     {
                         confirmed = true;

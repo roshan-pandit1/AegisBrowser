@@ -135,9 +135,10 @@ internal static partial class Program
             var stderr = process.StandardError.ReadToEndAsync();
             // This child receives only a previously verified, unique test-root
             // thumbprint when deleting. Some certutil versions prompt on stdin.
-            if (arguments.Contains("-delstore", StringComparer.Ordinal)) process.StandardInput.WriteLine("Y");
+            var removing = arguments.Contains("-delstore", StringComparer.Ordinal);
+            if (removing) process.StandardInput.WriteLine("Y");
             process.StandardInput.Close();
-            _ = RunnerTrustConfirmation.WaitForInstaller(process, certificate);
+            _ = RunnerTrustConfirmation.WaitForUtility(process, certificate, removing);
             if (!process.WaitForExit(5000))
             {
                 process.Kill(); // Only this test-owned installer; no browser exists yet.

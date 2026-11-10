@@ -35,8 +35,8 @@ terminated and CEF has not started. Chromium
 uses its ordinary certificate validation and the production request handler;
 there is no certificate-error override.
 
-A public-only DER manifest is written before installation. The test removes
-and checks the exact root after CEF shutdown with the same bounded,
+A public-only DER manifest is written before installation. The test attempts to remove
+and check the exact root after CEF shutdown with a bounded,
 process-specific confirmation guard. An independent, time-bounded workflow
 cleanup step runs after failures, validates the manifest name and certificate,
 removes only a unique byte-identical root from the current-user store, and
@@ -106,6 +106,12 @@ and the bounded cleanup could not verify removal of the temporary user root.
 The process-restart phase did not execute. A test-server disposal deadlock was
 subsequently found: accept-loop continuations had captured the WinForms UI
 thread while disposal blocked that same thread. The accept loops now run on
-the thread pool. Root-removal confirmation remains a separate unresolved
-condition until a later hosted run verifies it. Loopback observations do not
+the thread pool. In [run 42816775067](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42816775067)
+CEF shutdown completed, but removal failed: Windows displayed a process-owned
+`Root Certificate Store` confirmation, while the guard recognized only the
+installation dialog. The subsequent implementation checks the operation's
+specific title as well as the process, certificate subject, fingerprint and
+confirmation button. The cleanup result on that run remains unverified.
+Root-removal confirmation remains a separate unresolved condition until a
+later hosted run verifies it. Loopback observations do not
 prove behavior for every public HTTPS site or network path.
