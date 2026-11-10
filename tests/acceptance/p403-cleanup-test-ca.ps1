@@ -28,7 +28,7 @@ $store = [Security.Cryptography.X509Certificates.X509Store]::new(
     [Security.Cryptography.X509Certificates.StoreName]::Root,
     [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
 try {
-    $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite -bor
+    $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly -bor
         [Security.Cryptography.X509Certificates.OpenFlags]::OpenExistingOnly)
     foreach ($file in $files) {
         $nameMatch = [regex]::Match($file.Name, '^p403-ca-([0-9a-f]{32})\.cer$')
@@ -46,7 +46,14 @@ try {
             $matches = @($store.Certificates.Find(
                 [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $certificate.Thumbprint, $false) |
                 Where-Object { [Convert]::ToBase64String($_.RawData) -ceq $raw })
-            foreach ($entry in $matches) { $store.Remove($entry) }
+            if ($matches.Count -gt 1) { throw 'The test root is not unique.' }
+            if ($matches.Count -eq 1) {
+                & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe https-privacy-remove-root $file.FullName
+                if ($LASTEXITCODE -ne 0) { throw 'The exact test root could not be removed.' }
+                $store.Close()
+                $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly -bor
+                    [Security.Cryptography.X509Certificates.OpenFlags]::OpenExistingOnly)
+            }
             $remaining = @($store.Certificates.Find(
                 [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $certificate.Thumbprint, $false) |
                 Where-Object { [Convert]::ToBase64String($_.RawData) -ceq $raw })

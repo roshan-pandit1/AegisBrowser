@@ -50,6 +50,30 @@ internal static partial class Program
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }
 
+    private static int HttpsPrivacyRemoveRoot(string manifest)
+    {
+        try
+        {
+            DisposableRunnerTrust.RequireHostedRunner();
+            var path = Path.GetFullPath(manifest);
+            var runnerTemp = Path.GetFullPath(Environment.GetEnvironmentVariable("RUNNER_TEMP")!);
+            if (!path.StartsWith(Path.TrimEndingDirectorySeparator(runnerTemp) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || (File.GetAttributes(path) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+                throw new InvalidOperationException("The test root manifest is not a regular file under RUNNER_TEMP.");
+            var name = Path.GetFileNameWithoutExtension(path);
+            if (!name.StartsWith("p403-ca-", StringComparison.Ordinal) || !Guid.TryParseExact(name[8..], "N", out _)
+                || Path.GetExtension(path) != ".cer")
+                throw new InvalidOperationException("The test root manifest name is invalid.");
+            using var certificate = new X509Certificate2(path);
+            if (certificate.HasPrivateKey || certificate.Subject != "CN=AegisBrowser P403 Disposable Test CA " + name[8..])
+                throw new InvalidOperationException("The test root manifest does not match its generated identity.");
+            DisposableRunnerTrust.RemoveExact(certificate);
+            Console.WriteLine("P403_TRUST: exact test root absent");
+            return 0;
+        }
+        catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
     private static async Task<bool> ClientHandshake(int port, string host, X509Certificate2? root)
     {
         try

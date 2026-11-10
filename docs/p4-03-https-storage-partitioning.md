@@ -36,9 +36,11 @@ uses its ordinary certificate validation and the production request handler;
 there is no certificate-error override.
 
 A public-only DER manifest is written before installation. The test removes
-and checks the exact root after CEF shutdown. An independent workflow cleanup
-step runs after failures, validates the manifest name and certificate, removes
-only byte-identical roots from the current-user store, and verifies absence.
+and checks the exact root after CEF shutdown with the same bounded,
+process-specific confirmation guard. An independent, time-bounded workflow
+cleanup step runs after failures, validates the manifest name and certificate,
+removes only a unique byte-identical root from the current-user store, and
+verifies absence. A cleanup failure is a failed test, not evidence of removal.
 No private key or certificate is checked into the repository. Environment
 checks are an operational guard, not protection against a hostile runner
 administrator.
@@ -68,6 +70,11 @@ On [run 42808253542](https://github.com/roshan-pandit1/AegisBrowser/actions/runs
 the bounded utility also timed out after 20 seconds and the cleanup step
 verified the test root absent. Exact-dialog confirmation is a subsequent
 experiment and its result must be read from later CI.
+The next two hosted jobs timed out in the probe and then stalled in the
+original unbounded cleanup; their cancellation was requested so the disposable
+runners could be retired. Certificate removal on those runs was not verified.
+The current cleanup implementation is bounded and reports failure if it cannot
+verify removal.
 
 The fixture also exercises partitioned cookies, IndexedDB, CacheStorage and
 service-worker registration under two top-level sites, a Storage Access API

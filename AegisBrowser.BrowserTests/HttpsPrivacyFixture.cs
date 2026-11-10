@@ -110,7 +110,7 @@ internal static partial class Program
                 if (Matches(existing, certificate) != 0) throw new InvalidOperationException("The new test root already exists.");
             }
             Console.WriteLine("P403_STAGE: add_disposable_user_root");
-            AddUsingCertutil(path, certificate);
+            RunCertutil(certificate, "-user", "-f", "-addstore", "Root", path);
             Console.WriteLine("P403_STAGE: disposable_user_root_added");
             installed = true;
             using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
@@ -118,7 +118,7 @@ internal static partial class Program
             if (Matches(store, certificate) != 1) throw new InvalidOperationException("Could not verify test root installation.");
         }
 
-        private static void AddUsingCertutil(string path, X509Certificate2 certificate)
+        private static void RunCertutil(X509Certificate2 certificate, params string[] arguments)
         {
             // The managed Root-store Add call can wait indefinitely on a Windows
             // trust confirmation UI. Run the official user-store utility in a
@@ -129,7 +129,7 @@ internal static partial class Program
                 UseShellExecute = false, CreateNoWindow = true,
                 RedirectStandardOutput = true, RedirectStandardError = true
             };
-            foreach (var argument in new[] { "-user", "-f", "-addstore", "Root", path }) start.ArgumentList.Add(argument);
+            foreach (var argument in arguments) start.ArgumentList.Add(argument);
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the test CA installer.");
             var stdout = process.StandardOutput.ReadToEndAsync();
             var stderr = process.StandardError.ReadToEndAsync();
@@ -138,11 +138,11 @@ internal static partial class Program
             {
                 process.Kill(); // Only this test-owned installer; no browser exists yet.
                 process.WaitForExit();
-                throw new TimeoutException("The disposable user-root installer did not complete.");
+                throw new TimeoutException("The disposable user-root utility did not complete.");
             }
             Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
             if (process.ExitCode != 0)
-                throw new InvalidOperationException("The disposable user-root installer failed with exit code " + process.ExitCode + ".");
+                throw new InvalidOperationException("The disposable user-root utility failed with exit code " + process.ExitCode + ".");
         }
 
         private static int Matches(X509Store store, X509Certificate2 cert) =>
@@ -154,14 +154,29 @@ internal static partial class Program
             try
             {
                 if (!installed) return;
-                using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
-                store.Open(OpenFlags.ReadWrite | OpenFlags.OpenExistingOnly);
-                Console.WriteLine("P403_STAGE: remove_disposable_user_root");
-                store.Remove(certificate);
-                if (Matches(store, certificate) != 0) throw new InvalidOperationException("Test root remains in the user trust store.");
+                RemoveExact(certificate);
                 Console.WriteLine("P403_TRUST: temporary user root removed");
             }
             finally { certificate.Dispose(); }
+        }
+
+        internal static void RemoveExact(X509Certificate2 certificate)
+        {
+            RequireHostedRunner();
+            using (var existing = new X509Store(StoreName.Root, StoreLocation.CurrentUser))
+            {
+                existing.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+                var candidates = existing.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, validOnly: false)
+                    .Cast<X509Certificate2>().ToArray();
+                if (candidates.Length == 0) return;
+                if (candidates.Length != 1 || !candidates[0].RawData.AsSpan().SequenceEqual(certificate.RawData))
+                    throw new InvalidOperationException("Test root identity is not unique.");
+            }
+            Console.WriteLine("P403_STAGE: remove_disposable_user_root");
+            RunCertutil(certificate, "-user", "-f", "-delstore", "Root", certificate.Thumbprint);
+            using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
+            store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+            if (Matches(store, certificate) != 0) throw new InvalidOperationException("Test root remains in the user trust store.");
         }
     }
 

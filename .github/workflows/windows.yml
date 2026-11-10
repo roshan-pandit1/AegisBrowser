@@ -96,6 +96,7 @@ jobs:
           }
       - name: Remove disposable HTTPS test roots
         if: ${{ always() }}
+        timeout-minutes: 2
         run: ./tests/acceptance/p403-cleanup-test-ca.ps1 -TrustDirectory $env:P403_TRUST_DIR
       - name: Controlled CEF proxy routing and bypass probe
         timeout-minutes: 3
