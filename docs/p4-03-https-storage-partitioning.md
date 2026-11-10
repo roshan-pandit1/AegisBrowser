@@ -112,6 +112,58 @@ CEF shutdown completed, but removal failed: Windows displayed a process-owned
 installation dialog. The subsequent implementation checks the operation's
 specific title as well as the process, certificate subject, fingerprint and
 confirmation button. The cleanup result on that run remains unverified.
-Root-removal confirmation remains a separate unresolved condition until a
-later hosted run verifies it. Loopback observations do not
-prove behavior for every public HTTPS site or network path.
+
+## Completed hosted write/read run
+
+The Windows x64 [push run 42817656678](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42817656678)
+tested commit `f2da819f71019ef343a5745299cb11978a5b4216` and passed. Both
+browser processes completed CEF shutdown; each removed its own exact test root.
+The independent cleanup step then verified both roots absent and removed the
+public manifests. The prior failed and canceled runs above do not gain a cleanup
+verification from this later run.
+
+| Controlled HTTPS iframe | Server requests | Ordinary cookie | HttpOnly cookie | Response cookie stored |
+| --- | ---: | --- | --- | --- |
+| Protection off | 1 | present | present | yes |
+| Protection on | 1 | absent | absent | no |
+| Protection on after restart | 1 | absent | absent | no |
+
+Lax and Strict test cookies were absent from the cross-site iframe requests.
+The image, script, fetch and redirect endpoints each received one request and
+showed the same ordinary/HttpOnly cookie comparison. These were allowed network
+requests; cookie suppression did not block the resources. The first controlled
+cross-site request after restart also omitted the persistent ordinary and
+HttpOnly cookies, while a first-party request retained them. Chromium rejected
+both an untrusted certificate and a certificate with the wrong hostname.
+
+CHIPS cookies, IndexedDB values, CacheStorage entries, and service-worker
+registration and cache markers remained separate under the two tested
+top-level sites with the cookie option off, on, and after restart. CHIPS
+remained available when the third-party cookie option was on: that option is
+not a claim that all partitioned cookies are blocked. The synthetic popup,
+redirect and `postMessage` sign-in completed in both modes; its first-party
+session cookie survived restart and was removed by the fixture's sign-out.
+The no-gesture Storage Access API request was rejected, but the user-gesture,
+permission and grant-persistence paths were not tested.
+
+The same run passed the existing two-context cookie/localStorage isolation
+tests, 72 core privacy checks, 26 Chromium filtering checks, the concurrent
+proxy probes, published-browser smoke tests and the remaining Windows workflow
+checks. These are controlled test outcomes, not a review of every real OAuth
+provider or website. A previously observed concurrent SOCKS timeout remains an
+intermittent history, even though this run passed the concurrent probe.
+
+## Acceptance scope and remaining work
+
+The real TLS fixture, certificate rejection, tested cookie suppression,
+first-party compatibility, first controlled startup request and restart
+persistence were observed in this hosted loopback experiment. CHIPS,
+IndexedDB, CacheStorage and service-worker partition observations cover only
+the fixture's shared `localhost` origin under the IPv4 and IPv6 loopback
+top-level sites. These outcomes do not establish partitioning for every public
+site, storage-access grant, browser version or extension. The inherited profile
+isolation test covers its own two CEF request contexts, not every possible
+profile migration or failure mode. The embedded-login, payment, broad OAuth,
+permission-grant and session-expiration scenarios remain unverified. Network
+leak coverage remains incomplete and production readiness requires review;
+the tests do not establish anonymity or complete fingerprint protection.
