@@ -31,6 +31,9 @@ internal static partial class Program
         if (args.Length == 2 && args[0] == "proxy-auth-probe") return ProxyAuthProbe(args[1]);
         if (args.Length == 2 && args[0] is "storage-policy-probe" or "storage-policy-write" or "storage-policy-read")
             return StoragePolicyProbe(args[1], args[0]);
+        if (args.Length == 2 && args[0] == "https-privacy-preflight") return HttpsPrivacyPreflight(args[1]);
+        if (args.Length == 3 && args[0] is "https-privacy-write" or "https-privacy-read")
+            return HttpsPrivacyProbe(args[1], args[2], args[0]);
         if (args.Length != 2 || args[0] is not ("write" or "read")) return 2;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
