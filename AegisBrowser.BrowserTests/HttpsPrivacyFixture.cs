@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -103,14 +104,44 @@ internal static partial class Program
                 var encoded = certificate.Export(X509ContentType.Cert);
                 stream.Write(encoded); stream.Flush(true);
             }
-            using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
-            store.Open(OpenFlags.ReadWrite | OpenFlags.OpenExistingOnly);
-            if (Matches(store, certificate) != 0) throw new InvalidOperationException("The new test root already exists.");
+            using (var existing = new X509Store(StoreName.Root, StoreLocation.CurrentUser))
+            {
+                existing.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+                if (Matches(existing, certificate) != 0) throw new InvalidOperationException("The new test root already exists.");
+            }
             Console.WriteLine("P403_STAGE: add_disposable_user_root");
-            store.Add(certificate);
+            AddUsingCertutil(path);
             Console.WriteLine("P403_STAGE: disposable_user_root_added");
             installed = true;
+            using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
+            store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
             if (Matches(store, certificate) != 1) throw new InvalidOperationException("Could not verify test root installation.");
+        }
+
+        private static void AddUsingCertutil(string path)
+        {
+            // The managed Root-store Add call can wait indefinitely on a Windows
+            // trust confirmation UI. Run the official user-store utility in a
+            // bounded child before starting CEF; the manifest remains available
+            // to the independent cleanup step even if this helper fails.
+            var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "certutil.exe"))
+            {
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            foreach (var argument in new[] { "-user", "-f", "-addstore", "Root", path }) start.ArgumentList.Add(argument);
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the test CA installer.");
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(20000))
+            {
+                process.Kill(); // Only this test-owned installer; no browser exists yet.
+                process.WaitForExit();
+                throw new TimeoutException("The disposable user-root installer did not complete.");
+            }
+            Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException("The disposable user-root installer failed with exit code " + process.ExitCode + ".");
         }
 
         private static int Matches(X509Store store, X509Certificate2 cert) =>
@@ -124,6 +155,7 @@ internal static partial class Program
                 if (!installed) return;
                 using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
                 store.Open(OpenFlags.ReadWrite | OpenFlags.OpenExistingOnly);
+                Console.WriteLine("P403_STAGE: remove_disposable_user_root");
                 store.Remove(certificate);
                 if (Matches(store, certificate) != 0) throw new InvalidOperationException("Test root remains in the user trust store.");
                 Console.WriteLine("P403_TRUST: temporary user root removed");
@@ -133,7 +165,7 @@ internal static partial class Program
     }
 
     private readonly record struct HttpsCookieObservation(bool Normal, bool HttpOnly, bool Lax, bool Strict,
-        bool SetCookie, bool ChipA, bool ChipB);
+        bool SetCookie, bool ChipA, bool ChipB, bool AuthSession);
 
     // Actual TLS and HTTP over loopback sockets. Only booleans for known
     // synthetic cookie markers are retained; raw request headers are dropped.
@@ -207,7 +239,7 @@ internal static partial class Program
                     if (parts.Length < 2 || parts[0] != "GET") return;
                     var path = parts[1].Split('?')[0];
                     var normal = false; var httpOnly = false; var lax = false; var strict = false; var set = false;
-                    var chipA = false; var chipB = false;
+                    var chipA = false; var chipB = false; var authSession = false;
                     for (var i = 0; i < 100; i++)
                     {
                         var header = await reader.ReadLineAsync(timeout.Token);
@@ -220,9 +252,30 @@ internal static partial class Program
                         set = header.Contains("p403embedded=1", StringComparison.Ordinal);
                         chipA = header.Contains("p403chip=A", StringComparison.Ordinal);
                         chipB = header.Contains("p403chip=B", StringComparison.Ordinal);
+                        authSession = header.Contains("p403auth=1", StringComparison.Ordinal);
                     }
-                    observations.GetOrAdd(path, _ => new()).Enqueue(new(normal, httpOnly, lax, strict, set, chipA, chipB));
-                    var body = path.StartsWith("/storage-", StringComparison.Ordinal)
+                    observations.GetOrAdd(path, _ => new()).Enqueue(new(normal, httpOnly, lax, strict, set, chipA, chipB, authSession));
+                    if (path == "/auth-provider")
+                    {
+                        var response = Encoding.ASCII.GetBytes("HTTP/1.1 302 Found\r\nLocation: " + TopA
+                            + "auth-callback\r\nSet-Cookie: p403provider=1; Max-Age=3600; Path=/; SameSite=Lax; Secure; HttpOnly\r\n"
+                            + "Cache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        await stream.WriteAsync(response, timeout.Token);
+                        return;
+                    }
+                    if (path == "/third-redirect")
+                    {
+                        var redirect = Encoding.ASCII.GetBytes("HTTP/1.1 302 Found\r\nLocation: " + Third
+                            + "third-final\r\nCache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        await stream.WriteAsync(redirect, timeout.Token);
+                        return;
+                    }
+                    var body = path == "/auth-callback"
+                        ? "<!doctype html><script>if(window.opener){window.opener.postMessage('p403-oauth-ok','"
+                            + TopA.TrimEnd('/') + "');window.close();}</script>"
+                        : path == "/sw/worker.js" ? ServiceWorkerScript()
+                        : path.StartsWith("/sw/frame-", StringComparison.Ordinal) ? ServiceWorkerPage(path)
+                        : path.StartsWith("/storage-", StringComparison.Ordinal)
                         ? StorageFixturePage(path)
                         : path == "/embedded" || path == "/early-child" || path.StartsWith("/chips-", StringComparison.Ordinal)
                         ? "<!doctype html><script>parent.postMessage('p403:done','*');</script>"
@@ -231,8 +284,13 @@ internal static partial class Program
                             + Third.TrimEnd('/') + "'&&e.data==='p403:done')window.p403early=true;});</script><iframe src='"
                             + Third + "early-child'></iframe>"
                         : "<!doctype html><title>Controlled HTTPS privacy fixture</title>";
-                    var bytes = Encoding.UTF8.GetBytes(body);
-                    var headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n";
+                    if (path == "/third-script") body = "window.p403script=true;";
+                    var bytes = path == "/third-image"
+                        ? Convert.FromBase64String("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
+                        : Encoding.UTF8.GetBytes(body);
+                    var contentType = path == "/third-image" ? "image/gif"
+                        : path is "/third-script" or "/sw/worker.js" ? "application/javascript" : "text/html; charset=utf-8";
+                    var headers = "HTTP/1.1 200 OK\r\nContent-Type: " + contentType + "\r\nCache-Control: no-store\r\nConnection: close\r\n";
                     if (path == "/seed")
                         headers += "Set-Cookie: p403normal=1; Max-Age=3600; Path=/; SameSite=None; Secure\r\n"
                             + "Set-Cookie: p403http=1; Max-Age=3600; Path=/; SameSite=None; Secure; HttpOnly\r\n"
@@ -241,6 +299,10 @@ internal static partial class Program
                             + "Set-Cookie: p403embedded=; Max-Age=0; Path=/; SameSite=None; Secure\r\n";
                     if (path is "/embedded" or "/early-child")
                         headers += "Set-Cookie: p403embedded=1; Max-Age=3600; Path=/; SameSite=None; Secure\r\n";
+                    if (path == "/auth-start")
+                        headers += "Set-Cookie: p403auth=1; Max-Age=3600; Path=/; SameSite=Lax; Secure; HttpOnly\r\n";
+                    if (path == "/auth-signout")
+                        headers += "Set-Cookie: p403auth=; Max-Age=0; Path=/; SameSite=Lax; Secure; HttpOnly\r\n";
                     if (path is "/chips-a" or "/chips-b" or "/chips-clear")
                     {
                         var value = path == "/chips-a" ? "A" : path == "/chips-b" ? "B" : "";

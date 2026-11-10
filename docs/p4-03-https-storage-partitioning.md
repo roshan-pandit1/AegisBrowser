@@ -13,14 +13,19 @@ Its certificate contains SANs for `localhost`, `127.0.0.1` and `::1`.
 The sites are distinct by host, not just port. The test server records only
 booleans for fixed synthetic cookie markers; it does not retain cookie headers.
 
-The process generates a short-lived CA and server keys in memory. The normal
+The process generates a short-lived CA and server keys for the fixture. Windows
+Schannel imports temporary user-key containers for the test server; no key is
+added to a certificate trust store. The normal
 local preflight uses an explicitly scoped .NET custom-root chain and confirms
 that the matching hostname succeeds while an untrusted root and a wrong
 hostname fail. It does not install a root in the user's certificate store.
 The browser test refuses to install a root unless running on a declared
 GitHub-hosted Windows CI runner and the manifest directory is under
 `RUNNER_TEMP`. On that disposable runner it adds only the new public CA
-certificate to the current test user's Root store before CEF starts. Chromium
+certificate to the current test user's Root store before CEF starts. The
+official Windows `certutil` user-store command runs in a bounded child
+process; if it stalls, only that test-owned installer is terminated and CEF
+has not started. Chromium
 uses its ordinary certificate validation and the production request handler;
 there is no certificate-error override.
 
@@ -32,7 +37,7 @@ No private key or certificate is checked into the repository. Environment
 checks are an operational guard, not protection against a hostile runner
 administrator.
 
-## Planned measurements and limits
+## Measurements and limits
 
 The write/read processes use the same disposable profile and port. The write
 process compares a baseline mode with the production cookie-protection mode;
@@ -44,7 +49,19 @@ with the wrong hostname and a certificate from an untrusted root.
 
 Hosted execution and complete results must be taken from the PR's exact-head
 CI checks. A passing local certificate preflight alone does not establish CEF
-HTTPS behavior. CHIPS, Storage Access API, IndexedDB, CacheStorage, service
-workers and broader authentication compatibility are not yet established by
-this initial fixture. Loopback measurements do not prove behavior for every
-public HTTPS site or network path.
+HTTPS behavior. The first hosted attempts
+([run 42804594596](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42804594596)
+and [run 42806422459](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42806422459))
+timed out before CEF started. Streamed diagnostics on the second run identified
+the stall at the managed current-user Root-store Add call; independent cleanup
+reported the exact temporary root absent. Windows documents a confirmation
+dialog for that operation in [dotnet/runtime #24160](https://github.com/dotnet/runtime/issues/24160).
+The dialog itself was not observed on that runner, so it is a plausible cause,
+not an established observation. The bounded utility is a subsequent experiment.
+
+The fixture also exercises partitioned cookies, IndexedDB, CacheStorage and
+service-worker registration under two top-level sites, a Storage Access API
+request without user activation, and a synthetic HTTPS popup/redirect flow.
+Those cases are not established until real CEF execution reaches them.
+Loopback measurements do not prove behavior for every public HTTPS site or
+network path.

@@ -145,8 +145,11 @@ internal static partial class Program
                         Check(first.Length == 1 && first[0].Normal && first[0].HttpOnly,
                             "first-party normal and HttpOnly HTTPS cookies survived restart");
                         await HttpsScenario(browser, server, false, "restart-enabled");
+                        await HttpsSubresources(browser, server, false, "restart-enabled");
                         await HttpsChips(browser, server, "restart-enabled", true);
                         await HttpsStorage(browser, server, "restart-enabled", true);
+                        await HttpsServiceWorker(browser, server, "restart-enabled", true);
+                        await HttpsAuthRestart(browser, server);
                     }
                     else
                     {
@@ -157,13 +160,19 @@ internal static partial class Program
                         });
                         Check(baseline, "baseline cookie preference selected");
                         await HttpsScenario(browser, server, true, "baseline");
+                        await HttpsSubresources(browser, server, true, "baseline");
                         await HttpsChips(browser, server, "baseline", false);
                         await HttpsStorage(browser, server, "baseline", false);
+                        await HttpsServiceWorker(browser, server, "baseline", false);
+                        await HttpsAuthentication(browser, server, "baseline");
                         var applied = await Cef.UIThreadTaskFactory.StartNew(() => ThirdPartyCookiePolicy.ApplyOnUiThread(context, true));
                         Check(applied.Succeeded, "production cookie preference applied and read back");
                         await HttpsScenario(browser, server, false, "enabled");
+                        await HttpsSubresources(browser, server, false, "enabled");
                         await HttpsChips(browser, server, "enabled", false);
                         await HttpsStorage(browser, server, "enabled", false);
+                        await HttpsServiceWorker(browser, server, "enabled", false);
+                        await HttpsAuthentication(browser, server, "enabled");
                         await HttpsStorageAccessNoGesture(browser, server);
                         await RejectFixtureCertificates(host, certificates);
                         new PrivacySettingsStore(root).Save(new PrivacyConfiguration { BlockThirdPartyCookies = true });
