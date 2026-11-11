@@ -49,6 +49,9 @@ internal static partial class Program
                     Console.WriteLine("WEBRTC_STARTUP_STUN: " + observation.ToString().ToUpperInvariant());
                     if (restrict && observation == WebRtcUdpObservation.Stun)
                         throw new InvalidOperationException("The restricted startup probe sent a STUN packet to the local listener.");
+                    await ObserveWebRtcWorkers(browser, restrict);
+                    await ObserveWebRtcContexts(browser, restrict, origin.Port);
+                    await ObserveWebRtcPopup(browser, restrict, origin.Port);
                     Console.WriteLine("INCONCLUSIVE: a single loopback listener is not a network-containment test.");
                 }
                 catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }

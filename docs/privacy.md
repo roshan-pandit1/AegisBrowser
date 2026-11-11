@@ -118,7 +118,9 @@ Two independent, profile-local settings are **off by default**:
 
 - **Restrict WebGL:** sets the pinned CEF per-browser `IBrowserSettings.WebGl`
   to `CefState.Disabled`. It may prevent WebGL rendering and break 3D maps,
-  visualizations, games and web apps.
+  visualizations, games and web apps. A controlled test found that a dedicated
+  worker could still create an OffscreenCanvas WebGL context with this option
+  enabled, so it does not restrict all WebGL execution contexts.
 - **Block remote web fonts:** sets `IBrowserSettings.RemoteFonts` to
   `CefState.Disabled`. Sites may use fallback fonts. This does **not**
   restrict locally installed fonts, font enumeration, text metrics, Canvas
@@ -132,7 +134,8 @@ This is selected fingerprint-surface reduction, **not complete fingerprint
 resistance or Tor Browser equivalence**. Screen and CSS metrics, browser and
 engine versions, Canvas, WebGPU, audio, WebRTC, language, IP address and other
 signals remain observable. Disabled features may themselves be recognizable.
-Native popup settings are not separately qualified.
+The controlled native popup fixture observed the WebGL and remote-font settings;
+that result does not establish behavior for every popup or worker.
 
 The Windows CEF fixture measures actual WebGL-context availability and
 synthetic remote-font request counts with a disposable profile; it leaves

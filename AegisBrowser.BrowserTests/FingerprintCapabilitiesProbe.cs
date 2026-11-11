@@ -22,6 +22,13 @@ internal static partial class Program
               else { ctx.fillRect(0,0,1,1); ctx.getImageData(0,0,1,1); result.canvas = 'FEATURE_FUNCTIONAL'; }
             }
           } catch (_) { result.canvas = 'REQUEST_DENIED'; }
+          try {
+            const canvas = typeof document !== 'undefined' ? document.createElement('canvas')
+              : (typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(1,1) : null);
+            const gl = canvas?.getContext('webgl');
+            result.webgl = gl ? 'FEATURE_FUNCTIONAL' : 'API_UNAVAILABLE';
+            gl?.getExtension('WEBGL_lose_context')?.loseContext();
+          } catch (_) { result.webgl = 'INCONCLUSIVE'; }
           if (typeof OfflineAudioContext !== 'function') result.offlineAudio = 'API_UNAVAILABLE';
           else {
             try {
@@ -98,7 +105,7 @@ internal static partial class Program
                 continue;
             }
             Check(value.ValueKind == JsonValueKind.Object, "controlled context returned capability outcomes");
-            foreach (var surface in new[] { "canvas", "audio", "offlineAudio", "webgpu", "localFonts" })
+            foreach (var surface in new[] { "canvas", "webgl", "audio", "offlineAudio", "webgpu", "localFonts" })
             {
                 var state = value.GetProperty(surface).GetString();
                 Check(state is "API_PRESENT" or "API_UNAVAILABLE" or "REQUEST_DENIED"
