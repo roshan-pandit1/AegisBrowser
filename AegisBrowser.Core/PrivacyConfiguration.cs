@@ -12,6 +12,9 @@ public sealed record PrivacyConfiguration
     // Null preserves the existing Chromium preference for older profiles.
     // False explicitly restores Chromium's default after an opt-in is removed.
     public bool? BlockThirdPartyCookies { get; init; }
+    // Opt-in Tor-inspired viewport bucketing; takes effect on next profile launch.
+    // This does not alter screen metrics, browser API values or network identity.
+    public bool LetterboxWebContent { get; init; }
     public string FilterList { get; init; } = StarterList;
     public string UserRules { get; init; } = "";
     public string[] BlockedDomains { get; init; } = [];

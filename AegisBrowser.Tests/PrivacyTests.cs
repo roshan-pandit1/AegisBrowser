@@ -31,6 +31,7 @@ internal static class PrivacyTests
         Check(!Test(BrowserPolicy.DiagnosticsUrl).Blocked, "internal diagnostics");
         Check(!Test("data:text/plain,hello").Blocked, "nonnetwork resources");
         var config = new PrivacyConfiguration();
+        Check(!config.LetterboxWebContent, "letterboxing off by default");
         Check(config.BlockThirdPartyCookies is null, "legacy profiles retain Chromium's existing cookie preference");
         var standard = new RequestFilter(config);
         var tracking = new NetworkRequest("https://google-analytics.com/collect", "https://example.com", "ping");
@@ -101,12 +102,14 @@ internal static class PrivacyTests
         {
             var store = new PrivacySettingsStore(folder);
             Check(store.Load().Mode == PrivacyMode.Standard, "missing settings defaults");
-            var saved = config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"], UserRules = "||tracker.test^", ApplyThirdPartyRulesWhenSiteUnknown = true, BlockThirdPartyCookies = true };
+            var saved = config with { Mode = PrivacyMode.Strict, SiteExceptions = ["example.com"], UserRules = "||tracker.test^", ApplyThirdPartyRulesWhenSiteUnknown = true, BlockThirdPartyCookies = true, LetterboxWebContent = true };
             store.Save(saved);
             var restored = new PrivacySettingsStore(folder).Load();
+            Check(restored.LetterboxWebContent, "letterboxing persists for this profile");
             Check(restored.Mode == PrivacyMode.Strict && restored.ApplyThirdPartyRulesWhenSiteUnknown && restored.BlockThirdPartyCookies == true && restored.SiteExceptions.SequenceEqual(saved.SiteExceptions)
                 && restored.UserRules == saved.UserRules, "settings round trip");
             Check(new PrivacySettingsStore(Path.Combine(folder, "other")).Load() is { BlockThirdPartyCookies: null, SiteExceptions.Length: 0 }, "profile settings isolation");
+            Check(!new PrivacySettingsStore(Path.Combine(folder, "other")).Load().LetterboxWebContent, "other profiles retain letterboxing default");
             store.Save(saved with { BlockThirdPartyCookies = false });
             Check(new PrivacySettingsStore(folder).Load().BlockThirdPartyCookies == false, "explicit cookie opt-out persists");
             store.Save(saved);
@@ -122,6 +125,8 @@ internal static class PrivacyTests
                 "older settings keep unknown-site rule behavior disabled");
             Check(new PrivacySettingsStore(folder).Load().BlockThirdPartyCookies is null,
                 "older settings do not override Chromium's cookie preference");
+            Check(!new PrivacySettingsStore(folder).Load().LetterboxWebContent,
+                "older settings leave viewport letterboxing disabled");
             File.WriteAllText(Path.Combine(folder, "privacy.json"), "{broken");
             var corrupt = new PrivacySettingsStore(folder);
             rejected = false;

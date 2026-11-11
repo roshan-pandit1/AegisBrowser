@@ -92,3 +92,22 @@ Strict mode can break embedded sign-in, payment widgets, video, fonts and CDN de
 Run the existing console tests with `dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64`. On Windows, build and run `AegisBrowser.FilteringTests` with `dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true`, then run its generated executable. This harness uses the production request handler with a loopback HTTP fixture; it tests server-side arrival of allowed requests and absence of blocked direct/redirect/iframe requests, Strict mode, exceptions, pause/resume and top-level navigation. It also opens the native Privacy form, but does not automate editing every control.
 
 The workflow runs on `windows-latest`, installs .NET 8, requires the harness's completion marker and exit code, and only then publishes and uploads the complete self-contained win-x64 directory. See BUILD-STATUS.md for actual results and remaining manual tests.
+
+## Optional viewport letterboxing
+
+The profile-local **Letterbox page viewport** setting defaults to **off**.
+When enabled and the profile is restarted, AegisBrowser centers each normal
+Chromium tab within a display area rounded down to 200-by-100 WinForms-control
+size buckets. This may reduce variation in a page's viewport dimensions, but
+it also reduces usable content space and can affect responsive layouts.
+Tiny panes remain usable without bucketing below the minimum step.
+
+This is inspired by Tor Browser's letterboxing principle, **not** a port of
+Tor's browser-engine protections. It does not change JavaScript-visible
+`screen` values, GPU/Canvas/audio/font characteristics, IP address or the
+other fingerprint signals. Actual CSS viewport bucketing at different Windows
+display scaling and browser zoom has **not** been accepted on Windows yet.
+The option applies at the next profile launch; network rules remain live.
+Popups are not letterboxed. No identity spoofing or anti-fraud evasion is added.
+
+See [Tor and GoLogin public-behavior comparison and testing limitations](tor-gologin-fingerprint-privacy-study.md).
