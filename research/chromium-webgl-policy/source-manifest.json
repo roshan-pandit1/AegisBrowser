@@ -1,0 +1,39 @@
+{
+  "cef_revision": "14c5a089e8452874cb1a556dc3fde26ed2d87723",
+  "chromium_version": "154.0.8037.98",
+  "chromium_revision": "b859317bf11f6be47f9b7799ec690a0a42a1fb33",
+  "scope": "Five upstream source files fetched at exact revision; this is not a complete checkout or build.",
+  "patch": "0001-prototype-offscreen-context-settings.patch",
+  "patch_sha256": "117adc6d05196b51ba177681193a602a02ced0fbe05450dbc92e01d41ba4c743",
+  "sources": [
+    {
+      "path": "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc",
+      "git_blob": "f81d66014ff994b2c95f44fa39ae13b605c6e1c3",
+      "sha256": "afd6e994d42392d0e82d33bc9908dc9a4333da9aa5b67b6f9174f24e9e85eaab"
+    },
+    {
+      "path": "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h",
+      "git_blob": "cf76a95e1dfa65075e3a64c82b42fb9802c0dd7c",
+      "sha256": "fe61dd99fb023e9251d906d8d989e7a07cb17b685f37332e7b039b485966f0ec"
+    },
+    {
+      "path": "third_party/blink/renderer/core/workers/worker_settings.cc",
+      "git_blob": "45680c5f6ea0c7e89ccf43eb88f8a11e3318c02e",
+      "sha256": "13f8ac1e14bde95d3d796b5b3bd83de923f2826d829e42c1ae6409fe69fd9f01"
+    },
+    {
+      "path": "third_party/blink/renderer/core/workers/worker_settings.h",
+      "git_blob": "45c60dd2c44b05fdd279f759069383479823c7f2",
+      "sha256": "d7355e2eb6d4ff2d656d55c5700b590565318d8eea5f81d0df4e8e95f8ceabbf"
+    },
+    {
+      "path": "third_party/blink/renderer/platform/runtime_enabled_features.json5",
+      "git_blob": "7718a28600c53fca00ec57e47167f176af9ff9c5",
+      "sha256": "99b92e6776a5305543ab196a64128a11e2d4e86667e72e48787b05d45bcb1d2b"
+    }
+  ],
+  "patch_application": "git apply --check --whitespace=error-all passed on the five verified source files in an independent scratch Git repository.",
+  "engine_compilation": "NOT_RUN",
+  "blink_tests": "NOT_RUN",
+  "cef_integration": "NOT_RUN"
+}

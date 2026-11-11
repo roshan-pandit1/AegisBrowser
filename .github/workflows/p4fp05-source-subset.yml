@@ -1,0 +1,35 @@
+name: Experimental Chromium source-subset check
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  source-subset:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch pinned source subset and check prototype patch
+        shell: pwsh
+        run: |
+          $manifest = Get-Content research/chromium-webgl-policy/source-manifest.json -Raw | ConvertFrom-Json
+          $revision = 'b859317bf11f6be47f9b7799ec690a0a42a1fb33'
+          if ($manifest.chromium_revision -cne $revision -or @($manifest.sources).Count -ne 5) { throw 'Unexpected source manifest' }
+          $root = Join-Path $env:RUNNER_TEMP ('aegis-chromium-source-subset-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
+          foreach ($entry in $manifest.sources) {
+            $path = [string]$entry.path
+            if ($path -notmatch '^third_party/blink/[A-Za-z0-9_./-]+$' -or $path.Contains('..')) { throw 'Unsafe source path' }
+            $destination = Join-Path $root $path
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/chromium/chromium/$revision/$path" -OutFile $destination -TimeoutSec 45
+          }
+          git -C $root init -q
+          if ($LASTEXITCODE -ne 0) { throw 'Could not initialize isolated source-subset repository' }
+          python research/chromium-webgl-policy/verify_source_subset.py $root
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned source-subset check failed' }
+          python research/chromium-webgl-policy/test_verify_source_subset.py $root
+          if ($LASTEXITCODE -ne 0) { throw 'Source-subset negative test failed' }
+          'Source subset and patch applicability checked; Chromium compilation, Blink tests and enforcement remain NOT_RUN.' | Out-File $env:GITHUB_STEP_SUMMARY -Append

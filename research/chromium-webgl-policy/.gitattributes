@@ -1,0 +1,3 @@
+# Unified-diff blank context lines require a single space. The patch verifier
+# checks added upstream lines with git apply --whitespace=error-all instead.
+*.patch text eol=lf -whitespace
