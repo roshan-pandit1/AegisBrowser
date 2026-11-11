@@ -15,6 +15,10 @@ public sealed record PrivacyConfiguration
     // Opt-in Tor-inspired viewport bucketing; takes effect on next profile launch.
     // This does not alter screen metrics, browser API values or network identity.
     public bool LetterboxWebContent { get; init; }
+    // Optional browser-native restrictions for individual fingerprint surfaces.
+    // Both are off by default; enabling either requires restarting the profile.
+    public bool DisableWebGl { get; init; }
+    public bool DisableRemoteFonts { get; init; }
     public string FilterList { get; init; } = StarterList;
     public string UserRules { get; init; } = "";
     public string[] BlockedDomains { get; init; } = [];

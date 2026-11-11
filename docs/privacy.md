@@ -111,3 +111,32 @@ The option applies at the next profile launch; network rules remain live.
 Popups are not letterboxed. No identity spoofing or anti-fraud evasion is added.
 
 See [Tor and GoLogin public-behavior comparison and testing limitations](tor-gologin-fingerprint-privacy-study.md).
+
+## Optional browser-native fingerprint-surface restrictions
+
+Two independent, profile-local settings are **off by default**:
+
+- **Restrict WebGL:** sets the pinned CEF per-browser `IBrowserSettings.WebGl`
+  to `CefState.Disabled`. It may prevent WebGL rendering and break 3D maps,
+  visualizations, games and web apps.
+- **Block remote web fonts:** sets `IBrowserSettings.RemoteFonts` to
+  `CefState.Disabled`. Sites may use fallback fonts. This does **not**
+  restrict locally installed fonts, font enumeration, text metrics, Canvas
+  or font-based tracking generally.
+
+Changes apply on profile restart. New ordinary Chromium tabs use the selected
+settings before browser creation. Unselected controls preserve Chromium
+defaults; older profiles remain unchanged.
+
+This is selected fingerprint-surface reduction, **not complete fingerprint
+resistance or Tor Browser equivalence**. Screen and CSS metrics, browser and
+engine versions, Canvas, WebGPU, audio, WebRTC, language, IP address and other
+signals remain observable. Disabled features may themselves be recognizable.
+Native popup settings are not separately qualified.
+
+The Windows CEF fixture measures actual WebGL-context availability and
+synthetic remote-font request counts with a disposable profile; it leaves
+TLS, sandbox, permissions and proxy enforcement unchanged.
+
+See [fingerprint-surface reduction notes](fingerprint-surface-reduction.md)
+for evidence and remaining work.
