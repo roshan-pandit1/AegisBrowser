@@ -43,7 +43,7 @@ internal sealed class PrivacyForm : Form
             Text = "Current cookie policy: " + cookiePolicyStatus + ". Viewport letterboxing at startup: "
                 + (letterboxingActive ? "On" : "Off") + ". Changes apply after restarting this profile. "
                 + "Turning this off restores Chromium's default, which may still block some cookies. "
-                + "Blocking can affect embedded sign-in, payments and media. Letterboxing can reduce visible content area but does not hide your screen, IP or full fingerprint." });
+                + "Blocking can affect embedded sign-in, payments and media. Letterboxing sizes the browser control; page zoom and display scaling can change the CSS viewport. It can reduce visible content area and does not hide your screen, IP or full fingerprint." });
         var pause = new CheckBox { Text = "Pause filtering until resumed or browser exit", AutoSize = true, Checked = session.Paused };
         pause.CheckedChanged += (_, _) => session.Paused = pause.Checked;
         controls.Controls.Add(pause);

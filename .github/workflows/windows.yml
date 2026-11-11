@@ -48,6 +48,21 @@ jobs:
               throw "Browser $phase phase did not complete CEF shutdown"
             }
           }
+      - name: Measure Chromium CSS viewport and profile restart
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-viewport-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('viewport-write', 'viewport-read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
+                ($output -join "`n") -notmatch "PASS: \d+ CSS viewport checks \($phase\)" -or
+                ($output -join "`n") -notmatch "PASS: viewport CEF shutdown completed \($phase\)" -or
+                ($output -join "`n") -notmatch 'P4LB_CSS_VIEWPORT:') {
+              throw "CSS viewport probe $phase failed or did not complete native shutdown."
+            }
+          }
       - name: Controlled cross-site cookie and restart probe
         timeout-minutes: 5
         run: |

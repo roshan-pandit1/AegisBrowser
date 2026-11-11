@@ -29,6 +29,7 @@ internal static partial class Program
         if (args.Length == 2 && args[0] == "external-egress-probe") return ExternalEgressProbe(args[1]);
         if (args.Length == 2 && args[0] == "hwnd-repro") return NativeWindowRepro(args[1]);
         if (args.Length == 2 && args[0] == "proxy-auth-probe") return ProxyAuthProbe(args[1]);
+        if (args.Length == 2 && args[0] is "viewport-write" or "viewport-read") return ViewportCssProbe(args[1], args[0]);
         if (args.Length == 2 && args[0] is "storage-policy-probe" or "storage-policy-write" or "storage-policy-read")
             return StoragePolicyProbe(args[1], args[0]);
         if (args.Length == 2 && args[0] == "https-privacy-preflight") return HttpsPrivacyPreflight(args[1]);
@@ -617,6 +618,8 @@ internal static partial class Program
         public IResourceHandler Create(IBrowser browser, IFrame frame, string schemeName, IRequest request)
         {
             var uri = new Uri(request.Url);
+            if (uri.Host == "browser-tests.invalid" && uri.AbsolutePath.StartsWith("/viewport", StringComparison.Ordinal))
+                return ResourceHandler.FromString(ViewportFixturePage(), mimeType: "text/html");
             var script = uri.Host == "provider-tests.invalid"
                 ? "location.replace('https://browser-tests.invalid/callback');"
                 : uri.AbsolutePath == "/callback" ? "window.opener.postMessage('oauth-ok','https://browser-tests.invalid');window.close();" : "";
