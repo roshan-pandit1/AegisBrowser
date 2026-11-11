@@ -42,13 +42,15 @@ On the Windows ARM64 development host running x64 CEF under emulation, the form 
 | Profile restart | A fresh read process loaded the enabled setting, measured the viewport and completed CEF shutdown. |
 | Responsive content | A controlled scrollable page exercised form editing, a dialog, a fixed element, a media control, an embedded frame and responsive CSS checks. It is not a compatibility survey of real websites. |
 | Native shutdown | Both local write and read processes reported normal CEF shutdown and exit code 0. |
-| Final-head Windows CI | See the research PR's final-head workflow logs; a passing workflow is not a multi-DPI qualification. |
+| Windows x64 CI | At commit `3f34c85a0d11a0d33f9e5c7118ccd3f9ad8bd0b2`, the [push](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42967212181) and [PR](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42967216673) workflows passed; later final-head results belong to the research PR. A passing workflow is not a multi-DPI qualification. |
 
 For a controlled privacy comparison, collect the same finite set of window sizes with the same display, OS scaling and zoom in each mode and report the distinct observed CSS width/height pairs. A smaller count in that sample would describe only that sample; it would not establish user anonymity, unlinkability or a population-wide benefit. Also record whether enabled mode introduces distinctive dimensions. Do not extrapolate across untested displays, zoom levels or web content.
 
 With the later scrollable local fixture at zoom 0, a 1000×600 control reported `innerWidth=1000` but `documentElement.clientWidth=985` and `visualViewport.width=985`; at zoom 1 it reported 833, 821 and approximately 820.83 respectively. The test's `cssBucketed` field describes `innerWidth`/`innerHeight` only. Scrollbar-sensitive measurements must not be represented as bucketed merely because that field is true. No population-wide privacy benefit has been measured.
 
 For four selected window sizes on that same local display at zoom 0, the disabled `innerWidth`/`innerHeight` pairs were 1226×721, 999×584, 1065×622 and 1075×632 (four distinct pairs). Enabled pairs were 1200×700, 800×500, 1000×600 and 1000×600 (three distinct pairs). This deliberately small sample demonstrates a collision for two selected sizes; it does not establish anonymity or a population-wide reduction in identifiability.
+
+The hosted PR run reported effective DPI 96 and DPR 1 at zoom 0. Its smaller screen constrained the requested window sizes: the four disabled pairs were 1020×659, 999×584, 1020×622 and 1020×632; the enabled pairs were 1000×600, 800×500, 1000×600 and 1000×600. Both write (62 checks) and read (44 checks) processes reported CEF shutdown. This run also observed the 833×500 zoomed `innerWidth`/`innerHeight` and the 985-pixel scrollbar-sensitive client width at zoom 0. These are controlled runner observations, not independent verification of its Windows scaling setting.
 
 ## DPI qualification and bounded manual procedure
 
