@@ -16,10 +16,11 @@ internal static partial class Program
             + ".woff2') format('woff2')}</style><script>"
             + "(async()=>{const c=document.createElement('canvas');const gl=c.getContext('webgl');"
             + "const available=!!gl;gl?.getExtension('WEBGL_lose_context')?.loseContext();"
+            + "const gl2=document.createElement('canvas').getContext('webgl2');const available2=!!gl2;gl2?.getExtension('WEBGL_lose_context')?.loseContext();"
             + "let font='pending';try{await document.fonts.load('20px PopupFixtureFont','test');font='settled';}"
             + "catch(_){font='settled';}"
             + "if(window.opener)window.opener.postMessage({kind:'p4fp03-popup',mode:'" + mode
-            + "',gl:available,font},'https://fp-surface.invalid');})();</script>";
+            + "',gl:available,gl2:available2,font},'https://fp-surface.invalid');})();</script>";
     }
 
     private static async Task MeasureFingerprintPopup(ChromiumWebBrowser browser, string mode)
@@ -31,7 +32,7 @@ internal static partial class Program
             window.p4fp03PopupResult=null; window.p4fp03Popup=null;
             addEventListener('message',e=>{
               if(e.origin==='https://fp-surface.invalid' && e.source===window.p4fp03Popup &&
-                 e.data && e.data.kind==='p4fp03-popup' && typeof e.data.gl==='boolean' &&
+                 e.data && e.data.kind==='p4fp03-popup' && typeof e.data.gl==='boolean' && typeof e.data.gl2==='boolean' &&
                  e.data.font==='settled') window.p4fp03PopupResult=e.data;
             }); 'ready'
             """);
@@ -52,6 +53,10 @@ internal static partial class Program
         Console.WriteLine($"P4FP03_POPUP_WEBGL: mode={mode} contextAvailable={gl}");
         if (mode == "restricted") Check(gl == "False", "native popup inherits the WebGL restriction");
         else Check(gl is "True" or "False", "native popup baseline WebGL availability observed");
+        var gl2 = await Js(browser, "window.p4fp03PopupResult.gl2");
+        Console.WriteLine($"P4FP04_POPUP_WEBGL2: mode={mode} contextAvailable={gl2}");
+        if (mode == "restricted") Check(gl2 == "False", "native popup inherits the WebGL2 restriction");
+        else Check(gl2 is "True" or "False", "native popup baseline WebGL2 availability observed");
         await Js(browser, "window.p4fp03Popup.close(); 'close requested'");
         await Wait(() => life.PopupCount == 0, mode + " native fingerprint popup closed");
         Check(await Js(browser, "document.querySelector('#fixture')?.textContent") == "Controlled font test",
