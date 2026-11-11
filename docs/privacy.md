@@ -120,7 +120,8 @@ Two independent, profile-local settings are **off by default**:
   to `CefState.Disabled`. It may prevent WebGL rendering and break 3D maps,
   visualizations, games and web apps. A controlled test found that a dedicated
   worker could still create an OffscreenCanvas WebGL context with this option
-  enabled, so it does not restrict all WebGL execution contexts.
+  enabled. P4-FP-04 also observed WebGL 1 and 2 in document-created
+  OffscreenCanvas, so it does not restrict all WebGL execution contexts.
 - **Block remote web fonts:** sets `IBrowserSettings.RemoteFonts` to
   `CefState.Disabled`. Sites may use fallback fonts. This does **not**
   restrict locally installed fonts, font enumeration, text metrics, Canvas

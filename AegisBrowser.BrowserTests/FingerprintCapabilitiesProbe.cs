@@ -23,12 +23,35 @@ internal static partial class Program
             }
           } catch (_) { result.canvas = 'REQUEST_DENIED'; }
           try {
-            const canvas = typeof document !== 'undefined' ? document.createElement('canvas')
-              : (typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(1,1) : null);
-            const gl = canvas?.getContext('webgl');
-            result.webgl = gl ? 'FEATURE_FUNCTIONAL' : 'API_UNAVAILABLE';
-            gl?.getExtension('WEBGL_lose_context')?.loseContext();
-          } catch (_) { result.webgl = 'INCONCLUSIVE'; }
+            if (typeof OffscreenCanvas !== 'function') result.offscreen2d = 'UNSUPPORTED';
+            else { const c = new OffscreenCanvas(1,1); const x = c.getContext('2d');
+              if (!x) result.offscreen2d = 'INCONCLUSIVE';
+              else { x.fillRect(0,0,1,1); x.getImageData(0,0,1,1); result.offscreen2d = 'FEATURE_FUNCTIONAL'; } }
+          } catch (_) { result.offscreen2d = 'INCONCLUSIVE'; }
+          // Each version/host gets a fresh canvas: a canvas cannot change its
+          // context type after the first getContext call. A synthetic 1x1
+          // readback exercises the API; pixel values are never retained or sent.
+          function probeGl(offscreen, version) {
+            try {
+              const canvas = offscreen
+                ? (typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(1,1) : null)
+                : (typeof document !== 'undefined' ? document.createElement('canvas') : null);
+              if (!canvas) return 'UNSUPPORTED';
+              const gl = canvas.getContext(version);
+              if (!gl) return 'API_UNAVAILABLE';
+              gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+              gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(4));
+              const outcome = gl.getError() === gl.NO_ERROR ? 'FEATURE_FUNCTIONAL' : 'INCONCLUSIVE';
+              gl.getExtension('WEBGL_lose_context')?.loseContext();
+              return outcome;
+            } catch (_) { return 'INCONCLUSIVE'; }
+          }
+          result.webgl = probeGl(typeof document === 'undefined', 'webgl');
+          result.webgl2 = probeGl(typeof document === 'undefined', 'webgl2');
+          result.offscreenWebgl = probeGl(true, 'webgl');
+          result.offscreenWebgl2 = probeGl(true, 'webgl2');
+          result.webglConstructor = typeof WebGLRenderingContext === 'function' ? 'API_PRESENT' : 'API_UNAVAILABLE';
+          result.webgl2Constructor = typeof WebGL2RenderingContext === 'function' ? 'API_PRESENT' : 'API_UNAVAILABLE';
           if (typeof OfflineAudioContext !== 'function') result.offlineAudio = 'API_UNAVAILABLE';
           else {
             try {
@@ -60,7 +83,7 @@ internal static partial class Program
         + "measureCapabilities().then(result=>parent.postMessage({kind:'aegis-fp-capabilities',result},'*'));"
         + "</script><p>Controlled frame</p>";
 
-    private static async Task MeasureFingerprintContexts(ChromiumWebBrowser browser, string mode)
+    private static async Task<Dictionary<string, Dictionary<string, string>>> MeasureFingerprintContexts(ChromiumWebBrowser browser, string mode)
     {
         // Match both the iframe WindowProxy and its origin; a role label alone
         // must not be treated as proof of frame attribution.
@@ -95,6 +118,7 @@ internal static partial class Program
             "Object.values(window.fpCapabilities).every(x=>x!=='pending')") == "True",
             mode + " controlled fingerprint context results");
         using var results = JsonDocument.Parse(await Js(browser, "JSON.stringify(window.fpCapabilities)"));
+        var observations = new Dictionary<string, Dictionary<string, string>>();
         foreach (var context in new[] { "main", "same", "cross", "worker" })
         {
             var value = results.RootElement.GetProperty(context);
@@ -102,17 +126,21 @@ internal static partial class Program
             {
                 Check(value.GetString() == "INCONCLUSIVE", "unsupported capability context is explicit");
                 Console.WriteLine($"P4FP02_CAPABILITIES: mode={mode} context={context} result=INCONCLUSIVE");
+                observations[context] = new();
                 continue;
             }
             Check(value.ValueKind == JsonValueKind.Object, "controlled context returned capability outcomes");
-            foreach (var surface in new[] { "canvas", "webgl", "audio", "offlineAudio", "webgpu", "localFonts" })
+            var surfaces = observations[context] = new();
+            foreach (var surface in new[] { "canvas", "offscreen2d", "webgl", "webgl2", "offscreenWebgl", "offscreenWebgl2", "webglConstructor", "webgl2Constructor", "audio", "offlineAudio", "webgpu", "localFonts" })
             {
                 var state = value.GetProperty(surface).GetString();
                 Check(state is "API_PRESENT" or "API_UNAVAILABLE" or "REQUEST_DENIED"
                     or "FEATURE_FUNCTIONAL" or "UNSUPPORTED" or "INCONCLUSIVE",
                     "capability result uses a bounded state");
+                surfaces[surface] = state!;
                 Console.WriteLine($"P4FP02_CAPABILITY: mode={mode} context={context} surface={surface} state={state}");
             }
         }
+        return observations;
     }
 }

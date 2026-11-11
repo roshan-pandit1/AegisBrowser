@@ -82,6 +82,7 @@ jobs:
                 $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=cross surface=webgpu' -or
                 $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=worker surface=webgl state=' -or
                 $body -notmatch 'P4FP03_POPUP_WEBGL: mode=restricted contextAvailable=False' -or
+                $body -notmatch 'P4FP04_POPUP_WEBGL2: mode=restricted contextAvailable=False' -or
                 $body -notmatch 'P4FP03_POPUP_FONT_REQUESTS: baseline=[1-9][0-9]* restricted=0') {
               throw "Fingerprint surface probe $phase failed or did not complete native shutdown"
             }
@@ -90,6 +91,43 @@ jobs:
               'WebGL dedicated worker: restriction did not prevent the observed OffscreenCanvas WebGL context.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
             } else {
               'WebGL dedicated worker: see bounded capability observation; no universal worker-enforcement claim.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            }
+          }
+      - name: Diagnose process-wide WebGL candidate
+        timeout-minutes: 5
+        run: |
+          $observations = @{}
+          foreach ($mode in @('baseline', 'restricted', '3d')) {
+            $root = Join-Path $env:RUNNER_TEMP ('aegis-webgl-process-' + $mode + '-' + [guid]::NewGuid().ToString('N'))
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webgl-process-$mode" $root 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            $body = $output | Out-String
+            if ($code -ne 0 -or $body -match 'Check failed:' -or $body -notmatch 'PASS: WebGL process experiment completed and CEF shut down') {
+              throw "WebGL process diagnostic $mode failed or did not shut down (exit $code)"
+            }
+            foreach ($surface in @('offscreenWebgl', 'offscreenWebgl2')) {
+              $matches = [regex]::Matches($body, "P4FP04_PROCESS_GL: mode=$mode context=worker surface=$surface state=(FEATURE_FUNCTIONAL|API_UNAVAILABLE|UNSUPPORTED|INCONCLUSIVE)")
+              if ($matches.Count -ne 1) { throw "WebGL diagnostic $mode worker $surface missing or ambiguous" }
+              $observations["$mode-$surface"] = $matches[0].Groups[1].Value
+            }
+            foreach ($surface in @('webgl', 'webgl2')) {
+              $matches = [regex]::Matches($body, "P4FP04_PROCESS_GL: mode=$mode context=main surface=$surface state=(FEATURE_FUNCTIONAL|API_UNAVAILABLE|UNSUPPORTED|INCONCLUSIVE)")
+              if ($matches.Count -ne 1) { throw "WebGL diagnostic $mode main $surface missing or ambiguous" }
+              $observations["$mode-main-$surface"] = $matches[0].Groups[1].Value
+            }
+            if ($mode -ne 'baseline' -and $body -notmatch 'P4FP04_SWITCH_RESULT: (INEFFECTIVE|INCONCLUSIVE|NO_CONTEXT_OBSERVED)') { throw 'Missing candidate classification' }
+          }
+          foreach ($mode in @('restricted', '3d')) {
+            foreach ($surface in @('offscreenWebgl', 'offscreenWebgl2')) {
+              $baseline = $observations["baseline-$surface"]
+              $restricted = $observations["$mode-$surface"]
+              $mainSurface = if ($surface -eq 'offscreenWebgl') { 'webgl' } else { 'webgl2' }
+              $mainBaseline = $observations["baseline-main-$mainSurface"]
+              $mainRestricted = $observations["$mode-main-$mainSurface"]
+              $decision = if ($baseline -eq 'FEATURE_FUNCTIONAL' -and $restricted -eq 'FEATURE_FUNCTIONAL' -and $mainBaseline -eq 'FEATURE_FUNCTIONAL' -and $mainRestricted -eq 'API_UNAVAILABLE') { 'GAP_REPRODUCED' } else { 'INCONCLUSIVE' }
+              "Worker $surface candidate $mode`: $decision (baseline=$baseline, switch=$restricted); no protection claim." | Out-File $env:GITHUB_STEP_SUMMARY -Append
+              if ($decision -eq 'GAP_REPRODUCED') { Write-Warning "Candidate $mode did not block worker $surface in this run." }
             }
           }
       - name: Controlled cross-site cookie and restart probe
