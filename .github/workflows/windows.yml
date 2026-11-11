@@ -63,6 +63,24 @@ jobs:
               throw "CSS viewport probe $phase failed or did not complete native shutdown."
             }
           }
+      - name: Controlled WebGL and remote-font privacy restrictions
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-fingerprint-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('fingerprint-write', 'fingerprint-read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            $body = $output | Out-String
+            if ($code -ne 0 -or $body -match 'Check failed:' -or
+                $body -notmatch "PASS: \d+ fingerprint surface checks \($phase\)" -or
+                $body -notmatch "PASS: fingerprint surface CEF shutdown completed \($phase\)" -or
+                $body -notmatch 'P4FP_FONT_REQUESTS: baseline=[1-9]' -or
+                $body -notmatch 'restricted=0' -or
+                $body -notmatch 'P4FP_WEBGL: mode=restricted contextAvailable=False') {
+              throw "Fingerprint surface probe $phase failed or did not complete native shutdown"
+            }
+          }
       - name: Controlled cross-site cookie and restart probe
         timeout-minutes: 5
         run: |
