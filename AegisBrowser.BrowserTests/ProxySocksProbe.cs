@@ -83,6 +83,9 @@ internal static partial class Program
             if (terminal != failed.Task)
             {
                 trace.Add("NAVIGATION_EVENT", "TIMEOUT_NO_MATCHING_LOAD_ERROR");
+                // Preserve the evidence before browser teardown, which may
+                // itself stall. A later final snapshot may contain more events.
+                trace.Print("OFFLINE_TIMEOUT");
                 throw new TimeoutException("No matching SOCKS-offline load error was observed within 25 seconds.");
             }
             var error = await failed.Task;
@@ -155,12 +158,12 @@ internal static partial class Program
             }
         }
 
-        internal void Print()
+        internal void Print(string phase = "FINAL")
         {
             lock (gate)
             {
                 foreach (var item in events) Console.WriteLine(item);
-                Console.WriteLine($"P404_TRACE: run={run} recorded={events.Count} dropped={dropped}");
+                Console.WriteLine($"P404_TRACE: run={run} phase={phase} recorded={events.Count} dropped={dropped}");
             }
         }
     }

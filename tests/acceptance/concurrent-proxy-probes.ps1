@@ -35,7 +35,19 @@ try {
     $failedRoles = [Collections.Generic.List[string]]::new()
     foreach ($entry in $processes) {
         $entry.Process.Refresh()
-        if (-not $entry.Process.HasExited) { throw "Concurrent $($entry.Role) fixture did not exit within three minutes." }
+        if (-not $entry.Process.HasExited) {
+            Write-Output "Concurrent proxy fixture $($entry.Role) did not exit within three minutes; available output follows:"
+            foreach ($path in @($entry.Output, $entry.Errors)) {
+                if (Test-Path -LiteralPath $path -PathType Leaf) {
+                    try { Get-Content -LiteralPath $path -Tail 256 -ErrorAction Stop | Write-Output }
+                    catch { Write-Output "P405_PROCESS_EVENT: role=$($entry.Role) state=OUTPUT_UNAVAILABLE" }
+                }
+            }
+            Write-Output "P405_PROCESS_EVENT: role=$($entry.Role) state=OUTPUT_TAIL_ONLY"
+            Write-Output "P405_PROCESS_EVENT: role=$($entry.Role) state=TIMEOUT exit=unavailable"
+            $failedRoles.Add($entry.Role)
+            continue
+        }
         $entry.Process.WaitForExit()
         $result = (Get-Content -LiteralPath $entry.Output -Raw) + "`n" + (Get-Content -LiteralPath $entry.Errors -Raw)
         Write-Output "Concurrent proxy fixture $($entry.Role):"
