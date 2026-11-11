@@ -18,6 +18,7 @@ public sealed class MainForm : Form
     private readonly PrivacySettingsStore? privacyStore;
     private readonly ThirdPartyCookiePolicy.Result cookiePolicy;
     private readonly bool cookiePolicyBlocksTabs;
+    private readonly bool letterboxingAtStartup;
     private PrivacyForm? privacyWindow;
     private SearchSettings searchSettings = new();
     private readonly SearchSettingsStore? searchStore;
@@ -40,6 +41,7 @@ public sealed class MainForm : Form
             catch (IOException ex) { privacyWarning = ex.Message; }
         }
         privacy = new(configuration);
+        letterboxingAtStartup = configuration.LetterboxWebContent;
         cookiePolicy = ThirdPartyCookiePolicy.ApplyAtStartup(configuration.BlockThirdPartyCookies);
         cookiePolicyBlocksTabs = ThirdPartyCookiePolicy.PreventBrowsing(configuration.BlockThirdPartyCookies, cookiePolicy);
         if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
@@ -164,6 +166,14 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { }
     }
 
+    private static void ResizeLetterboxedTab(TabPage page, ChromiumWebBrowser browser)
+    {
+        if (page.IsDisposed || browser.IsDisposed) return;
+        var rect = ViewportLetterboxing.Calculate(page.ClientSize.Width, page.ClientSize.Height);
+        var bounds = new Rectangle(rect.X, rect.Y, rect.Width, rect.Height);
+        if (browser.Bounds != bounds) browser.Bounds = bounds;
+    }
+
     private void NewTab(string url)
     {
         if (closing) return;
@@ -173,7 +183,16 @@ public sealed class MainForm : Form
             return;
         }
         var page = new TabPage("New tab") { Tag = "Loading…" };
-        var browser = new BrowserView(url) { Dock = DockStyle.Fill };
+        var browser = new BrowserView(url) { Dock = letterboxingAtStartup ? DockStyle.None : DockStyle.Fill };
+        if (letterboxingAtStartup)
+        {
+            // Keep Chromium itself inside a centered size bucket. No JS or browser
+            // identity overrides; normal tabs retain the existing Dock=Fill path.
+            browser.Bounds = Rectangle.Empty;
+            page.BackColor = Color.FromArgb(32, 37, 46);
+            page.ClientSizeChanged += (_, _) => ResizeLetterboxedTab(page, browser);
+            page.VisibleChanged += (_, _) => { if (page.Visible) ResizeLetterboxedTab(page, browser); };
+        }
         void Report(string message) => Post(() =>
         {
             if (page.IsDisposed) return;
@@ -231,6 +250,7 @@ public sealed class MainForm : Form
         page.Controls.Add(browser);
         tabs.TabPages.Add(page);
         tabs.SelectedTab = page;
+        if (letterboxingAtStartup) ResizeLetterboxedTab(page, browser);
     }
 
     private void UpdateNavigation()
