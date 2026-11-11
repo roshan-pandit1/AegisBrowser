@@ -111,13 +111,21 @@ jobs:
               if ($matches.Count -ne 1) { throw "WebGL diagnostic $mode worker $surface missing or ambiguous" }
               $observations["$mode-$surface"] = $matches[0].Groups[1].Value
             }
+            foreach ($surface in @('webgl', 'webgl2')) {
+              $matches = [regex]::Matches($body, "P4FP04_PROCESS_GL: mode=$mode context=main surface=$surface state=(FEATURE_FUNCTIONAL|API_UNAVAILABLE|UNSUPPORTED|INCONCLUSIVE)")
+              if ($matches.Count -ne 1) { throw "WebGL diagnostic $mode main $surface missing or ambiguous" }
+              $observations["$mode-main-$surface"] = $matches[0].Groups[1].Value
+            }
             if ($mode -ne 'baseline' -and $body -notmatch 'P4FP04_SWITCH_RESULT: (INEFFECTIVE|INCONCLUSIVE|NO_CONTEXT_OBSERVED)') { throw 'Missing candidate classification' }
           }
           foreach ($mode in @('restricted', '3d')) {
             foreach ($surface in @('offscreenWebgl', 'offscreenWebgl2')) {
               $baseline = $observations["baseline-$surface"]
               $restricted = $observations["$mode-$surface"]
-              $decision = if ($baseline -eq 'FEATURE_FUNCTIONAL' -and $restricted -eq 'FEATURE_FUNCTIONAL') { 'GAP_REPRODUCED' } else { 'INCONCLUSIVE' }
+              $mainSurface = if ($surface -eq 'offscreenWebgl') { 'webgl' } else { 'webgl2' }
+              $mainBaseline = $observations["baseline-main-$mainSurface"]
+              $mainRestricted = $observations["$mode-main-$mainSurface"]
+              $decision = if ($baseline -eq 'FEATURE_FUNCTIONAL' -and $restricted -eq 'FEATURE_FUNCTIONAL' -and $mainBaseline -eq 'FEATURE_FUNCTIONAL' -and $mainRestricted -eq 'API_UNAVAILABLE') { 'GAP_REPRODUCED' } else { 'INCONCLUSIVE' }
               "Worker $surface candidate $mode`: $decision (baseline=$baseline, switch=$restricted); no protection claim." | Out-File $env:GITHUB_STEP_SUMMARY -Append
               if ($decision -eq 'GAP_REPRODUCED') { Write-Warning "Candidate $mode did not block worker $surface in this run." }
             }
