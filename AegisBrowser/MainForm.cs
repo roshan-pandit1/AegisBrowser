@@ -18,6 +18,8 @@ public sealed class MainForm : Form
     private readonly PrivacySettingsStore? privacyStore;
     private readonly ThirdPartyCookiePolicy.Result cookiePolicy;
     private readonly bool cookiePolicyBlocksTabs;
+    private readonly WebRtcPrivacyPolicy.Result webRtcPolicy;
+    private readonly bool webRtcPolicyBlocksTabs;
     private readonly bool letterboxingAtStartup;
     private readonly bool disableWebGlAtStartup;
     private readonly bool disableRemoteFontsAtStartup;
@@ -48,12 +50,19 @@ public sealed class MainForm : Form
         disableRemoteFontsAtStartup = configuration.DisableRemoteFonts;
         cookiePolicy = ThirdPartyCookiePolicy.ApplyAtStartup(configuration.BlockThirdPartyCookies);
         cookiePolicyBlocksTabs = ThirdPartyCookiePolicy.PreventBrowsing(configuration.BlockThirdPartyCookies, cookiePolicy);
+        webRtcPolicy = WebRtcPrivacyPolicy.ApplyAtStartup(configuration.RestrictWebRtcNonProxiedUdp);
+        webRtcPolicyBlocksTabs = WebRtcPrivacyPolicy.PreventBrowsing(configuration.RestrictWebRtcNonProxiedUdp, webRtcPolicy);
         if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
         if (!cookiePolicy.Succeeded) Shown += (_, _) => MessageBox.Show(this,
             cookiePolicy.Error + (cookiePolicyBlocksTabs
                 ? "\n\nNo browser tabs will open. Disable the setting in Privacy and restart this profile."
                 : "\n\nThe existing Chromium cookie policy remains in effect; it could not be restored to the default."),
             "Cookie protection could not be applied");
+        if (!webRtcPolicy.Succeeded) Shown += (_, _) => MessageBox.Show(this,
+            webRtcPolicy.Error + (webRtcPolicyBlocksTabs
+                ? "\n\nNo browser tabs will open. Disable the setting in Privacy and restart this profile."
+                : "\n\nThe existing Chromium WebRTC policy could not be restored to the default."),
+            "WebRTC privacy setting could not be applied");
         Text = $"Aegis Browser — {profile}";
         Width = 1250;
         Height = 850;
@@ -76,7 +85,7 @@ public sealed class MainForm : Form
         bar.Controls.Add(MakeButton("Privacy", () =>
         {
             if (privacyWindow is null || privacyWindow.IsDisposed)
-                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save), cookiePolicy.Status, letterboxingAtStartup, disableWebGlAtStartup, disableRemoteFontsAtStartup);
+                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save), cookiePolicy.Status, letterboxingAtStartup, disableWebGlAtStartup, disableRemoteFontsAtStartup, webRtcPolicy.Status);
             privacyWindow.Show(this); privacyWindow.BringToFront();
         }), 8, 0);
         bar.Controls.Add(MakeButton("Search", () =>
@@ -185,6 +194,11 @@ public sealed class MainForm : Form
         if (cookiePolicyBlocksTabs)
         {
             status.Text = "Cookie protection unavailable; change the setting in Privacy and restart.";
+            return;
+        }
+        if (webRtcPolicyBlocksTabs)
+        {
+            status.Text = "WebRTC privacy setting unavailable; change the setting in Privacy and restart.";
             return;
         }
         var page = new TabPage("New tab") { Tag = "Loading…" };

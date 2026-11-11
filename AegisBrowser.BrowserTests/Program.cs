@@ -26,6 +26,7 @@ internal static partial class Program
         if (args.Length == 2 && args[0] == "packet-control-client") return PacketControlProbe(args[1]);
         if (args.Length == 2 && args[0] == "private-network-control-client") return PrivateNetworkControlProbe(args[1]);
         if (args.Length == 2 && args[0] == "proxy-probe") return ProxyProbe(args[1]);
+        if (args.Length == 2 && args[0] is "webrtc-baseline" or "webrtc-restrict") return WebRtcStartupProbe(args[1], args[0] == "webrtc-restrict");
         if (args.Length == 2 && args[0] == "external-egress-probe") return ExternalEgressProbe(args[1]);
         if (args.Length == 2 && args[0] == "hwnd-repro") return NativeWindowRepro(args[1]);
         if (args.Length == 2 && args[0] == "proxy-auth-probe") return ProxyAuthProbe(args[1]);

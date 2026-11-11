@@ -77,7 +77,9 @@ jobs:
                 $body -notmatch "PASS: fingerprint surface CEF shutdown completed \($phase\)" -or
                 $body -notmatch 'P4FP_FONT_REQUESTS: baseline=[1-9]' -or
                 $body -notmatch 'restricted=0' -or
-                $body -notmatch 'P4FP_WEBGL: mode=restricted contextAvailable=False') {
+                $body -notmatch 'P4FP_WEBGL: mode=restricted contextAvailable=False' -or
+                $body -notmatch 'P4FP02_CAPABILITY: mode=baseline context=main surface=canvas' -or
+                $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=cross surface=webgpu') {
               throw "Fingerprint surface probe $phase failed or did not complete native shutdown"
             }
           }
@@ -216,6 +218,27 @@ jobs:
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy authentication probe checks')) { throw 'CEF proxy authentication probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy authentication probe shutdown completed')) { throw 'CEF authentication probe did not complete native shutdown' }
+      - name: Observe WebRTC startup policy in independent profiles
+        timeout-minutes: 3
+        run: |
+          $observations = @{}
+          foreach ($mode in @('baseline', 'restrict')) {
+            $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-webrtc-' + $mode + '-' + [guid]::NewGuid().ToString('N'))
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webrtc-$mode" $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            $joined = $output -join "`n"
+            if ($code -ne 0 -or $joined -notmatch 'PASS: WebRTC startup observation shutdown completed') { throw "WebRTC $mode probe failed or did not shut down" }
+            if ($joined -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+            $stunMatches = [regex]::Matches($joined, 'WEBRTC_STARTUP_STUN: (STUN|OTHERPACKET|NOTOBSERVED|UNSUPPORTED)')
+            if ($stunMatches.Count -ne 1) { throw "WebRTC $mode observation missing or ambiguous" }
+            $observations[$mode] = $stunMatches[0].Groups[1].Value
+          }
+          if ($observations.baseline -eq 'STUN' -and $observations.restrict -eq 'NOTOBSERVED') {
+            'WebRTC loopback STUN: one baseline packet; none observed in one restricted run. This is not network containment.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          } else {
+            'WebRTC loopback STUN comparison: INCONCLUSIVE (positive control or restricted observation incomplete).' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
       - name: Concurrent independent CEF proxy probes
         timeout-minutes: 5
         run: ./tests/acceptance/concurrent-proxy-probes.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
