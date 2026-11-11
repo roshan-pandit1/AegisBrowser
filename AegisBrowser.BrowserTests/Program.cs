@@ -30,6 +30,7 @@ internal static partial class Program
         if (args.Length == 2 && args[0] == "hwnd-repro") return NativeWindowRepro(args[1]);
         if (args.Length == 2 && args[0] == "proxy-auth-probe") return ProxyAuthProbe(args[1]);
         if (args.Length == 2 && args[0] is "viewport-write" or "viewport-read") return ViewportCssProbe(args[1], args[0]);
+        if (args.Length == 2 && args[0] is "fingerprint-write" or "fingerprint-read") return FingerprintSurfaceProbe(args[1], args[0]);
         if (args.Length == 2 && args[0] is "storage-policy-probe" or "storage-policy-write" or "storage-policy-read")
             return StoragePolicyProbe(args[1], args[0]);
         if (args.Length == 2 && args[0] == "https-privacy-preflight") return HttpsPrivacyPreflight(args[1]);
