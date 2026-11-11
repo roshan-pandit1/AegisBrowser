@@ -20,6 +20,10 @@ internal static partial class Program
         Check(!WebRtcPrivacyPolicy.Apply(fake, true).Succeeded, "synthetic missing WebRTC readback fails closed");
         fake.Readback = WebRtcPrivacyPolicy.RestrictNonProxiedUdp;
         Check(WebRtcPrivacyPolicy.Apply(fake, true).Succeeded && Equals(fake.LastValue, fake.Readback), "synthetic WebRTC policy reads back exact value");
+        fake.ThrowOnRead = true;
+        var unavailable = WebRtcPrivacyPolicy.Apply(fake, true);
+        Check(!unavailable.Succeeded && WebRtcPrivacyPolicy.PreventBrowsing(true, unavailable), "synthetic WebRTC preference exception blocks tabs and permits settings recovery");
+        fake.ThrowOnRead = false;
         Check(WebRtcPrivacyPolicy.Apply(fake, false).Succeeded && fake.LastValue is null, "synthetic WebRTC opt-out resets browser default");
         Check(WebRtcPrivacyPolicy.ApplyAtStartup(null).Succeeded, "legacy WebRTC setting does not override existing preference");
 
@@ -40,10 +44,11 @@ internal static partial class Program
         public bool Writable { get; set; } = true;
         public bool Accepted { get; set; } = true;
         public object? Readback { get; set; }
+        public bool ThrowOnRead { get; set; }
         public object? LastValue { get; private set; }
         public int SetCalls { get; private set; }
         public bool Set(object? value, out string error)
         { SetCalls++; LastValue = value; error = Accepted ? "" : "synthetic rejection"; return Accepted; }
-        public object? Value => Readback;
+        public object? Value => ThrowOnRead ? throw new InvalidOperationException("synthetic preference failure") : Readback;
     }
 }

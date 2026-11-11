@@ -91,7 +91,8 @@ native popups, cross-origin frames, shared workers, service workers, or WebGPU.
 | Native popup | Separate observation using the production popup and request-context lifecycle. |
 | Restart and multiple profiles | Persistence, isolation and startup readback in independently launched processes. |
 
-The local `fingerprint-write` CEF run completed 60 checks and normal shutdown.
+The local `fingerprint-write` and `fingerprint-read` CEF runs each completed
+60 checks and normal shutdown.
 In its controlled main frame, same-origin frame and cross-origin frame, Canvas
 readback and an offline audio render were functional, `AudioContext` and the
 Local Font Access API were present, and WebGPU adapter requests were
@@ -102,6 +103,11 @@ test observed baseline availability and restricted unavailability; the
 controlled remote-font request counts were one and zero respectively. The
 fixture used local scheme handlers, not public websites.
 
+The disposable profile write/read test confirmed the WebRTC preference on
+restart; the native filtering suite passed 29 checks. A separate local CEF
+proxy fixture passed 31 checks, including its untrusted TLS rejection, an
+offline SOCKS failure and a synthetic preference-exception recovery case.
+
 Do not collect or persist device fingerprints, ICE addresses, raw cookies, or
 credentials. Controlled test fixtures should record only bounded status and
 packet-presence observations. Canvas, audio, local font metrics, screen, device
@@ -111,8 +117,13 @@ accessibility, and website layout; WebRTC controls may interrupt calls.
 
 ## Verification and decisions
 
-- Hosted Windows x64 final-head workflow and security-regression results are
-  **pending** until their actual run results are inspected.
+- Hosted Windows x64 [PR workflow 42977036487](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42977036487)
+  passed at `e6fb594062833bb45815f90b59cab6202cbf51b5`, including the two
+  60-check fingerprint phases, the loopback WebRTC comparison, HTTPS, TLS,
+  concurrent proxy, filtering, published smoke and packaging stages. Its
+  baseline sent a STUN packet and the restricted listener received none in
+  eight seconds. This run predates the preference-exception recovery fix; the
+  later final-head workflow must be evaluated independently.
 - Canvas and audio protection: no supported targeted mechanism established.
 - WebGPU protection: no independently verified per-profile CEF mechanism.
 - Local Font Access: browser content-setting capability established from source;
