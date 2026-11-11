@@ -1,0 +1,258 @@
+diff --git a/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc b/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
+index f81d660..31ac679 100644
+--- a/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
++++ b/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
+@@ -24,6 +24,7 @@
+ #include "third_party/blink/renderer/core/fileapi/blob.h"
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ #include "third_party/blink/renderer/core/frame/local_frame.h"
++#include "third_party/blink/renderer/core/frame/settings.h"
+ #include "third_party/blink/renderer/core/geometry/dom_matrix.h"
+ #include "third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.h"
+ #include "third_party/blink/renderer/core/html/canvas/canvas_context_creation_attributes_core.h"
+@@ -38,6 +39,7 @@
+ #include "third_party/blink/renderer/core/inspector/console_message.h"
+ #include "third_party/blink/renderer/core/probe/core_probes.h"
+ #include "third_party/blink/renderer/core/workers/dedicated_worker_global_scope.h"
++#include "third_party/blink/renderer/core/workers/worker_settings.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+ #include "third_party/blink/renderer/platform/fonts/plain_text_painter.h"
+ #include "third_party/blink/renderer/platform/graphics/canvas_resource.h"
+@@ -55,6 +57,7 @@
+ #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
+ #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+ #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
++#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+ #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+ #include "third_party/blink/renderer/platform/supplementable.h"
+ #include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
+@@ -575,6 +578,41 @@ bool OffscreenCanvas::IsOpaque() const {
+   return RenderingContext() && RenderingContext()->IsOpaque();
+ }
+ 
++// Research prototype: the enabled feature applies the receiving document's
++// settings or a dedicated worker's startup snapshot. Other worker types and
++// transfer policy semantics are deliberately not qualified by this patch.
++bool OffscreenCanvas::IsWebGL1Enabled() const {
++  if (!RuntimeEnabledFeatures::AegisOffscreenWebGLSettingsEnabled())
++    return true;
++  if (auto* window = DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
++    auto* frame = window->GetFrame();
++    auto* settings = frame ? frame->GetSettings() : nullptr;
++    return settings && settings->GetWebGL1Enabled();
++  }
++  if (auto* worker =
++          DynamicTo<DedicatedWorkerGlobalScope>(GetExecutionContext())) {
++    auto* settings = worker->GetWorkerSettings();
++    return settings && settings->GetWebGL1Enabled();
++  }
++  return true;
++}
++
++bool OffscreenCanvas::IsWebGL2Enabled() const {
++  if (!RuntimeEnabledFeatures::AegisOffscreenWebGLSettingsEnabled())
++    return true;
++  if (auto* window = DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
++    auto* frame = window->GetFrame();
++    auto* settings = frame ? frame->GetSettings() : nullptr;
++    return settings && settings->GetWebGL2Enabled();
++  }
++  if (auto* worker =
++          DynamicTo<DedicatedWorkerGlobalScope>(GetExecutionContext())) {
++    auto* settings = worker->GetWorkerSettings();
++    return settings && settings->GetWebGL2Enabled();
++  }
++  return true;
++}
++
+ CanvasRenderingContext* OffscreenCanvas::GetCanvasRenderingContext(
+     ExecutionContext* execution_context,
+     CanvasRenderingContext::CanvasRenderingAPI rendering_api,
+diff --git a/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h b/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h
+index cf76a95..9f4195d 100644
+--- a/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h
++++ b/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h
+@@ -167,8 +167,8 @@ class CORE_EXPORT OffscreenCanvas final
+     frame_dispatcher_ = nullptr;
+   }
+   UkmParameters GetUkmParameters() override;
+-  bool IsWebGL1Enabled() const override { return true; }
+-  bool IsWebGL2Enabled() const override { return true; }
++  bool IsWebGL1Enabled() const override;
++  bool IsWebGL2Enabled() const override;
+   bool IsWebGLBlocked() const override { return false; }
+ 
+   // CanvasResourceProviderDelegate implementation
+diff --git a/third_party/blink/renderer/core/workers/worker_settings.cc b/third_party/blink/renderer/core/workers/worker_settings.cc
+index 45680c5..88018fb 100644
+--- a/third_party/blink/renderer/core/workers/worker_settings.cc
++++ b/third_party/blink/renderer/core/workers/worker_settings.cc
+@@ -32,6 +32,8 @@ std::unique_ptr<WorkerSettings> WorkerSettings::Copy(
+       std::make_unique<WorkerSettings>(nullptr);
+   new_settings->disable_reading_from_canvas_ =
+       old_settings->disable_reading_from_canvas_;
++  new_settings->webgl1_enabled_ = old_settings->webgl1_enabled_;
++  new_settings->webgl2_enabled_ = old_settings->webgl2_enabled_;
+   new_settings->strict_mixed_content_checking_ =
+       old_settings->strict_mixed_content_checking_;
+   new_settings->allow_running_of_insecure_content_ =
+@@ -45,6 +47,8 @@ std::unique_ptr<WorkerSettings> WorkerSettings::Copy(
+ 
+ void WorkerSettings::CopyFlagValuesFromSettings(Settings* settings) {
+   disable_reading_from_canvas_ = settings->GetDisableReadingFromCanvas();
++  webgl1_enabled_ = settings->GetWebGL1Enabled();
++  webgl2_enabled_ = settings->GetWebGL2Enabled();
+   strict_mixed_content_checking_ = settings->GetStrictMixedContentChecking();
+   allow_running_of_insecure_content_ =
+       settings->GetAllowRunningOfInsecureContent();
+diff --git a/third_party/blink/renderer/core/workers/worker_settings.h b/third_party/blink/renderer/core/workers/worker_settings.h
+index 45c60dd..84fa51d 100644
+--- a/third_party/blink/renderer/core/workers/worker_settings.h
++++ b/third_party/blink/renderer/core/workers/worker_settings.h
+@@ -29,6 +29,8 @@ class CORE_EXPORT WorkerSettings {
+   static std::unique_ptr<WorkerSettings> Copy(WorkerSettings*);
+ 
+   bool DisableReadingFromCanvas() const { return disable_reading_from_canvas_; }
++  bool GetWebGL1Enabled() const { return webgl1_enabled_; }
++  bool GetWebGL2Enabled() const { return webgl2_enabled_; }
+   bool GetStrictMixedContentChecking() const {
+     return strict_mixed_content_checking_;
+   }
+@@ -51,6 +53,9 @@ class CORE_EXPORT WorkerSettings {
+   // For dedicated workers these flag values must remain unchanged throughout
+   // the parent document lifecycle.
+   bool disable_reading_from_canvas_ = false;
++  // The opt-in OffscreenCanvas gate denies an uninitialized snapshot.
++  bool webgl1_enabled_ = false;
++  bool webgl2_enabled_ = false;
+   bool strict_mixed_content_checking_ = false;
+   bool allow_running_of_insecure_content_ = false;
+   bool strictly_block_blockable_mixed_content_ = false;
+diff --git a/third_party/blink/renderer/platform/runtime_enabled_features.json5 b/third_party/blink/renderer/platform/runtime_enabled_features.json5
+index 7718a28..5842c7c 100644
+--- a/third_party/blink/renderer/platform/runtime_enabled_features.json5
++++ b/third_party/blink/renderer/platform/runtime_enabled_features.json5
+@@ -315,6 +315,12 @@
+       status: "test",
+       base_feature: "none",
+     },
++    {
++      name: "AegisOffscreenWebGLSettings",
++      // Research-only, default-off guard; not a web-exposed capability.
++      base_feature: "none",
++      settable_from_internals: true,
++    },
+     {
+       name: "AIClassifierAPI",
+       status: {
+diff --git a/third_party/blink/web_tests/fast/canvas/aegis-offscreen-webgl-settings.html b/third_party/blink/web_tests/fast/canvas/aegis-offscreen-webgl-settings.html
+new file mode 100644
+index 0000000..cf12fe4
+--- /dev/null
++++ b/third_party/blink/web_tests/fast/canvas/aegis-offscreen-webgl-settings.html
+@@ -0,0 +1,105 @@
++<!doctype html>
++<meta charset="utf-8">
++<title>Research: OffscreenCanvas WebGL per-context settings</title>
++<script src="/resources/testharness.js"></script>
++<script src="/resources/testharnessreport.js"></script>
++<script>
++'use strict';
++
++// These tests require a content_shell with working WebGL1 and WebGL2 positive
++// controls. Missing GPU support must fail rather than stand in for protection.
++test(() => assert_false(internals.runtimeFlags.aegisOffscreenWebGLSettingsEnabled),
++     'research feature is off by default');
++add_completion_callback(() => { internals.runtimeFlags.aegisOffscreenWebGLSettingsEnabled = false; });
++
++const workerSource = `
++  onmessage = async ({data}) => {
++    if (data.nested) {
++      const nested = new Worker(self.location.href);
++      nested.onmessage = e => { postMessage(e.data); nested.terminate(); };
++      nested.onerror = () => { postMessage({error: 'nested worker failed'}); nested.terminate(); };
++      nested.postMessage({version: data.version});
++      return;
++    }
++    const canvas = data.canvas || new OffscreenCanvas(1, 1);
++    const gl = canvas.getContext(data.version);
++    let rendered = false;
++    if (gl) {
++      gl.clearColor(0, 0, 0, 1);
++      gl.clear(gl.COLOR_BUFFER_BIT);
++      const pixel = new Uint8Array(4);
++      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
++      rendered = gl.getError() === gl.NO_ERROR;
++      gl.getExtension('WEBGL_lose_context')?.loseContext();
++    }
++    postMessage({available: !!gl, rendered});
++  };
++`;
++const workerUrl = URL.createObjectURL(new Blob([workerSource], {type:'text/javascript'}));
++add_completion_callback(() => URL.revokeObjectURL(workerUrl));
++
++function workerResult(version, nested = false, canvas = null) {
++  return new Promise((resolve, reject) => {
++    const worker = new Worker(workerUrl);
++    const timer = setTimeout(() => { worker.terminate(); reject(new Error('worker timeout')); }, 10000);
++    worker.onmessage = e => {
++      clearTimeout(timer);
++      worker.terminate();
++      if (e.data.error) reject(new Error(e.data.error));
++      else resolve(e.data);
++    };
++    worker.onerror = () => { clearTimeout(timer); worker.terminate(); reject(new Error('worker error')); };
++    worker.postMessage({version, nested, canvas}, canvas ? [canvas] : []);
++  });
++}
++
++function setWebGL(enabled) {
++  internals.settings.setWebGL1Enabled(enabled);
++  internals.settings.setWebGL2Enabled(enabled);
++}
++
++promise_test(async t => {
++  t.add_cleanup(() => setWebGL(true));
++  setWebGL(false);
++  const doc = new OffscreenCanvas(1,1).getContext('webgl');
++  assert_not_equals(doc, null, 'guard-off document retains stock behavior');
++  doc.getExtension('WEBGL_lose_context')?.loseContext();
++  const worker = await workerResult('webgl');
++  assert_true(worker.available && worker.rendered, 'guard-off worker retains stock behavior');
++}, 'default-off research feature preserves stock OffscreenCanvas behavior');
++
++for (const version of ['webgl', 'webgl2']) {
++  promise_test(async t => {
++    internals.runtimeFlags.aegisOffscreenWebGLSettingsEnabled = true;
++    setWebGL(true);
++    const doc = new OffscreenCanvas(1,1).getContext(version);
++    assert_not_equals(doc, null, version + ' document positive control');
++    doc.clear(doc.COLOR_BUFFER_BIT);
++    assert_equals(doc.getError(), doc.NO_ERROR);
++    doc.getExtension('WEBGL_lose_context')?.loseContext();
++    const worker = await workerResult(version);
++    assert_true(worker.available, version + ' dedicated-worker positive control');
++    assert_true(worker.rendered, version + ' dedicated-worker readback control');
++    const nested = await workerResult(version, true);
++    assert_true(nested.available && nested.rendered, version + ' nested-worker positive control');
++    const transferred = await workerResult(version, false, new OffscreenCanvas(1,1));
++    assert_true(transferred.available && transferred.rendered, version + ' transferred-canvas positive control');
++  }, version + ' enabled settings preserve document and worker positive controls');
++
++  promise_test(async t => {
++    t.add_cleanup(() => setWebGL(true));
++    setWebGL(false);
++    assert_equals(new OffscreenCanvas(1,1).getContext(version), null, 'document OffscreenCanvas blocked');
++    const dedicated = await workerResult(version);
++    assert_false(dedicated.available, 'dedicated-worker OffscreenCanvas blocked');
++    const nested = await workerResult(version, true);
++    assert_false(nested.available, 'nested dedicated worker inherits the snapshot');
++    const transferred = await workerResult(version, false, new OffscreenCanvas(1,1));
++    assert_false(transferred.available, 'same-policy transfer evaluated at receiver');
++    const twoD = new OffscreenCanvas(1,1).getContext('2d');
++    assert_not_equals(twoD, null, 'Canvas 2D remains available');
++    twoD.fillRect(0,0,1,1);
++    assert_equals(twoD.getImageData(0,0,1,1).data.length, 4);
++  }, version + ' disabled settings block document and dedicated-worker contexts');
++}
++</script>
