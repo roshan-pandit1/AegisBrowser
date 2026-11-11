@@ -130,8 +130,10 @@ internal static partial class Program
         private readonly Stopwatch elapsed = Stopwatch.StartNew();
         private readonly string run = Guid.NewGuid().ToString("N");
         private int storageCallbacks;
+        private int storageDenials;
         private int otherCallbacks;
         internal int StorageCallbacks => Volatile.Read(ref storageCallbacks);
+        internal int StorageDenials => Volatile.Read(ref storageDenials);
         internal int OtherCallbacks => Volatile.Read(ref otherCallbacks);
         internal void Record(string category, string details) =>
             Console.WriteLine($"P404_{category}: run={run} elapsed_ms={elapsed.ElapsedMilliseconds} {details}");
@@ -143,6 +145,7 @@ internal static partial class Program
             var decision = message.StartsWith("Permission blocked:", StringComparison.Ordinal) ? "blocked"
                 : message.StartsWith("Permission decision requested", StringComparison.Ordinal) ? "prompt"
                 : "other";
+            if (storage && decision == "blocked") Interlocked.Increment(ref storageDenials);
             var requesting = message.Contains("localhost", StringComparison.OrdinalIgnoreCase) ? "controlled_third" : "unknown";
             Record("PERMISSION_EVENT", $"type={(storage ? "storage_access" : "other")} decision={decision} requesting={requesting} top=not_exposed_by_report");
         }
@@ -243,6 +246,7 @@ internal static partial class Program
         await InteractWithRequestingSite(browser, server);
         server.Take("/p404-cookie-check");
         var beforeCallbacks = permissions.StorageCallbacks;
+        var beforeDenials = permissions.StorageDenials;
         var beforeOtherCallbacks = permissions.OtherCallbacks;
         using var ready = await OpenStorageAccessFrame(browser, server, server.TopA, sandboxed);
         var readyRoot = ready.RootElement;
@@ -279,7 +283,28 @@ internal static partial class Program
         var classification = incomplete ? "result=INCONCLUSIVE reason=api_unavailable_or_timeout " : "";
         permissions.Record("STORAGE_ACCESS_EVENT", $"scenario={label} {classification}supported={supported} trusted={trusted} active={active} before={before} api={result} after={after} storage_named_callbacks={permissions.StorageCallbacks - beforeCallbacks} other_callbacks={permissions.OtherCallbacks - beforeOtherCallbacks}");
         permissions.Record("COOKIE_OBSERVATION", $"scenario={label} request_received=true ordinary_cookie={requests[0].Normal} httponly_cookie={requests[0].HttpOnly}");
-        if (!sandboxed) await EmbeddedAuthentication(browser, server, permissions, null, label + "_after_access", seed: false);
+        if (label == "enabled" && !incomplete && result == "rejected:NotAllowedError")
+        {
+            var callbackWait = Stopwatch.StartNew();
+            while (permissions.StorageDenials == beforeDenials && callbackWait.Elapsed < TimeSpan.FromSeconds(2))
+                await Task.Delay(50);
+        }
+        var deniedByHandler = permissions.StorageDenials > beforeDenials;
+        if (label == "enabled" && !incomplete)
+        {
+            if (deniedByHandler)
+            {
+                Check(before == "false" && result == "rejected:NotAllowedError" && after == "false",
+                    "production Storage Access denial agrees with the API result");
+                Check(!requests[0].Normal && !requests[0].HttpOnly,
+                    "denied Storage Access leaves synthetic third-party cookies suppressed");
+                Console.WriteLine("P405_PERMISSION_DECISION: scenario=enabled result=DENIED_BY_HANDLER user_decision=not_observed");
+            }
+            else Console.WriteLine("P405_PERMISSION_DECISION: scenario=enabled result=INCONCLUSIVE reason=no_named_handler_denial");
+        }
+        bool? expectAfter = label == "enabled" && deniedByHandler ? false
+            : label == "baseline" && before == "true" && result == "resolved" ? true : null;
+        if (!sandboxed) await EmbeddedAuthentication(browser, server, permissions, expectAfter, label + "_after_access", seed: false);
         using var siteA = await OpenStorageAccessFrame(browser, server, server.TopA);
         using var siteB = await OpenStorageAccessFrame(browser, server, server.TopB);
         permissions.Record("STORAGE_ACCESS_PERSISTENCE", $"scenario={label} site_a={siteA.RootElement.GetProperty("before").GetString()} site_b={siteB.RootElement.GetProperty("before").GetString()}");

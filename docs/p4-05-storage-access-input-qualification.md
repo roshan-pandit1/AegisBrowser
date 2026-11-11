@@ -47,8 +47,7 @@ process ultimately handled input. The controlled frame's received click,
 acknowledgment and from any permission result.
 
 The feasibility finding is `SUPPORTED_INPUT_ROUTE_IDENTIFIED` for the pinned
-API and controlled test design. It is not an assertion that hosted delivery
-or user-mediated Storage Access permission has been verified.
+API and controlled test design. It is not a user-approved Storage Access grant.
 
 ## Local observations and negative checks
 
@@ -83,6 +82,26 @@ synthetic cookie booleans are separate evidence. An API resolution while
 cookies were already available is not a newly granted permission. No automatic
 grant, origin exception or permission override is introduced.
 
+On Windows x64, the initial P4-05 [push run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42954142021)
+and [PR run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/42955052461)
+at commit `664249125fc7f5d7ac02db9c709b57beba990058` both observed the
+controlled real-HTTPS iframe click as trusted with transient activation. In
+the enabled case, the existing production `OriginPermissions` handler
+reported a `StorageAccess` permission as blocked; the API rejected with
+`NotAllowedError`, `hasStorageAccess` remained false, and the server received
+neither the ordinary nor the HttpOnly synthetic cookie. The embedded synthetic
+session remained unavailable. This is an application-handler denial, not a
+user's explicit choice in a prompt.
+
+With blocking disabled, access was already true before the request; the API
+resolved and both synthetic cookies reached the server. No new grant follows
+from that resolution. The sandboxed iframe without the storage-access sandbox
+token rejected its request with `NotAllowedError`; no storage-named handler
+callback was reported for that case. After navigation and process restart,
+the enabled fixture still reported access unavailable. Because no grant was
+established, this is not grant-persistence evidence. Both runs observed CEF
+shutdown and the independent temporary-root cleanup.
+
 P4-04 measured a synthetic embedded-cookie-dependent login that worked with
 blocking disabled and failed with blocking enabled; its synthetic popup flow
 worked. Those results are scoped to the fixtures. A user may turn off the
@@ -103,8 +122,28 @@ The historical intermittent SOCKS root cause remains inconclusive.
 ## Verification and acceptance
 
 The local browser-test project builds and the source-derived input route has
-been exercised in the CEF-only fixture. Hosted Windows x64 real-HTTPS results,
-permission decisions and final-head CI must be read from the research PR and
-its logs. Missing gesture, denial, grant or persistence evidence remains
-inconclusive; a green infrastructure workflow is not permission qualification.
-No result approves production deployment.
+been exercised in the CEF-only fixture. The initial hosted runs supplied the
+controlled real-HTTPS evidence above; later final-head results must be read
+from the research PR and its logs. No result approves production deployment.
+
+| Area | Result and tested scope |
+| --- | --- |
+| `CROSS_ORIGIN_INPUT_ROUTE` | SUPPORTED for the pinned browser-level test API. |
+| `FRAME_TARGET_ATTRIBUTION` | VERIFIED for the controlled named iframe using CEF, target metadata and fixture messages. |
+| `TRUSTED_CLICK_DELIVERY` | VERIFIED for automated input to the controlled iframe. |
+| `TRANSIENT_USER_ACTIVATION` | VERIFIED at the controlled automated click handler. |
+| `STORAGE_ACCESS_NO_GESTURE` | VERIFIED for the controlled enabled and baseline HTTPS cases. |
+| `STORAGE_ACCESS_WITH_GESTURE` | VERIFIED for API execution and the observed handler-denied result. |
+| `STORAGE_PERMISSION_DENIAL` | VERIFIED for the production handler's denial, not a user's prompt choice. |
+| `STORAGE_PERMISSION_GRANT` | INCONCLUSIVE; no user-approved grant was observed. |
+| `GRANT_PERSISTENCE` | INCONCLUSIVE; no grant was established. |
+| `HTTPS_COOKIE_TRANSMISSION` | VERIFIED for synthetic ordinary and HttpOnly loopback cookies. |
+| `EMBEDDED_LOGIN_COMPATIBILITY` | FAILED for the synthetic cookie-dependent iframe with blocking enabled. |
+| `OAUTH_POPUP_COMPATIBILITY` | VERIFIED for the controlled synthetic popup. |
+| `SOCKS_CALLBACK_ORDERING` | VERIFIED for the observed offline and cancellation cases. |
+| `SOCKS_ROOT_CAUSE` | INCONCLUSIVE. |
+| `SOCKS_TEST_RELIABILITY` | INCOMPLETE. |
+| `TLS_VALIDATION` | VERIFIED for the controlled certificate fixtures. |
+| `PROFILE_ISOLATION` | VERIFIED within disposable-profile tests. |
+| `NETWORK_LEAK_COVERAGE` | INCOMPLETE. |
+| `PRODUCTION_READINESS` | NOT_APPROVED. |

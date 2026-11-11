@@ -140,7 +140,15 @@ jobs:
                      $output -notmatch "P405_STORAGE_ACCESS_RESULT: scenario=$scenario ")) {
                   throw "Missing Storage Access request or result for $scenario"
                 }
+                if ($scenario -eq 'enabled' -and $event.Groups['details'].Value -notmatch 'result=INCONCLUSIVE' -and
+                    $output -notmatch 'P405_PERMISSION_DECISION: scenario=enabled result=(DENIED_BY_HANDLER|INCONCLUSIVE)') {
+                  throw 'Missing production permission-handler decision classification.'
+                }
               }
+            }
+            if ($output -match 'P405_PERMISSION_DECISION: scenario=enabled result=INCONCLUSIVE') {
+              Write-Warning 'The production Storage Access denial was not independently observed.'
+              'P405 production Storage Access denial: INCONCLUSIVE (see logs)' | Out-File $env:GITHUB_STEP_SUMMARY -Append
             }
             if ($output -match 'P404_STORAGE_ACCESS_EVENT:.*result=INCONCLUSIVE') {
               Write-Warning 'A real HTTPS Storage Access gesture was not observed; grant, denial and persistence are not verified.'
