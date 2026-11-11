@@ -10,6 +10,8 @@ internal sealed class PrivacyForm : Form
     private readonly CheckBox unknownSiteRules = new() { Name = "UnknownSiteRules", Text = "Apply third-party rules when site is unknown (may block content)", AutoSize = true };
     private readonly CheckBox blockThirdPartyCookies = new() { Name = "BlockThirdPartyCookies", Text = "Block third-party cookies (restart profile to apply)", AutoSize = true };
     private readonly CheckBox letterboxWebContent = new() { Name = "LetterboxWebContent", Text = "Letterbox page viewport (restart profile; may reduce available space)", AutoSize = true };
+    private readonly CheckBox disableWebGl = new() { Name = "DisableWebGl", Text = "Restrict WebGL (restart; 3D graphics and some sites may fail)", AutoSize = true };
+    private readonly CheckBox disableRemoteFonts = new() { Name = "DisableRemoteFonts", Text = "Block remote web fonts (restart; typography may change)", AutoSize = true };
     private readonly TextBox blocks = Editor(), allows = Editor(), sites = Editor(), rules = Editor(), list = Editor(), unsupported = Editor();
     private readonly Label summary = new() { AutoSize = true };
     private readonly DataGridView network = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false,
@@ -19,7 +21,8 @@ internal sealed class PrivacyForm : Form
     private readonly Action<PrivacyConfiguration> apply;
 
     public PrivacyForm(PrivacySession session, string? currentUrl, Action<PrivacyConfiguration>? apply = null,
-        string cookiePolicyStatus = "Existing Chromium setting (no Aegis override)", bool letterboxingActive = false)
+        string cookiePolicyStatus = "Existing Chromium setting (no Aegis override)", bool letterboxingActive = false,
+        bool webGlRestrictionActive = false, bool remoteFontRestrictionActive = false)
     {
         this.session = session;
         mode.Name = "PrivacyMode"; blocks.Name = "BlockedDomains"; allows.Name = "AllowedDomains";
@@ -37,13 +40,18 @@ internal sealed class PrivacyForm : Form
         unknownSiteRules.Checked = session.Configuration.ApplyThirdPartyRulesWhenSiteUnknown;
         blockThirdPartyCookies.Checked = session.Configuration.BlockThirdPartyCookies == true;
         letterboxWebContent.Checked = session.Configuration.LetterboxWebContent;
+        disableWebGl.Checked = session.Configuration.DisableWebGl;
+        disableRemoteFonts.Checked = session.Configuration.DisableRemoteFonts;
         var controls = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
-        controls.Controls.AddRange([mode, customList, unknownSiteRules, blockThirdPartyCookies, letterboxWebContent, Button("Apply settings", Apply)]);
+        controls.Controls.AddRange([mode, customList, unknownSiteRules, blockThirdPartyCookies, letterboxWebContent,
+            disableWebGl, disableRemoteFonts, Button("Apply settings", Apply)]);
         controls.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(1000, 0),
             Text = "Current cookie policy: " + cookiePolicyStatus + ". Viewport letterboxing at startup: "
-                + (letterboxingActive ? "On" : "Off") + ". Changes apply after restarting this profile. "
+                + (letterboxingActive ? "On" : "Off") + ". WebGL restriction at startup: "
+                + (webGlRestrictionActive ? "On" : "Off") + ". Remote web fonts restriction: "
+                + (remoteFontRestrictionActive ? "On" : "Off") + ". Changes apply after restarting this profile. "
                 + "Turning this off restores Chromium's default, which may still block some cookies. "
-                + "Blocking can affect embedded sign-in, payments and media. Letterboxing sizes the browser control; page zoom and display scaling can change the CSS viewport. It can reduce visible content area and does not hide your screen, IP or full fingerprint." });
+                + "Blocking can affect embedded sign-in, payments and media. Letterboxing sizes the browser control; page zoom and display scaling can change the CSS viewport. WebGL restrictions can break 3D content; disabling remote fonts does not conceal installed local fonts. None of these options hides your IP or prevents all fingerprinting." });
         var pause = new CheckBox { Text = "Pause filtering until resumed or browser exit", AutoSize = true, Checked = session.Paused };
         pause.CheckedChanged += (_, _) => session.Paused = pause.Checked;
         controls.Controls.Add(pause);
@@ -123,6 +131,7 @@ internal sealed class PrivacyForm : Form
                 UseListsInCustom = customList.Checked, ApplyThirdPartyRulesWhenSiteUnknown = unknownSiteRules.Checked,
                 BlockThirdPartyCookies = blockThirdPartyCookies.Checked ? true : previousCookies == true ? false : previousCookies,
                 LetterboxWebContent = letterboxWebContent.Checked,
+                DisableWebGl = disableWebGl.Checked, DisableRemoteFonts = disableRemoteFonts.Checked,
                 FilterList = list.Text, UserRules = rules.Text,
                 BlockedDomains = Domains(blocks), AllowedDomains = Domains(allows), SiteExceptions = Domains(sites) };
             apply(config);
@@ -133,7 +142,7 @@ internal sealed class PrivacyForm : Form
         {
             ApplyEdits();
             RefreshInspector();
-            MessageBox.Show(this, $"Network rules apply to new requests. Restart this profile to apply cookie-policy or viewport letterboxing changes.\n{session.RuleCount} active rules; {session.Unsupported.Count} unsupported rules skipped.", "Privacy settings");
+            MessageBox.Show(this, $"Network rules apply to new requests. Restart this profile for cookie, viewport or fingerprint-surface settings.\n{session.RuleCount} active rules; {session.Unsupported.Count} unsupported rules skipped.", "Privacy settings");
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
         { MessageBox.Show(this, ex.Message, "Settings were not applied"); }
