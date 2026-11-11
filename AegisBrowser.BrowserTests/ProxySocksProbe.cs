@@ -74,18 +74,7 @@ internal static partial class Program
         {
             trace.Add("NAVIGATION_EVENT", "OFFLINE_LOAD_REQUESTED");
             browser.Load(offlineUrl);
-            var terminal = await Task.WhenAny(failed.Task, unexpectedSuccess.Task, Task.Delay(TimeSpan.FromSeconds(25)));
-            if (terminal == unexpectedSuccess.Task)
-            {
-                trace.Add("NAVIGATION_EVENT", "UNEXPECTED_SUCCESS", (await unexpectedSuccess.Task).ToString());
-                throw new InvalidOperationException("The SOCKS-offline navigation unexpectedly succeeded.");
-            }
-            if (terminal != failed.Task)
-            {
-                trace.Add("NAVIGATION_EVENT", "TIMEOUT_NO_MATCHING_LOAD_ERROR");
-                throw new TimeoutException("No matching SOCKS-offline load error was observed within 25 seconds.");
-            }
-            var error = await failed.Task;
+            var error = await AwaitSocksOutcome(failed.Task, unexpectedSuccess.Task, TimeSpan.FromSeconds(25), trace);
             trace.Add("NAVIGATION_EVENT", error == CefErrorCode.Aborted ? "NAVIGATION_CANCELLED" : "LOAD_ERROR_OBSERVED", error.ToString());
             Check(error != CefErrorCode.None && error != CefErrorCode.Aborted,
                 "CEF reports a non-cancellation load error after the controlled SOCKS5 listener stops");
@@ -99,6 +88,45 @@ internal static partial class Program
             // cancellation after a timeout. The owner detaches the callbacks.
             trace.Add("NAVIGATION_EVENT", "OFFLINE_WAIT_ENDED");
         }
+    }
+
+    private static async Task<CefErrorCode> AwaitSocksOutcome(Task<CefErrorCode> failed, Task<int> unexpectedSuccess,
+        TimeSpan timeout, SocksTrace trace)
+    {
+        var terminal = await Task.WhenAny(failed, unexpectedSuccess, Task.Delay(timeout));
+        if (terminal == unexpectedSuccess)
+        {
+            trace.Add("NAVIGATION_EVENT", "UNEXPECTED_SUCCESS", (await unexpectedSuccess).ToString());
+            throw new InvalidOperationException("The SOCKS-offline navigation unexpectedly succeeded.");
+        }
+        if (terminal != failed)
+        {
+            trace.Add("NAVIGATION_EVENT", "TIMEOUT_NO_MATCHING_LOAD_ERROR");
+            // Preserve the evidence before browser teardown, which may stall.
+            trace.Print("OFFLINE_TIMEOUT");
+            throw new TimeoutException($"No matching SOCKS-offline load error was observed within {timeout.TotalMilliseconds:0} ms.");
+        }
+        return await failed;
+    }
+
+    private static async Task VerifySocksOutcomeFailures()
+    {
+        var synthetic = new SocksTrace("SYNTHETIC");
+        var missing = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var success = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var timedOut = false;
+        try { await AwaitSocksOutcome(missing.Task, success.Task, TimeSpan.FromMilliseconds(20), synthetic); }
+        catch (TimeoutException) { timedOut = true; }
+        Check(timedOut, "synthetic missing SOCKS callback remains a timeout");
+
+        var rejected = false;
+        try { await AwaitSocksOutcome(missing.Task, Task.FromResult(200), TimeSpan.FromSeconds(1), synthetic); }
+        catch (InvalidOperationException) { rejected = true; }
+        Check(rejected, "synthetic successful offline navigation is rejected");
+
+        var overflow = new SocksTrace("SYNTHETIC");
+        for (var i = 0; i < 129; i++) overflow.Add("NAVIGATION_EVENT", "SYNTHETIC");
+        Check(overflow.Dropped == 1, "synthetic SOCKS trace reports dropped events");
     }
 
     private static async Task ObserveSocksCancellation(BrowserView browser, IRequestContext context, SocksTrace trace)
@@ -135,9 +163,12 @@ internal static partial class Program
         private const int Limit = 128;
         private readonly Stopwatch elapsed = Stopwatch.StartNew();
         private readonly string run = Guid.NewGuid().ToString("N");
+        private readonly string evidence;
         private readonly object gate = new();
         private readonly List<string> events = [];
         private int dropped;
+        internal SocksTrace(string evidence = "NATIVE_CEF") => this.evidence = evidence;
+        internal int Dropped { get { lock (gate) return dropped; } }
         internal Action? DetachCallbacks { get; set; }
 
         internal void Detach()
@@ -151,16 +182,16 @@ internal static partial class Program
             lock (gate)
             {
                 if (events.Count >= Limit) { dropped++; return; }
-                events.Add($"P404_{category}: run={run} sequence={events.Count + 1} elapsed_ms={elapsed.ElapsedMilliseconds} kind={kind} status={status}");
+                events.Add($"P404_{category}: run={run} evidence={evidence} sequence={events.Count + 1} elapsed_ms={elapsed.ElapsedMilliseconds} kind={kind} status={status}");
             }
         }
 
-        internal void Print()
+        internal void Print(string phase = "FINAL")
         {
             lock (gate)
             {
                 foreach (var item in events) Console.WriteLine(item);
-                Console.WriteLine($"P404_TRACE: run={run} recorded={events.Count} dropped={dropped}");
+                Console.WriteLine($"P404_TRACE: run={run} evidence={evidence} phase={phase} recorded={events.Count} dropped={dropped}");
             }
         }
     }

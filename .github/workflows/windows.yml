@@ -77,9 +77,19 @@ jobs:
           }
           $inputResults = [regex]::Matches(($output -join "`n"), 'P404_CROSS_ORIGIN_INPUT: (VERIFIED|INCONCLUSIVE)\b')
           if ($inputResults.Count -ne 2) { throw 'Missing cross-origin input preflight results.' }
+          foreach ($check in @('script-generated iframe click is not trusted input', 'wrong frame URL is rejected before input',
+                               'hidden iframe is rejected before input', 'offscreen iframe coordinates are rejected before input',
+                               'destroyed iframe is rejected before input')) {
+            if ([regex]::Matches(($output -join "`n"), [regex]::Escape("PASS: $check")).Count -ne 2) {
+              throw "Missing frame-input negative check: $check"
+            }
+          }
+          if (($output -join "`n") -match 'P405_INPUT_TRACE:.*dropped=[1-9]') { throw 'Frame-input trace was truncated.' }
           if (($output -join "`n") -match 'P404_CROSS_ORIGIN_INPUT: INCONCLUSIVE') {
             Write-Warning 'Cross-origin test input was not observed; Storage Access gesture qualification remains inconclusive.'
             'P404 cross-origin input preflight: INCONCLUSIVE (see logs)' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          } else {
+            'P405 cross-origin input preflight: trusted automated input observed in the in-process fixture; HTTPS permission results are separate.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
           }
       - name: HTTPS fixture certificate preflight
         timeout-minutes: 2
@@ -113,10 +123,32 @@ jobs:
             $required = if ($phase -eq 'https-privacy-write') {
               @('P404_AUTH_EVENT:.*scenario=baseline ', 'P404_AUTH_EVENT:.*scenario=enabled ',
                 'P404_STORAGE_ACCESS_EVENT:.*scenario=baseline ', 'P404_STORAGE_ACCESS_EVENT:.*scenario=enabled ',
-                'P404_STORAGE_ACCESS_EVENT:.*scenario=sandboxed_enabled ', 'P404_PERMISSION_SUMMARY:')
+                'P404_STORAGE_ACCESS_EVENT:.*scenario=sandboxed_enabled ', 'P404_PERMISSION_SUMMARY:',
+                'P405_INPUT_TRACE:.*scenario=baseline ', 'P405_INPUT_TRACE:.*scenario=enabled ',
+                'P405_INPUT_TRACE:.*scenario=sandboxed_enabled ')
             } else { @('P404_STORAGE_ACCESS_PERSISTENCE:.*scenario=restart_enabled ', 'P404_PERMISSION_SUMMARY:') }
             foreach ($marker in $required) {
               if ($output -notmatch $marker) { throw "Missing HTTPS research observation: $marker" }
+            }
+            if ($output -match 'P405_INPUT_TRACE:.*dropped=[1-9]') { throw 'Frame-input trace was truncated.' }
+            if ($phase -eq 'https-privacy-write') {
+              foreach ($scenario in @('baseline', 'enabled', 'sandboxed_enabled')) {
+                $event = [regex]::Match($output, "P404_STORAGE_ACCESS_EVENT:[^`r`n]*scenario=$scenario (?<details>[^`r`n]*)")
+                if (-not $event.Success) { throw "Missing Storage Access result for $scenario" }
+                if ($event.Groups['details'].Value -notmatch 'result=INCONCLUSIVE' -and
+                    ($output -notmatch "P405_STORAGE_ACCESS_REQUESTED: scenario=$scenario " -or
+                     $output -notmatch "P405_STORAGE_ACCESS_RESULT: scenario=$scenario ")) {
+                  throw "Missing Storage Access request or result for $scenario"
+                }
+                if ($scenario -eq 'enabled' -and $event.Groups['details'].Value -notmatch 'result=INCONCLUSIVE' -and
+                    $output -notmatch 'P405_PERMISSION_DECISION: scenario=enabled result=(DENIED_BY_HANDLER|INCONCLUSIVE)') {
+                  throw 'Missing production permission-handler decision classification.'
+                }
+              }
+            }
+            if ($output -match 'P405_PERMISSION_DECISION: scenario=enabled result=INCONCLUSIVE') {
+              Write-Warning 'The production Storage Access denial was not independently observed.'
+              'P405 production Storage Access denial: INCONCLUSIVE (see logs)' | Out-File $env:GITHUB_STEP_SUMMARY -Append
             }
             if ($output -match 'P404_STORAGE_ACCESS_EVENT:.*result=INCONCLUSIVE') {
               Write-Warning 'A real HTTPS Storage Access gesture was not observed; grant, denial and persistence are not verified.'
@@ -137,6 +169,10 @@ jobs:
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy probe checks')) { throw 'CEF proxy probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy probe shutdown completed')) { throw 'CEF proxy probe did not complete native shutdown' }
+          foreach ($check in @('synthetic missing SOCKS callback remains a timeout', 'synthetic successful offline navigation is rejected',
+                               'synthetic SOCKS trace reports dropped events')) {
+            if (($output -join "`n") -notmatch [regex]::Escape("PASS: $check")) { throw "Missing SOCKS negative check: $check" }
+          }
       - name: Controlled CEF proxy authentication probe
         timeout-minutes: 3
         run: |
