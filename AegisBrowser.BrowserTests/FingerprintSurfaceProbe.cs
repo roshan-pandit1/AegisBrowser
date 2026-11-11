@@ -80,7 +80,12 @@ internal static partial class Program
                         "baseline web-font fixture made an actual remote-font request");
                     Check(fixture.RestrictedFontRequests == 0,
                         "CEF remote-font restriction suppressed the controlled request");
+                    Check(fixture.BaselinePopupFontRequests > 0,
+                        "baseline native popup made its own remote-font request");
+                    Check(fixture.RestrictedPopupFontRequests == 0,
+                        "native popup remote-font restriction suppressed its controlled request");
                     Console.WriteLine($"P4FP_FONT_REQUESTS: baseline={fixture.BaselineFontRequests} restricted={fixture.RestrictedFontRequests}");
+                    Console.WriteLine($"P4FP03_POPUP_FONT_REQUESTS: baseline={fixture.BaselinePopupFontRequests} restricted={fixture.RestrictedPopupFontRequests}");
                     Console.WriteLine($"PASS: {checks} fingerprint surface checks ({phase})");
                     completed = true;
                 }
@@ -110,6 +115,7 @@ internal static partial class Program
             await Ready(browser);
             await LoadReady(browser, "https://fp-surface.invalid/" + mode);
             await MeasureFingerprintContexts(browser, mode);
+            await MeasureFingerprintPopup(browser, mode);
             var gl = await Js(browser, "(() => { const c = document.createElement('canvas'); const gl = c.getContext('webgl'); gl?.getExtension('WEBGL_lose_context')?.loseContext(); return !!gl; })()");
             Console.WriteLine($"P4FP_WEBGL: mode={mode} contextAvailable={gl}");
             if (mode == "restricted")
@@ -139,14 +145,30 @@ internal static partial class Program
     {
         private int baselineFontRequests;
         private int restrictedFontRequests;
+        private int baselinePopupFontRequests;
+        private int restrictedPopupFontRequests;
         public int BaselineFontRequests => Volatile.Read(ref baselineFontRequests);
         public int RestrictedFontRequests => Volatile.Read(ref restrictedFontRequests);
+        public int BaselinePopupFontRequests => Volatile.Read(ref baselinePopupFontRequests);
+        public int RestrictedPopupFontRequests => Volatile.Read(ref restrictedPopupFontRequests);
 
         public IResourceHandler Create(IBrowser browser, IFrame frame, string schemeName, IRequest request)
         {
             var path = new Uri(request.Url).AbsolutePath;
             if (path == "/capability-frame")
                 return ResourceHandler.FromString(CapabilityFrameHtml, mimeType: "text/html");
+            if (path == "/popup-baseline" || path == "/popup-restricted")
+                return ResourceHandler.FromString(FingerprintPopupHtml(path[7..]), mimeType: "text/html");
+            if (path == "/popup-font-baseline.woff2")
+            {
+                Interlocked.Increment(ref baselinePopupFontRequests);
+                return ResourceHandler.FromString("invalid synthetic font data", mimeType: "font/woff2");
+            }
+            if (path == "/popup-font-restricted.woff2")
+            {
+                Interlocked.Increment(ref restrictedPopupFontRequests);
+                return ResourceHandler.FromString("invalid synthetic font data", mimeType: "font/woff2");
+            }
             if (path == "/font-baseline.woff2")
             {
                 Interlocked.Increment(ref baselineFontRequests);

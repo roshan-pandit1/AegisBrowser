@@ -79,7 +79,9 @@ jobs:
                 $body -notmatch 'restricted=0' -or
                 $body -notmatch 'P4FP_WEBGL: mode=restricted contextAvailable=False' -or
                 $body -notmatch 'P4FP02_CAPABILITY: mode=baseline context=main surface=canvas' -or
-                $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=cross surface=webgpu') {
+                $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=cross surface=webgpu' -or
+                $body -notmatch 'P4FP03_POPUP_WEBGL: mode=restricted contextAvailable=False' -or
+                $body -notmatch 'P4FP03_POPUP_FONT_REQUESTS: baseline=[1-9][0-9]* restricted=0') {
               throw "Fingerprint surface probe $phase failed or did not complete native shutdown"
             }
           }
@@ -219,9 +221,10 @@ jobs:
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy authentication probe checks')) { throw 'CEF proxy authentication probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy authentication probe shutdown completed')) { throw 'CEF authentication probe did not complete native shutdown' }
       - name: Observe WebRTC startup policy in independent profiles
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           $observations = @{}
+          $contexts = @{}
           foreach ($mode in @('baseline', 'restrict')) {
             $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-webrtc-' + $mode + '-' + [guid]::NewGuid().ToString('N'))
             $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webrtc-$mode" $profileRoot 2>&1
@@ -230,6 +233,14 @@ jobs:
             $joined = $output -join "`n"
             if ($code -ne 0 -or $joined -notmatch 'PASS: WebRTC startup observation shutdown completed') { throw "WebRTC $mode probe failed or did not shut down" }
             if ($joined -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+            foreach ($context in @('main', 'same', 'cross', 'popup')) {
+              $match = [regex]::Matches($joined, "P4FP03_RTC:.*context=$context .*udp4=(STUN_OBSERVED|OTHER_PACKET|NOT_OBSERVED|UNSUPPORTED) udp6=(STUN_OBSERVED|OTHER_PACKET|NOT_OBSERVED|UNSUPPORTED) tcp4=(CONNECTION_OBSERVED|NOT_OBSERVED|UNSUPPORTED) tcp6=(CONNECTION_OBSERVED|NOT_OBSERVED|UNSUPPORTED)")
+              if ($match.Count -ne 1) { throw "WebRTC $mode context $context result missing or ambiguous" }
+              $contexts["$mode-$context"] = @($match[0].Groups[1].Value, $match[0].Groups[2].Value, $match[0].Groups[3].Value, $match[0].Groups[4].Value)
+            }
+            foreach ($context in @('dedicated', 'shared', 'service')) {
+              if ([regex]::Matches($joined, "P4FP03_WORKER:.*context=$context ").Count -ne 1) { throw "WebRTC $mode worker $context result missing or ambiguous" }
+            }
             $stunMatches = [regex]::Matches($joined, 'WEBRTC_STARTUP_STUN: (STUN|OTHERPACKET|NOTOBSERVED|UNSUPPORTED)')
             if ($stunMatches.Count -ne 1) { throw "WebRTC $mode observation missing or ambiguous" }
             $observations[$mode] = $stunMatches[0].Groups[1].Value
@@ -238,6 +249,15 @@ jobs:
             'WebRTC loopback STUN: one baseline packet; none observed in one restricted run. This is not network containment.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
           } else {
             'WebRTC loopback STUN comparison: INCONCLUSIVE (positive control or restricted observation incomplete).' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
+          foreach ($context in @('main', 'same', 'cross', 'popup')) {
+            $before = $contexts["baseline-$context"]
+            $after = $contexts["restrict-$context"]
+            foreach ($index in 0, 1) {
+              $family = if ($index -eq 0) { 'IPv4' } else { 'IPv6' }
+              $result = if ($before[$index] -eq 'STUN_OBSERVED' -and $after[$index] -eq 'NOT_OBSERVED') { 'SCOPED_COMPARISON_OBSERVED' } else { 'INCONCLUSIVE' }
+              "WebRTC $context $family loopback STUN: $result; baseline=$($before[$index]), restricted=$($after[$index]). No containment claim." | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            }
           }
       - name: Concurrent independent CEF proxy probes
         timeout-minutes: 5

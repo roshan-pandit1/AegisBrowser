@@ -224,11 +224,12 @@ internal static partial class Program
                         await stream.WriteAsync("HTTP/1.1 302 Found\r\nLocation: /redirect-target\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray(), token);
                         return;
                     }
-                    var contentType = path == "/proxy-script.js" ? "application/javascript" : "text/html";
+                    var contentType = path is "/proxy-script.js" or "/fp03-worker.js" ? "application/javascript" : "text/html";
                     var content = path switch
                     {
                         "/proxy-page" => "<!doctype html><title>page</title><script src='/proxy-script.js'></script>",
                         "/proxy-script.js" => "document.title='proxied script';",
+                        "/fp03-worker.js" => "self.addEventListener('message',e=>{if(e.source)e.source.postMessage({kind:'fp03-service',rtc:typeof RTCPeerConnection});});",
                         "/proxy-popup" => "<!doctype html><title>popup</title><script>window.close()</script>",
                         _ => "<!doctype html><title>" + (viaProxy ? "proxy" : label) + "</title><p>local fixture</p>"
                     };
