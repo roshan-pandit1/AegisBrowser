@@ -9,6 +9,7 @@ internal sealed class PrivacyForm : Form
     private readonly CheckBox customList = new() { Text = "Use tracking list in Custom", AutoSize = true };
     private readonly CheckBox unknownSiteRules = new() { Name = "UnknownSiteRules", Text = "Apply third-party rules when site is unknown (may block content)", AutoSize = true };
     private readonly CheckBox blockThirdPartyCookies = new() { Name = "BlockThirdPartyCookies", Text = "Block third-party cookies (restart profile to apply)", AutoSize = true };
+    private readonly CheckBox letterboxWebContent = new() { Name = "LetterboxWebContent", Text = "Letterbox page viewport (restart profile; may reduce available space)", AutoSize = true };
     private readonly TextBox blocks = Editor(), allows = Editor(), sites = Editor(), rules = Editor(), list = Editor(), unsupported = Editor();
     private readonly Label summary = new() { AutoSize = true };
     private readonly DataGridView network = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false,
@@ -35,12 +36,13 @@ internal sealed class PrivacyForm : Form
         customList.Checked = session.Configuration.UseListsInCustom;
         unknownSiteRules.Checked = session.Configuration.ApplyThirdPartyRulesWhenSiteUnknown;
         blockThirdPartyCookies.Checked = session.Configuration.BlockThirdPartyCookies == true;
+        letterboxWebContent.Checked = session.Configuration.LetterboxWebContent;
         var controls = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
-        controls.Controls.AddRange([mode, customList, unknownSiteRules, blockThirdPartyCookies, Button("Apply settings", Apply)]);
+        controls.Controls.AddRange([mode, customList, unknownSiteRules, blockThirdPartyCookies, letterboxWebContent, Button("Apply settings", Apply)]);
         controls.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(1000, 0),
             Text = "Current cookie policy: " + cookiePolicyStatus + ". Changes apply after restarting this profile. "
                 + "Turning this off restores Chromium's default, which may still block some cookies. "
-                + "Blocking can affect embedded sign-in, payments and media. It does not hide your IP or fingerprint." });
+                + "Blocking can affect embedded sign-in, payments and media. Letterboxing can reduce visible content area but does not hide your screen, IP or full fingerprint." });
         var pause = new CheckBox { Text = "Pause filtering until resumed or browser exit", AutoSize = true, Checked = session.Paused };
         pause.CheckedChanged += (_, _) => session.Paused = pause.Checked;
         controls.Controls.Add(pause);
@@ -119,6 +121,7 @@ internal sealed class PrivacyForm : Form
             var config = new PrivacyConfiguration { Mode = Enum.Parse<PrivacyMode>((string)mode.SelectedItem!),
                 UseListsInCustom = customList.Checked, ApplyThirdPartyRulesWhenSiteUnknown = unknownSiteRules.Checked,
                 BlockThirdPartyCookies = blockThirdPartyCookies.Checked ? true : previousCookies == true ? false : previousCookies,
+                LetterboxWebContent = letterboxWebContent.Checked,
                 FilterList = list.Text, UserRules = rules.Text,
                 BlockedDomains = Domains(blocks), AllowedDomains = Domains(allows), SiteExceptions = Domains(sites) };
             apply(config);
@@ -129,7 +132,7 @@ internal sealed class PrivacyForm : Form
         {
             ApplyEdits();
             RefreshInspector();
-            MessageBox.Show(this, $"Network rules apply to new requests. Restart this profile to apply cookie-policy changes.\n{session.RuleCount} active rules; {session.Unsupported.Count} unsupported rules skipped.", "Privacy settings");
+            MessageBox.Show(this, $"Network rules apply to new requests. Restart this profile to apply cookie-policy or viewport letterboxing changes.\n{session.RuleCount} active rules; {session.Unsupported.Count} unsupported rules skipped.", "Privacy settings");
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
         { MessageBox.Show(this, ex.Message, "Settings were not applied"); }
