@@ -56,6 +56,9 @@ try {
         Write-Output "P404_PROCESS_EVENT: role=$($entry.Role) exit=$exitStatus"
         if ($null -eq $entry.Process.ExitCode -or $entry.Process.ExitCode -ne 0 -or $result -match 'Check failed:' -or
             $result -notmatch 'PASS: both independent CEF proxy fixtures initialized before routing tests' -or
+            $result -notmatch 'PASS: synthetic missing SOCKS callback remains a timeout' -or
+            $result -notmatch 'PASS: synthetic successful offline navigation is rejected' -or
+            $result -notmatch 'PASS: synthetic SOCKS trace reports dropped events' -or
             $result -notmatch 'PASS: \d+ CEF proxy probe checks' -or
             $result -notmatch 'PASS: CEF proxy probe shutdown completed') {
             $failedRoles.Add($entry.Role)

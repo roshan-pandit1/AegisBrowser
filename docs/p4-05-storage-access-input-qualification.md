@@ -118,6 +118,9 @@ supervisor also prints bounded available output from a timed-out child and
 continues reporting the other child; a missing exit remains a failure. It does
 not force native browser disposal or establish system-wide proxy containment.
 The historical intermittent SOCKS root cause remains inconclusive.
+Separate synthetic checks exercise the missing-callback timeout, rejection of
+an unexpected successful navigation and trace overflow accounting. Their
+records are explicitly labeled `SYNTHETIC`; they are not CEF observations.
 
 ## Verification and acceptance
 

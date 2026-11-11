@@ -169,6 +169,10 @@ jobs:
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy probe checks')) { throw 'CEF proxy probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy probe shutdown completed')) { throw 'CEF proxy probe did not complete native shutdown' }
+          foreach ($check in @('synthetic missing SOCKS callback remains a timeout', 'synthetic successful offline navigation is rejected',
+                               'synthetic SOCKS trace reports dropped events')) {
+            if (($output -join "`n") -notmatch [regex]::Escape("PASS: $check")) { throw "Missing SOCKS negative check: $check" }
+          }
       - name: Controlled CEF proxy authentication probe
         timeout-minutes: 3
         run: |

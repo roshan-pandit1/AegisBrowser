@@ -59,6 +59,7 @@ internal static partial class Program
                     browser = new BrowserView("about:blank") { Dock = DockStyle.Fill };
                     browser.RequestHandler = new SafeRequests(Console.WriteLine);
                     Observe(browser); host.Controls.Add(browser); await Ready(browser);
+                    await VerifySocksOutcomeFailures();
                     await AwaitConcurrentProxyProbe(root);
                     await AwaitProcessObservation();
                     var baseUrl = "http://127.0.0.1:" + origin.Port;
