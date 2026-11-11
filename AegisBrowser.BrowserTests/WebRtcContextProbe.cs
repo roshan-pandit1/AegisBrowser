@@ -17,7 +17,7 @@ internal static partial class Program
         private readonly TcpListener tcp4 = new(IPAddress.Loopback, 0);
         private readonly UdpClient? udp6;
         private readonly TcpListener? tcp6;
-        private readonly CancellationTokenSource timeout = new(TimeSpan.FromSeconds(8));
+        private readonly CancellationTokenSource timeout = new();
         private readonly Task<string> udp4Result, udp6Result, tcp4Result, tcp6Result;
 
         internal RtcLoopbackObserver()
@@ -44,6 +44,10 @@ internal static partial class Program
             if (tcp6 is not null) servers.Add(new { urls = "turn:[::1]:" + ((IPEndPoint)tcp6.LocalEndpoint).Port + "?transport=tcp", username = "fixture", credential = "fixture" });
             return JsonSerializer.Serialize(servers);
         }
+
+        // Listeners are ready before dispatch; the observation window begins
+        // only after the controlled browser operation acknowledges dispatch.
+        internal void ArmTimeout() => timeout.CancelAfter(TimeSpan.FromSeconds(8));
 
         private static async Task<string> ObserveUdp(UdpClient socket, CancellationToken token)
         {
@@ -95,6 +99,9 @@ internal static partial class Program
             using var frame = name.Length == 0 ? browser.GetBrowser().MainFrame : browser.GetBrowser().GetFrameByName(name);
             if (frame is null || !frame.IsValid || frame.Url != expected || frame.IsMain != (name.Length == 0))
                 throw new InvalidOperationException("Controlled WebRTC frame identity does not match " + label);
+            await WaitForAsync(async () => await FrameScript(frame,
+                "document.readyState === 'complete' && location.href === " + JsonSerializer.Serialize(expected)) == "True",
+                "controlled WebRTC document readiness " + label);
             using var parent = frame.Parent;
             if (name.Length != 0 && (parent is null || !parent.IsValid || !parent.IsMain))
                 throw new InvalidOperationException("Controlled WebRTC iframe parent is not the main frame.");
@@ -110,6 +117,7 @@ internal static partial class Program
                 + ".then(()=>window.__fp03.offer='applied').catch(()=>window.__fp03.offer='failed');return 'STARTED';})()";
             var started = await FrameScript(frame, script);
             if (started != "STARTED") throw new InvalidOperationException("Controlled WebRTC operation unavailable in " + label + ": " + started);
+            observer.ArmTimeout();
             var observed = await observer.Results();
             var state = await FrameScript(frame, "JSON.stringify(window.__fp03)");
             using var parsed = JsonDocument.Parse(state);

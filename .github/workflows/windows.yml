@@ -80,9 +80,16 @@ jobs:
                 $body -notmatch 'P4FP_WEBGL: mode=restricted contextAvailable=False' -or
                 $body -notmatch 'P4FP02_CAPABILITY: mode=baseline context=main surface=canvas' -or
                 $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=cross surface=webgpu' -or
+                $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=worker surface=webgl state=' -or
                 $body -notmatch 'P4FP03_POPUP_WEBGL: mode=restricted contextAvailable=False' -or
                 $body -notmatch 'P4FP03_POPUP_FONT_REQUESTS: baseline=[1-9][0-9]* restricted=0') {
               throw "Fingerprint surface probe $phase failed or did not complete native shutdown"
+            }
+            if ($body -match 'P4FP02_CAPABILITY: mode=restricted context=worker surface=webgl state=FEATURE_FUNCTIONAL') {
+              Write-Warning 'WebGL remains functional in the controlled dedicated worker with the per-browser restriction enabled.'
+              'WebGL dedicated worker: restriction did not prevent the observed OffscreenCanvas WebGL context.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            } else {
+              'WebGL dedicated worker: see bounded capability observation; no universal worker-enforcement claim.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
             }
           }
       - name: Controlled cross-site cookie and restart probe
@@ -234,9 +241,9 @@ jobs:
             if ($code -ne 0 -or $joined -notmatch 'PASS: WebRTC startup observation shutdown completed') { throw "WebRTC $mode probe failed or did not shut down" }
             if ($joined -match 'Check failed:') { throw 'Native Chromium assertion detected' }
             foreach ($context in @('main', 'same', 'cross', 'popup')) {
-              $match = [regex]::Matches($joined, "P4FP03_RTC:.*context=$context .*udp4=(STUN_OBSERVED|OTHER_PACKET|NOT_OBSERVED|UNSUPPORTED) udp6=(STUN_OBSERVED|OTHER_PACKET|NOT_OBSERVED|UNSUPPORTED) tcp4=(CONNECTION_OBSERVED|NOT_OBSERVED|UNSUPPORTED) tcp6=(CONNECTION_OBSERVED|NOT_OBSERVED|UNSUPPORTED)")
+              $match = [regex]::Matches($joined, "P4FP03_RTC:.*context=$context .*udp4=(STUN_OBSERVED|OTHER_PACKET|NOT_OBSERVED|UNSUPPORTED) udp6=(STUN_OBSERVED|OTHER_PACKET|NOT_OBSERVED|UNSUPPORTED) tcp4=(CONNECTION_OBSERVED|NOT_OBSERVED|UNSUPPORTED) tcp6=(CONNECTION_OBSERVED|NOT_OBSERVED|UNSUPPORTED) ice=([a-z]+) offer=([a-z]+)")
               if ($match.Count -ne 1) { throw "WebRTC $mode context $context result missing or ambiguous" }
-              $contexts["$mode-$context"] = @($match[0].Groups[1].Value, $match[0].Groups[2].Value, $match[0].Groups[3].Value, $match[0].Groups[4].Value)
+              $contexts["$mode-$context"] = @($match[0].Groups[1].Value, $match[0].Groups[2].Value, $match[0].Groups[3].Value, $match[0].Groups[4].Value, $match[0].Groups[5].Value, $match[0].Groups[6].Value)
             }
             foreach ($context in @('dedicated', 'shared', 'service')) {
               if ([regex]::Matches($joined, "P4FP03_WORKER:.*context=$context ").Count -ne 1) { throw "WebRTC $mode worker $context result missing or ambiguous" }
@@ -255,7 +262,7 @@ jobs:
             $after = $contexts["restrict-$context"]
             foreach ($index in 0, 1) {
               $family = if ($index -eq 0) { 'IPv4' } else { 'IPv6' }
-              $result = if ($before[$index] -eq 'STUN_OBSERVED' -and $after[$index] -eq 'NOT_OBSERVED') { 'SCOPED_COMPARISON_OBSERVED' } else { 'INCONCLUSIVE' }
+              $result = if ($before[$index] -eq 'STUN_OBSERVED' -and $before[5] -eq 'applied' -and $after[$index] -eq 'NOT_OBSERVED' -and $after[4] -eq 'complete' -and $after[5] -eq 'applied') { 'SCOPED_COMPARISON_OBSERVED' } else { 'INCONCLUSIVE' }
               "WebRTC $context $family loopback STUN: $result; baseline=$($before[$index]), restricted=$($after[$index]). No containment claim." | Out-File $env:GITHUB_STEP_SUMMARY -Append
             }
           }

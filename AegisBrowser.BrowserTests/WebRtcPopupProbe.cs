@@ -35,6 +35,7 @@ internal static partial class Program
             + ".then(()=>window.__fp03.offer='applied').catch(()=>window.__fp03.offer='failed');return 'STARTED';})()";
         var started = await Js(browser, "window.__fp03popup.eval(" + JsonSerializer.Serialize(code) + ")");
         Check(started == "STARTED", "native popup started WebRTC in its own document realm");
+        observer.ArmTimeout();
         var observed = await observer.Results();
         using var state = JsonDocument.Parse(await Js(browser, "JSON.stringify(window.__fp03popup.__fp03)"));
         var ice = state.RootElement.GetProperty("state").GetString();
