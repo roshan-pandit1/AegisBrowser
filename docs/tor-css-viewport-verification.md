@@ -40,11 +40,15 @@ On the Windows ARM64 development host running x64 CEF under emulation, the form 
 | Maximize and restore | The maximized 1800×800 control reported 1800×800 CSS; restore returned 1000×600. |
 | Zoom and reset | At unchanged 1000×600 control bounds, level 1 reported 833×500 CSS and DPR 1.2; resetting to level 0 restored 1000×600. CSS bucketing across zoom therefore fails for this case. |
 | Profile restart | A fresh read process loaded the enabled setting, measured the viewport and completed CEF shutdown. |
-| Popup and responsive content | Not specifically exercised by this probe; existing browser regressions remain separate evidence. |
+| Responsive content | A controlled scrollable page exercised form editing, a dialog, a fixed element, a media control, an embedded frame and responsive CSS checks. It is not a compatibility survey of real websites. |
 | Native shutdown | Both local write and read processes reported normal CEF shutdown and exit code 0. |
 | Final-head Windows CI | See the research PR's final-head workflow logs; a passing workflow is not a multi-DPI qualification. |
 
 For a controlled privacy comparison, collect the same finite set of window sizes with the same display, OS scaling and zoom in each mode and report the distinct observed CSS width/height pairs. A smaller count in that sample would describe only that sample; it would not establish user anonymity, unlinkability or a population-wide benefit. Also record whether enabled mode introduces distinctive dimensions. Do not extrapolate across untested displays, zoom levels or web content.
+
+With the later scrollable local fixture at zoom 0, a 1000×600 control reported `innerWidth=1000` but `documentElement.clientWidth=985` and `visualViewport.width=985`; at zoom 1 it reported 833, 821 and approximately 820.83 respectively. The test's `cssBucketed` field describes `innerWidth`/`innerHeight` only. Scrollbar-sensitive measurements must not be represented as bucketed merely because that field is true. No population-wide privacy benefit has been measured.
+
+For four selected window sizes on that same local display at zoom 0, the disabled `innerWidth`/`innerHeight` pairs were 1226×721, 999×584, 1065×622 and 1075×632 (four distinct pairs). Enabled pairs were 1200×700, 800×500, 1000×600 and 1000×600 (three distinct pairs). This deliberately small sample demonstrates a collision for two selected sizes; it does not establish anonymity or a population-wide reduction in identifiability.
 
 ## DPI qualification and bounded manual procedure
 

@@ -83,12 +83,15 @@ internal static partial class Program
             await Ready(browser);
             await LoadReady(browser, Origin + "viewport");
             await ReportViewport(form, tabs, browser, enabled, "initial");
+            await CheckViewportFixture(browser);
 
-            if (!enabled) return;
             await ResizeViewportAndWait(browser, () => form.Size = new Size(1023, 713));
             await ReportViewport(form, tabs, browser, enabled, "resize_1023x713");
             await ResizeViewportAndWait(browser, () => form.Size = new Size(1089, 751));
             await ReportViewport(form, tabs, browser, enabled, "resize_1089x751");
+            await ResizeViewportAndWait(browser, () => form.Size = new Size(1099, 761));
+            await ReportViewport(form, tabs, browser, enabled, "resize_1099x761");
+            if (!enabled) return;
             Button("+").PerformClick();
             await Wait(() => tabs.TabCount == 2, "viewport second tab");
             await Ready(Current());
@@ -132,6 +135,34 @@ internal static partial class Program
         }
     }
 
+    private static string ViewportFixturePage() => """
+        <!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>body{margin:0;min-height:1800px}#fixed{position:fixed;right:0;top:0}
+        #layout::after{content:'desktop'}@media(max-width:900px){#layout::after{content:'mobile'}}</style>
+        <div id="layout">Controlled viewport fixture</div><div id="fixed">fixed</div>
+        <form id="form"><input id="entry" value="initial"><button type="button">Test</button></form>
+        <dialog id="dialog">Local dialog</dialog><video id="media" controls></video>
+        <iframe id="child" title="local fixture" srcdoc="<!doctype html><p>Local embedded content</p>"></iframe>
+        """;
+
+    private static async Task CheckViewportFixture(ChromiumWebBrowser browser)
+    {
+        var result = await Js(browser, """
+            (()=>{const entry=document.querySelector('#entry'), dialog=document.querySelector('#dialog');
+              entry.value='test';dialog.showModal();const opened=dialog.open;dialog.close();
+              const fixed=getComputedStyle(document.querySelector('#fixed')).position==='fixed';
+              const media=document.querySelector('#media').controls;
+              const frame=!!document.querySelector('#child').contentDocument;
+              window.scrollTo(0,400);return JSON.stringify({form:entry.value==='test',dialog:opened&&!dialog.open,
+                fixed,media,frame,responsive:matchMedia('(max-width:900px)').matches,scrollable:document.documentElement.scrollHeight>innerHeight});})()
+            """);
+        using var data = JsonDocument.Parse(result);
+        foreach (var property in new[] { "form", "dialog", "fixed", "media", "frame", "scrollable" })
+            Check(data.RootElement.GetProperty(property).GetBoolean(), "controlled viewport fixture " + property);
+        Console.WriteLine("P4LB_COMPATIBILITY: responsive_mobile=" + data.RootElement.GetProperty("responsive").GetBoolean());
+        await Js(browser, "window.scrollTo(0,0);'reset'");
+    }
+
     private static async Task ResizeViewportAndWait(ChromiumWebBrowser browser, Action resize)
     {
         await Js(browser, "window.__p4lbResize=0;window.addEventListener('resize',()=>window.__p4lbResize++);'ready'");
@@ -161,6 +192,8 @@ internal static partial class Program
         using var metrics = JsonDocument.Parse(value);
         var width = metrics.RootElement.GetProperty("innerWidth").GetInt32();
         var height = metrics.RootElement.GetProperty("innerHeight").GetInt32();
+        var responsive = await Js(browser, "matchMedia('(max-width:900px)').matches === (getComputedStyle(document.querySelector('#layout'),'::after').content.includes('mobile'))");
+        Check(responsive == "True", "controlled responsive layout matches viewport (" + scenario + ")");
         Check(width > 0 && height > 0 && browser.Width > 0 && browser.Height > 0,
             "active viewport remains nonzero (" + scenario + ")");
         var bounds = browser.Bounds;

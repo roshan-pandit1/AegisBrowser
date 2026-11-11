@@ -618,6 +618,8 @@ internal static partial class Program
         public IResourceHandler Create(IBrowser browser, IFrame frame, string schemeName, IRequest request)
         {
             var uri = new Uri(request.Url);
+            if (uri.Host == "browser-tests.invalid" && uri.AbsolutePath.StartsWith("/viewport", StringComparison.Ordinal))
+                return ResourceHandler.FromString(ViewportFixturePage(), mimeType: "text/html");
             var script = uri.Host == "provider-tests.invalid"
                 ? "location.replace('https://browser-tests.invalid/callback');"
                 : uri.AbsolutePath == "/callback" ? "window.opener.postMessage('oauth-ok','https://browser-tests.invalid');window.close();" : "";
