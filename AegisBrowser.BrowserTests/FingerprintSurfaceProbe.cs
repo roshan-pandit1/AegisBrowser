@@ -59,7 +59,8 @@ internal static partial class Program
             using var context = Cef.GetGlobalRequestContext();
             var fixture = new FingerprintSurfaceFixture();
             if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory())
-                || !context.RegisterSchemeHandlerFactory("https", "fp-surface.invalid", fixture))
+                || !context.RegisterSchemeHandlerFactory("https", "fp-surface.invalid", fixture)
+                || !context.RegisterSchemeHandlerFactory("https", "fp-other.invalid", fixture))
                 throw new InvalidOperationException("Fingerprint fixture origins were not registered.");
 
             using var host = new Form { Width = 200, Height = 150, ShowInTaskbar = false };
@@ -108,6 +109,7 @@ internal static partial class Program
             var browser = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
             await Ready(browser);
             await LoadReady(browser, "https://fp-surface.invalid/" + mode);
+            await MeasureFingerprintContexts(browser, mode);
             var gl = await Js(browser, "(() => { const c = document.createElement('canvas'); const gl = c.getContext('webgl'); gl?.getExtension('WEBGL_lose_context')?.loseContext(); return !!gl; })()");
             Console.WriteLine($"P4FP_WEBGL: mode={mode} contextAvailable={gl}");
             if (mode == "restricted")
@@ -143,6 +145,8 @@ internal static partial class Program
         public IResourceHandler Create(IBrowser browser, IFrame frame, string schemeName, IRequest request)
         {
             var path = new Uri(request.Url).AbsolutePath;
+            if (path == "/capability-frame")
+                return ResourceHandler.FromString(CapabilityFrameHtml, mimeType: "text/html");
             if (path == "/font-baseline.woff2")
             {
                 Interlocked.Increment(ref baselineFontRequests);
