@@ -72,7 +72,7 @@ public sealed class MainForm : Form
         bar.Controls.Add(MakeButton("Privacy", () =>
         {
             if (privacyWindow is null || privacyWindow.IsDisposed)
-                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save), cookiePolicy.Status);
+                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save), cookiePolicy.Status, letterboxingAtStartup);
             privacyWindow.Show(this); privacyWindow.BringToFront();
         }), 8, 0);
         bar.Controls.Add(MakeButton("Search", () =>
@@ -169,8 +169,9 @@ public sealed class MainForm : Form
     private static void ResizeLetterboxedTab(TabPage page, ChromiumWebBrowser browser)
     {
         if (page.IsDisposed || browser.IsDisposed) return;
-        var rect = ViewportLetterboxing.Calculate(page.ClientSize.Width, page.ClientSize.Height);
-        var bounds = new Rectangle(rect.X, rect.Y, rect.Width, rect.Height);
+        var area = page.DisplayRectangle;
+        var rect = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height));
+        var bounds = new Rectangle(area.X + rect.X, area.Y + rect.Y, rect.Width, rect.Height);
         if (browser.Bounds != bounds) browser.Bounds = bounds;
     }
 
