@@ -19,7 +19,7 @@ internal sealed class PrivacyForm : Form
     private readonly Action<PrivacyConfiguration> apply;
 
     public PrivacyForm(PrivacySession session, string? currentUrl, Action<PrivacyConfiguration>? apply = null,
-        string cookiePolicyStatus = "Existing Chromium setting (no Aegis override)")
+        string cookiePolicyStatus = "Existing Chromium setting (no Aegis override)", bool letterboxingActive = false)
     {
         this.session = session;
         mode.Name = "PrivacyMode"; blocks.Name = "BlockedDomains"; allows.Name = "AllowedDomains";
@@ -40,7 +40,8 @@ internal sealed class PrivacyForm : Form
         var controls = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
         controls.Controls.AddRange([mode, customList, unknownSiteRules, blockThirdPartyCookies, letterboxWebContent, Button("Apply settings", Apply)]);
         controls.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(1000, 0),
-            Text = "Current cookie policy: " + cookiePolicyStatus + ". Changes apply after restarting this profile. "
+            Text = "Current cookie policy: " + cookiePolicyStatus + ". Viewport letterboxing at startup: "
+                + (letterboxingActive ? "On" : "Off") + ". Changes apply after restarting this profile. "
                 + "Turning this off restores Chromium's default, which may still block some cookies. "
                 + "Blocking can affect embedded sign-in, payments and media. Letterboxing can reduce visible content area but does not hide your screen, IP or full fingerprint." });
         var pause = new CheckBox { Text = "Pause filtering until resumed or browser exit", AutoSize = true, Checked = session.Paused };
