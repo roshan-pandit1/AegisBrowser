@@ -1,10 +1,13 @@
 # Experimental OffscreenCanvas WebGL settings patch
 
 **Source-only prototype; not compiled, not integrated, not production-ready.**
-Do not apply to a production CefSharp installation. The single patch is based
+Do not apply to a production CefSharp installation. The initial patch is based
 on Chromium commit `b859317bf11f6be47f9b7799ec690a0a42a1fb33`, corresponding
 to the pinned CEF 154.0.34 line; see the parent research report for the revision
 derivation. `source-manifest.json` records exact input blobs and hashes.
+The separate incremental `0002-prototype-worker-settings-presence.patch`
+follows 0001; its SHA-256 and scope are recorded in
+`build-verification.json` and `p4fp06-policy-audit.md`.
 
 ## Candidate behavior and trust boundary
 
@@ -88,6 +91,17 @@ git -C $src apply --check --whitespace=error-all $patch
 ```
 
 ## Proposed isolated build and test
+
+P4-FP-06 adds a read-only preliminary check for an independently obtained
+full checkout. Run `python -B qualify_chromium_checkout.py <src>` from this
+directory. It checks the pinned main-repository HEAD, non-shallow status,
+checkout markers, gclient metadata presence, main-repository cleanliness and
+the existing input hashes and 0001 applicability. It does not verify 0002,
+synced dependency revisions, ignored files, toolchain qualification, compilation or
+runtime enforcement. Its seven negative and synthetic tests run with
+`python -B test_qualify_chromium_checkout.py`; the synthetic fixtures are not
+Chromium checkouts. See [the P4-FP-06 report](../../docs/p4-fp-06-patched-chromium-build-verification.md)
+and [policy audit](p4fp06-policy-audit.md) for the actual evidence and blockers.
 
 Use the [pinned Chromium Windows build instructions](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/docs/windows_build_instructions.md)
 and a supported Windows x64 build environment. Obtain the exact revision and

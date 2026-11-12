@@ -1,0 +1,67 @@
+diff --git a/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc b/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
+index 31ac679..bb308e7 100644
+--- a/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
++++ b/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
+@@ -592,7 +592,8 @@ bool OffscreenCanvas::IsWebGL1Enabled() const {
+   if (auto* worker =
+           DynamicTo<DedicatedWorkerGlobalScope>(GetExecutionContext())) {
+     auto* settings = worker->GetWorkerSettings();
+-    return settings && settings->GetWebGL1Enabled();
++    return settings && settings->HasWebGLSettings() &&
++           settings->GetWebGL1Enabled();
+   }
+   return true;
+ }
+@@ -608,7 +609,8 @@ bool OffscreenCanvas::IsWebGL2Enabled() const {
+   if (auto* worker =
+           DynamicTo<DedicatedWorkerGlobalScope>(GetExecutionContext())) {
+     auto* settings = worker->GetWorkerSettings();
+-    return settings && settings->GetWebGL2Enabled();
++    return settings && settings->HasWebGLSettings() &&
++           settings->GetWebGL2Enabled();
+   }
+   return true;
+ }
+diff --git a/third_party/blink/renderer/core/workers/worker_settings.cc b/third_party/blink/renderer/core/workers/worker_settings.cc
+index 88018fb..010c37d 100644
+--- a/third_party/blink/renderer/core/workers/worker_settings.cc
++++ b/third_party/blink/renderer/core/workers/worker_settings.cc
+@@ -32,6 +32,7 @@ std::unique_ptr<WorkerSettings> WorkerSettings::Copy(
+       std::make_unique<WorkerSettings>(nullptr);
+   new_settings->disable_reading_from_canvas_ =
+       old_settings->disable_reading_from_canvas_;
++  new_settings->webgl_settings_known_ = old_settings->webgl_settings_known_;
+   new_settings->webgl1_enabled_ = old_settings->webgl1_enabled_;
+   new_settings->webgl2_enabled_ = old_settings->webgl2_enabled_;
+   new_settings->strict_mixed_content_checking_ =
+@@ -47,6 +48,7 @@ std::unique_ptr<WorkerSettings> WorkerSettings::Copy(
+ 
+ void WorkerSettings::CopyFlagValuesFromSettings(Settings* settings) {
+   disable_reading_from_canvas_ = settings->GetDisableReadingFromCanvas();
++  webgl_settings_known_ = true;
+   webgl1_enabled_ = settings->GetWebGL1Enabled();
+   webgl2_enabled_ = settings->GetWebGL2Enabled();
+   strict_mixed_content_checking_ = settings->GetStrictMixedContentChecking();
+diff --git a/third_party/blink/renderer/core/workers/worker_settings.h b/third_party/blink/renderer/core/workers/worker_settings.h
+index 84fa51d..7ef3448 100644
+--- a/third_party/blink/renderer/core/workers/worker_settings.h
++++ b/third_party/blink/renderer/core/workers/worker_settings.h
+@@ -29,6 +29,7 @@ class CORE_EXPORT WorkerSettings {
+   static std::unique_ptr<WorkerSettings> Copy(WorkerSettings*);
+ 
+   bool DisableReadingFromCanvas() const { return disable_reading_from_canvas_; }
++  bool HasWebGLSettings() const { return webgl_settings_known_; }
+   bool GetWebGL1Enabled() const { return webgl1_enabled_; }
+   bool GetWebGL2Enabled() const { return webgl2_enabled_; }
+   bool GetStrictMixedContentChecking() const {
+@@ -53,7 +54,9 @@ class CORE_EXPORT WorkerSettings {
+   // For dedicated workers these flag values must remain unchanged throughout
+   // the parent document lifecycle.
+   bool disable_reading_from_canvas_ = false;
+-  // The opt-in OffscreenCanvas gate denies an uninitialized snapshot.
++  // Unknown settings are distinct from a known disabled policy. The opt-in
++  // OffscreenCanvas gate currently denies either state.
++  bool webgl_settings_known_ = false;
+   bool webgl1_enabled_ = false;
+   bool webgl2_enabled_ = false;
+   bool strict_mixed_content_checking_ = false;
