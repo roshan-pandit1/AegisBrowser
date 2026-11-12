@@ -115,7 +115,8 @@ different display-scaling configurations has **not** been established.
 The option applies at the next profile launch; network rules remain live.
 Popups are not letterboxed. No identity spoofing or anti-fraud evasion is added.
 
-See the [zoom-aware viewport verification](p4-fp-07-zoom-letterboxing.md) and
+See the [viewport reliability and measurement report](p4-fp-08-viewport-reliability.md),
+[zoom-aware viewport verification](p4-fp-07-zoom-letterboxing.md) and
 [Tor and GoLogin public-behavior comparison](tor-gologin-fingerprint-privacy-study.md).
 
 ## Optional browser-native fingerprint-surface restrictions
