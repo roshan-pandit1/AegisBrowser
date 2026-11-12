@@ -11,6 +11,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Test full-checkout prerequisite qualifier
+        shell: pwsh
+        run: |
+          python -B research/chromium-webgl-policy/test_qualify_chromium_checkout.py
+          if ($LASTEXITCODE -ne 0) { throw 'Checkout qualifier tests failed' }
       - name: Fetch pinned source subset and check prototype patch
         shell: pwsh
         run: |
@@ -32,4 +37,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned source-subset check failed' }
           python research/chromium-webgl-policy/test_verify_source_subset.py $root
           if ($LASTEXITCODE -ne 0) { throw 'Source-subset negative test failed' }
+          $first = (Resolve-Path research/chromium-webgl-policy/0001-prototype-offscreen-context-settings.patch).Path
+          $second = (Resolve-Path research/chromium-webgl-policy/0002-prototype-worker-settings-presence.patch).Path
+          $expected = '70cccc5506d1ffb95f183240dd090a61ca8f102ee78d44b2d753f6445f8a59d7'
+          if ((Get-FileHash -LiteralPath $second -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw 'Unexpected incremental patch hash' }
+          git -C $root apply --whitespace=error-all $first
+          if ($LASTEXITCODE -ne 0) { throw 'Could not apply prototype to disposable subset' }
+          git -C $root apply --check --whitespace=error-all $second
+          if ($LASTEXITCODE -ne 0) { throw 'Incremental patch does not apply to the disposable subset' }
           'Source subset and patch applicability checked; Chromium compilation, Blink tests and enforcement remain NOT_RUN.' | Out-File $env:GITHUB_STEP_SUMMARY -Append

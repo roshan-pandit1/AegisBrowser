@@ -1,0 +1,33 @@
+{
+  "recorded_utc": "2026-11-12",
+  "parent_aegisbrowser_commit": "54e7679c4ad1fba5a8077a7929fc100fd82774c1",
+  "chromium_revision_from_pinned_metadata": "b859317bf11f6be47f9b7799ec690a0a42a1fb33",
+  "cef_revision": "14c5a089e8452874cb1a556dc3fde26ed2d87723",
+  "prototype_patch_sha256": "117adc6d05196b51ba177681193a602a02ced0fbe05450dbc92e01d41ba4c743",
+  "incremental_patch_sha256": "70cccc5506d1ffb95f183240dd090a61ca8f102ee78d44b2d753f6445f8a59d7",
+  "builder": {
+    "os": "Windows ARM64",
+    "logical_processors": 2,
+    "installed_ram_gib_approx": 6,
+    "free_ntfs_gib_approx": 34.99,
+    "qualification": "NOT_AVAILABLE"
+  },
+  "source": {
+    "five_file_subset_hash_and_patch_check": "PASS",
+    "incremental_patch_check_after_first_on_disposable_subset": "PASS",
+    "full_checkout": "NOT_AVAILABLE",
+    "dependency_revisions": "NOT_VERIFIED"
+  },
+  "gn_configuration": null,
+  "test_targets": [],
+  "chromium_build": "NOT_RUN",
+  "blink_test_discovery": "NOT_RUN",
+  "blink_test_execution": "NOT_RUN",
+  "cef_build": "NOT_RUN",
+  "experimental_artifact_checksums": [],
+  "limitations": [
+    "No qualified authorized Windows x64 Chromium builder was identified.",
+    "The source subset and stock-browser CI do not verify the patched engine.",
+    "A source revision inferred from upstream metadata is not a verified complete local checkout."
+  ]
+}
