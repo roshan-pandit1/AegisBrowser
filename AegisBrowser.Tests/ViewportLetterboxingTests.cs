@@ -29,8 +29,13 @@ internal static class ViewportLetterboxingTests
             "empty pane during construction");
         Check(ViewportLetterboxing.Calculate(1000, 600, 1) == new ViewportRectangle(20, 0, 960, 600),
             "zoom in chooses CSS buckets that fit the centered control");
-        Check(ViewportLetterboxing.Calculate(1000, 600, -1) == new ViewportRectangle(0, 8, 1000, 583),
-            "zoom out chooses CSS buckets with rounded control dimensions");
+        Check(ViewportLetterboxing.Calculate(1000, 600, -1) == new ViewportRectangle(0, 8, 1000, 584),
+            "zoom out selects the neighboring control size predicted to reach 700 CSS pixels");
+        Check(ViewportLetterboxing.Calculate(1000, 583, -1) == new ViewportRectangle(0, 41, 1000, 500),
+            "an unavailable neighboring size never exceeds the host");
+        var fractionalZoom = Math.Log(1.1) / Math.Log(1.2);
+        Check(ViewportLetterboxing.Calculate(1065, 622, fractionalZoom) == new ViewportRectangle(92, 36, 880, 550),
+            "fractional zoom uses centered neighboring dimensions");
         Check(ViewportLetterboxing.Calculate(200, 100, 1) == new ViewportRectangle(0, 0, 200, 100),
             "zoomed panes below the first CSS bucket remain usable");
         Check(ViewportLetterboxing.Calculate(0, 0, 1) == new ViewportRectangle(0, 0, 0, 0),
@@ -55,6 +60,22 @@ internal static class ViewportLetterboxingTests
             catch (ArgumentOutOfRangeException) { invalidRejected = true; }
             Check(invalidRejected, "invalid zoom rejected");
         }
+        foreach (var zoom in new[] { -2d, -1d, 0d, fractionalZoom, 1d, 2d })
+        {
+            var previous = 0;
+            for (var available = 1; available <= 2000; available++)
+            {
+                var rect = ViewportLetterboxing.Calculate(available, 701, zoom);
+                Check(rect.Width >= previous && rect.Width <= available && rect.X >= 0 && rect.X + rect.Width <= available,
+                    "width remains monotonic and bounded as available area grows");
+                Check(rect == ViewportLetterboxing.Calculate(available, 701, zoom), "same input gives stable bounds");
+                previous = rect.Width;
+            }
+        }
+        var extreme = ViewportLetterboxing.Calculate(int.MaxValue, int.MaxValue, -1000);
+        Check(extreme.Width > 0 && extreme.Height > 0 && extreme.X >= 0 && extreme.Y >= 0 &&
+              (long)extreme.X + extreme.Width <= int.MaxValue && (long)extreme.Y + extreme.Height <= int.MaxValue,
+            "very small zoom factors and extreme host dimensions remain bounded");
         foreach (var (width, height) in new[] { (200, 100), (399, 199), (750, 450), (1920, 1080), (3200, 1800) })
         {
             var rect = ViewportLetterboxing.Calculate(width, height);

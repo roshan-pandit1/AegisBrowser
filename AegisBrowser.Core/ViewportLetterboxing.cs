@@ -35,11 +35,27 @@ public static class ViewportLetterboxing
 
     private static int FitBucket(int available, int cssStep, double zoomFactor)
     {
-        if (available == 0 || available / zoomFactor < cssStep) return available;
-        // Round the physical control size once, after selecting a CSS bucket.
-        // Fractional factors can cause a one-pixel CSS rounding difference.
-        var count = Math.Floor((available / zoomFactor + 1e-9) / cssStep);
-        var size = Math.Round(count * cssStep * zoomFactor, MidpointRounding.AwayFromZero);
-        return size < 1 ? available : (int)Math.Min(available, size);
+        if (available == 0) return 0;
+        var cssAvailable = available / zoomFactor;
+        if (cssAvailable < cssStep || !double.IsFinite(cssAvailable)) return available;
+
+        // Chromium normally exposes an integer layout viewport by truncating
+        // the CSS extent. Test the two neighboring control-unit sizes instead
+        // of rounding the ideal size: rounding down can expose one CSS pixel
+        // below the intended bucket (for example 583/0.8333 = 699.6).
+        // This model cannot account for every DPI or renderer rounding mode;
+        // those must be measured independently in the browser fixture.
+        var count = Math.Floor((cssAvailable + 1e-9) / cssStep);
+        if (count >= 9007199254740992d) return available; // integer precision exhausted
+        var targetCss = count * cssStep;
+        var desired = targetCss * zoomFactor;
+        var integral = Math.Round(desired);
+        if (Math.Abs(desired - integral) < 1e-7) desired = integral;
+        var lower = Math.Clamp(Math.Floor(desired), 1, available);
+        var upper = Math.Clamp(Math.Ceiling(desired), 1, available);
+        var lowerError = Math.Abs(Math.Floor(lower / zoomFactor + 1e-7) - targetCss);
+        var upperError = Math.Abs(Math.Floor(upper / zoomFactor + 1e-7) - targetCss);
+        // Prefer the larger usable browsing area if both are equally close.
+        return (int)(upperError <= lowerError ? upper : lower);
     }
 }

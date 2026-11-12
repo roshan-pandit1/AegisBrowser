@@ -55,6 +55,7 @@ if (args.Length == 2 && args[0] == "--hold-metadata-transaction")
 
 PrivacyTests.Run();
 ViewportLetterboxingTests.Run();
+ViewportZoomQueryTests.Run();
 AddressTests.Run();
 ProfileCatalogTests.Run();
 ProfileRepositoryTests.Run();

@@ -51,6 +51,7 @@ internal static partial class Program
                         "disabled viewport preference persisted");
                     if (phase == "viewport-write") await MeasureMainForm(disabledPath, false);
                     await MeasureMainForm(enabledPath, true);
+                    if (phase == "viewport-write") await ExerciseStalledZoomQuery(enabledPath);
                     completed = true;
                     Console.WriteLine($"PASS: {checks} CSS viewport checks ({phase})");
                 }
@@ -82,8 +83,14 @@ internal static partial class Program
             var browser = Current();
             await Ready(browser);
             await LoadReady(browser, Origin + "viewport");
+            // Chromium persists zoom by origin. The prior stress phase can
+            // leave it changed, so establish a known starting level on restart.
+            browser.GetBrowserHost().SetZoomLevel(0);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5))) < 0.01,
+                "viewport initial zoom reset");
             await ReportViewport(form, tabs, browser, enabled, "initial");
             await CheckViewportFixture(browser);
+            await MeasureScrollbarViewports(browser);
 
             await ResizeViewportAndWait(browser, () => form.Size = new Size(1023, 713));
             await ReportViewport(form, tabs, browser, enabled, "resize_1023x713");
@@ -115,11 +122,13 @@ internal static partial class Program
 
             // The renderer measurement, not the WinForms bounds, is the privacy check.
             var widthBeforeZoom = int.Parse(await Js(browser, "window.innerWidth"));
+            var zoomTimer = System.Diagnostics.Stopwatch.StartNew();
             browser.GetBrowserHost().SetZoomLevel(1.0);
             await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync() - 1.0) < 0.01 &&
                 int.Parse(await Js(browser, "window.innerWidth")) != widthBeforeZoom,
                 "viewport zoom change");
             await ReportViewport(form, tabs, browser, enabled, "zoom_1");
+            Console.WriteLine("P4FP08_ZOOM_SETTLED_MS: " + zoomTimer.ElapsedMilliseconds);
             await CheckViewportFixture(browser);
             await ResizeViewportAndWait(browser, () => form.Size = new Size(1089, 751));
             await ReportViewport(form, tabs, browser, enabled, "zoom_1_resize");
@@ -140,6 +149,14 @@ internal static partial class Program
                 int.Parse(await Js(browser, "window.innerWidth")) != widthAtFractionalZoom,
                 "viewport negative zoom change");
             await ReportViewport(form, tabs, browser, enabled, "zoom_minus_1");
+            browser.GetBrowserHost().SetZoomLevel(-2.0);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5)) + 2.0) < 0.01,
+                "viewport zoom minus two");
+            await ReportViewport(form, tabs, browser, enabled, "zoom_minus_2");
+            browser.GetBrowserHost().SetZoomLevel(2.0);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5)) - 2.0) < 0.01,
+                "viewport zoom plus two");
+            await ReportViewport(form, tabs, browser, enabled, "zoom_plus_2");
             var widthAtNegativeZoom = int.Parse(await Js(browser, "window.innerWidth"));
             browser.GetBrowserHost().SetZoomLevel(0);
             await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync()) < 0.01 &&
@@ -155,6 +172,14 @@ internal static partial class Program
             await ReportViewport(form, tabs, browser, enabled, "minimize_restore");
             await LoadReady(browser, Origin + "viewport-navigation");
             await ReportViewport(form, tabs, browser, enabled, "navigation");
+            // Exercise a real native tab close immediately after a zoom change.
+            tabs.SelectedIndex = 1;
+            var closingTab = Current();
+            closingTab.GetBrowserHost().SetZoomLevel(1);
+            Button("×").PerformClick();
+            await Wait(() => tabs.TabCount == 1, "zooming tab native close");
+            await Ready(Current());
+            await ReportViewport(form, tabs, Current(), enabled, "after_tab_close");
         }
         finally
         {
@@ -192,6 +217,91 @@ internal static partial class Program
             Check(data.RootElement.GetProperty(property).GetBoolean(), "controlled viewport fixture " + property);
         Console.WriteLine("P4LB_COMPATIBILITY: responsive_mobile=" + data.RootElement.GetProperty("responsive").GetBoolean());
         await Js(browser, "window.scrollTo(0,0);'reset'");
+    }
+
+    private static async Task MeasureScrollbarViewports(ChromiumWebBrowser browser)
+    {
+        foreach (var (name, x, y) in new[]
+        {
+            ("none", "hidden", "hidden"), ("vertical", "hidden", "scroll"),
+            ("horizontal", "scroll", "hidden"), ("both", "scroll", "scroll")
+        })
+        {
+            var result = await Js(browser, $$"""
+                (()=>{const root=document.documentElement;
+                root.style.overflowX='{{x}}';root.style.overflowY='{{y}}';
+                return JSON.stringify({innerWidth,innerHeight,clientWidth:root.clientWidth,
+                  clientHeight:root.clientHeight,visualWidth:visualViewport?.width??null,
+                  visualHeight:visualViewport?.height??null,overflowX:getComputedStyle(root).overflowX,
+                  overflowY:getComputedStyle(root).overflowY});})()
+                """);
+            using var metrics = JsonDocument.Parse(result);
+            Check(metrics.RootElement.GetProperty("overflowX").GetString() == x &&
+                metrics.RootElement.GetProperty("overflowY").GetString() == y,
+                "controlled scrollbar style " + name);
+            Console.WriteLine("P4FP08_SCROLLBAR: " + name + " " + result);
+        }
+        await Js(browser, "document.documentElement.style.overflowX='';document.documentElement.style.overflowY='';'restored'");
+    }
+
+    private static async Task ExerciseStalledZoomQuery(string profilePath)
+    {
+        var never = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ChromiumWebBrowser? stalledBrowser = null;
+        var stalledRequests = 0;
+        var otherRequests = 0;
+        Task<double> Query(ChromiumWebBrowser browser)
+        {
+            stalledBrowser ??= browser;
+            if (browser == stalledBrowser) { stalledRequests++; return never.Task; }
+            otherRequests++;
+            return browser.GetBrowserHost().GetZoomLevelAsync();
+        }
+        var form = new MainForm("viewport-stalled-query", profilePath, Query);
+        try
+        {
+            form.Show();
+            var tabs = form.Controls.OfType<TabControl>().Single();
+            var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
+            Button Button(string label) => toolbar.Controls.OfType<Button>().Single(b => b.Text == label);
+            ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+            await Wait(() => tabs.TabCount == 1 && stalledRequests == 1, "first zoom query started");
+            var first = Current();
+            await Ready(first);
+            await Wait(() => form.Controls.OfType<StatusStrip>().Single().Items.OfType<ToolStripStatusLabel>()
+                .Any(label => label.Text?.Contains("Page zoom query timed out", StringComparison.Ordinal) == true), "stalled zoom timeout notice");
+            Check(stalledRequests == 1, "stalled query is not repeatedly queued");
+            await LoadReady(first, Origin + "viewport-stalled-navigation");
+            Check(stalledRequests == 1, "navigation does not multiply a stalled query");
+            Button("+").PerformClick();
+            await Wait(() => tabs.TabCount == 2, "open tab while zoom query stalled");
+            var second = Current();
+            await Ready(second);
+            await LoadReady(second, Origin + "viewport-unstalled");
+            await Wait(() => otherRequests > 0, "independent tab zoom query");
+            await ReportViewport(form, tabs, second, true, "other_tab_while_stalled");
+            tabs.SelectedIndex = 0;
+            Button("×").PerformClick();
+            await Wait(() => tabs.TabCount == 1, "stalled tab closes without completing query");
+            never.TrySetResult(5);
+            await Ready(Current());
+            await ReportViewport(form, tabs, Current(), true, "stale_completion_after_tab_close");
+            Check(stalledRequests == 1, "stale completion did not restart closed tab queries");
+        }
+        finally
+        {
+            if (!form.IsDisposed) { form.Close(); await Wait(() => form.IsDisposed, "stalled-query form native close"); }
+        }
+
+        var pending = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requested = false;
+        var closing = new MainForm("viewport-close-pending", profilePath, _ => { requested = true; return pending.Task; });
+        closing.Show();
+        await Wait(() => requested, "shutdown test query started");
+        closing.Close();
+        await Wait(() => closing.IsDisposed, "window closes with pending zoom query");
+        pending.TrySetResult(5);
+        Check(closing.IsDisposed, "late completion does not reopen a closed window");
     }
 
     private static async Task ResizeViewportAndWait(ChromiumWebBrowser browser, Action resize)
@@ -259,6 +369,12 @@ internal static partial class Program
                 if (scenario == "zoom_1" && available.Width / factor >= ViewportLetterboxing.WidthStep &&
                     available.Height / factor >= ViewportLetterboxing.HeightStep)
                     Console.WriteLine("P4FP07_CSS_BUCKET: VERIFIED zoom_1 (inner viewport, observed DPR)");
+                if (scenario == "zoom_minus_1" && available.Height / factor >= ViewportLetterboxing.HeightStep)
+                {
+                    var targetHeight = (int)Math.Floor(available.Height / factor / ViewportLetterboxing.HeightStep) * ViewportLetterboxing.HeightStep;
+                    Check(height == targetHeight, "negative zoom CSS height reaches target bucket");
+                    Console.WriteLine("P4FP08_ROUNDING: VERIFIED zoom_minus_1 css_height=" + height);
+                }
             }
             else Console.WriteLine("P4FP07_CSS_BUCKET: INCONCLUSIVE (DPR differs from zoom factor; " + scenario + ")");
         }
