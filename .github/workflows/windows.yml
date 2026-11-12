@@ -59,7 +59,8 @@ jobs:
             if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
                 ($output -join "`n") -notmatch "PASS: \d+ CSS viewport checks \($phase\)" -or
                 ($output -join "`n") -notmatch "PASS: viewport CEF shutdown completed \($phase\)" -or
-                ($output -join "`n") -notmatch 'P4LB_CSS_VIEWPORT:') {
+                ($output -join "`n") -notmatch 'P4LB_CSS_VIEWPORT:' -or
+                ($output -join "`n") -notmatch 'P4FP07_CSS_BUCKET: VERIFIED zoom_1') {
               throw "CSS viewport probe $phase failed or did not complete native shutdown."
             }
           }

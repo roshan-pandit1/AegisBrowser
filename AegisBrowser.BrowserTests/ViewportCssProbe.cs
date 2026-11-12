@@ -91,7 +91,19 @@ internal static partial class Program
             await ReportViewport(form, tabs, browser, enabled, "resize_1089x751");
             await ResizeViewportAndWait(browser, () => form.Size = new Size(1099, 761));
             await ReportViewport(form, tabs, browser, enabled, "resize_1099x761");
-            if (!enabled) return;
+            if (!enabled)
+            {
+                var original = int.Parse(await Js(browser, "window.innerWidth"));
+                browser.GetBrowserHost().SetZoomLevel(1.0);
+                await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync() - 1.0) < 0.01 &&
+                    int.Parse(await Js(browser, "window.innerWidth")) != original, "unletterboxed zoom change");
+                await ReportViewport(form, tabs, browser, false, "disabled_zoom_1");
+                browser.GetBrowserHost().SetZoomLevel(0);
+                await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync()) < 0.01 &&
+                    int.Parse(await Js(browser, "window.innerWidth")) == original,
+                    "unletterboxed zoom reset");
+                return;
+            }
             Button("+").PerformClick();
             await Wait(() => tabs.TabCount == 2, "viewport second tab");
             await Ready(Current());
@@ -101,18 +113,37 @@ internal static partial class Program
             await Ready(Current());
             await ReportViewport(form, tabs, Current(), enabled, "tab_switch");
 
-            // Zoom is an intentionally unchanged Chromium behavior. Measure it,
-            // rather than claiming the original CSS buckets survive zoom.
+            // The renderer measurement, not the WinForms bounds, is the privacy check.
             var widthBeforeZoom = int.Parse(await Js(browser, "window.innerWidth"));
             browser.GetBrowserHost().SetZoomLevel(1.0);
             await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync() - 1.0) < 0.01 &&
                 int.Parse(await Js(browser, "window.innerWidth")) != widthBeforeZoom,
                 "viewport zoom change");
             await ReportViewport(form, tabs, browser, enabled, "zoom_1");
-            var widthAtZoom = int.Parse(await Js(browser, "window.innerWidth"));
+            await CheckViewportFixture(browser);
+            await ResizeViewportAndWait(browser, () => form.Size = new Size(1089, 751));
+            await ReportViewport(form, tabs, browser, enabled, "zoom_1_resize");
+            await LoadReady(browser, Origin + "viewport-zoomed-navigation");
+            await ReportViewport(form, tabs, browser, enabled, "zoom_1_navigation");
+            tabs.SelectedIndex = 1;
+            await Ready(Current());
+            tabs.SelectedIndex = 0;
+            await ReportViewport(form, tabs, browser, enabled, "zoomed_tab_switch");
+            var fractionalZoom = Math.Log(1.1) / Math.Log(1.2);
+            browser.GetBrowserHost().SetZoomLevel(fractionalZoom);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync() - fractionalZoom) < 0.01,
+                "viewport fractional zoom change");
+            await ReportViewport(form, tabs, browser, enabled, "zoom_110_percent");
+            var widthAtFractionalZoom = int.Parse(await Js(browser, "window.innerWidth"));
+            browser.GetBrowserHost().SetZoomLevel(-1.0);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync() + 1.0) < 0.01 &&
+                int.Parse(await Js(browser, "window.innerWidth")) != widthAtFractionalZoom,
+                "viewport negative zoom change");
+            await ReportViewport(form, tabs, browser, enabled, "zoom_minus_1");
+            var widthAtNegativeZoom = int.Parse(await Js(browser, "window.innerWidth"));
             browser.GetBrowserHost().SetZoomLevel(0);
             await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync()) < 0.01 &&
-                int.Parse(await Js(browser, "window.innerWidth")) != widthAtZoom,
+                int.Parse(await Js(browser, "window.innerWidth")) != widthAtNegativeZoom,
                 "viewport zoom reset");
             await ReportViewport(form, tabs, browser, enabled, "zoom_reset");
             await ResizeViewportAndWait(browser, () => form.WindowState = FormWindowState.Maximized);
@@ -175,6 +206,16 @@ internal static partial class Program
 
     private static async Task ReportViewport(MainForm form, TabControl tabs, ChromiumWebBrowser browser, bool enabled, string scenario)
     {
+        if (enabled)
+        {
+            await WaitForAsync(async () =>
+            {
+                var area = tabs.SelectedTab!.DisplayRectangle;
+                var level = await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                var target = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), level);
+                return browser.Bounds == new Rectangle(area.X + target.X, area.Y + target.Y, target.Width, target.Height);
+            }, "zoom-aware layout " + scenario);
+        }
         const string script = "JSON.stringify({innerWidth:window.innerWidth,innerHeight:window.innerHeight,clientWidth:document.documentElement.clientWidth,clientHeight:document.documentElement.clientHeight,dpr:window.devicePixelRatio,outerWidth:window.outerWidth,outerHeight:window.outerHeight,screenWidth:screen.width,screenHeight:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight,visualWidth:window.visualViewport?.width??null,visualHeight:window.visualViewport?.height??null})";
         string? previous = null;
         var stable = 0;
@@ -198,16 +239,33 @@ internal static partial class Program
             "active viewport remains nonzero (" + scenario + ")");
         var bounds = browser.Bounds;
         var available = tabs.SelectedTab!.DisplayRectangle;
+        var zoom = await browser.GetBrowserHost().GetZoomLevelAsync();
+        var factor = Math.Pow(1.2, zoom);
         if (enabled)
         {
-            var expected = ViewportLetterboxing.Calculate(Math.Max(0, available.Width), Math.Max(0, available.Height));
+            var expected = ViewportLetterboxing.Calculate(Math.Max(0, available.Width), Math.Max(0, available.Height), zoom);
             Check(bounds == new Rectangle(available.X + expected.X, available.Y + expected.Y, expected.Width, expected.Height),
                 "letterboxed control matches centered geometry (" + scenario + ")");
+            // The fixture is independently checked in CSS pixels when the
+            // observed renderer scale matches the zoom factor. Other DPI
+            // configurations remain measured, not assumed equivalent.
+            if (Math.Abs(metrics.RootElement.GetProperty("dpr").GetDouble() - factor) < 0.02)
+            {
+                static int Distance(int value, int step) => Math.Min(value % step, step - value % step);
+                if (available.Width / factor >= ViewportLetterboxing.WidthStep)
+                    Check(Distance(width, ViewportLetterboxing.WidthStep) <= 1, "CSS width near zoom bucket (" + scenario + ")");
+                if (available.Height / factor >= ViewportLetterboxing.HeightStep)
+                    Check(Distance(height, ViewportLetterboxing.HeightStep) <= 1, "CSS height near zoom bucket (" + scenario + ")");
+                if (scenario == "zoom_1" && available.Width / factor >= ViewportLetterboxing.WidthStep &&
+                    available.Height / factor >= ViewportLetterboxing.HeightStep)
+                    Console.WriteLine("P4FP07_CSS_BUCKET: VERIFIED zoom_1 (inner viewport, observed DPR)");
+            }
+            else Console.WriteLine("P4FP07_CSS_BUCKET: INCONCLUSIVE (DPR differs from zoom factor; " + scenario + ")");
         }
         else Check(bounds == available, "unletterboxed control fills available area (" + scenario + ")");
         Console.WriteLine("P4LB_CSS_VIEWPORT: " + JsonSerializer.Serialize(new
         {
-            scenario, enabled, dpi = form.DeviceDpi, windowState = form.WindowState.ToString(), zoom = await browser.GetBrowserHost().GetZoomLevelAsync(),
+            scenario, enabled, dpi = form.DeviceDpi, windowState = form.WindowState.ToString(), zoom,
             bounds = new { bounds.X, bounds.Y, bounds.Width, bounds.Height },
             available = new { available.X, available.Y, available.Width, available.Height },
             css = metrics.RootElement.Clone(),

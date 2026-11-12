@@ -23,6 +23,9 @@ public sealed class MainForm : Form
     private readonly bool letterboxingAtStartup;
     private readonly bool disableWebGlAtStartup;
     private readonly bool disableRemoteFontsAtStartup;
+    private readonly System.Windows.Forms.Timer letterboxZoomTimer = new() { Interval = 250 };
+    private readonly Dictionary<ChromiumWebBrowser, double> letterboxZoomLevels = new();
+    private readonly Dictionary<ChromiumWebBrowser, (Task<double> Task, DateTime Started)> letterboxZoomQueries = new();
     private PrivacyForm? privacyWindow;
     private SearchSettings searchSettings = new();
     private readonly SearchSettingsStore? searchStore;
@@ -120,6 +123,18 @@ public sealed class MainForm : Form
         Controls.Add(bar);
         Controls.Add(bottom);
         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
+        if (letterboxingAtStartup)
+        {
+            // CEF has no zoom-changed event in this binding. Poll only the
+            // selected live browser, without blocking the WinForms or CEF UI thread.
+            letterboxZoomTimer.Tick += (_, _) => RefreshLetterboxZoom();
+            letterboxZoomTimer.Start();
+        }
+        Disposed += (_, _) =>
+        {
+            letterboxZoomTimer.Stop();
+            letterboxZoomTimer.Dispose();
+        };
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
         FormClosing += (_, e) =>
         {
@@ -179,13 +194,63 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { }
     }
 
-    private static void ResizeLetterboxedTab(TabPage page, ChromiumWebBrowser browser)
+    private void ResizeLetterboxedTab(TabPage page, ChromiumWebBrowser browser)
     {
         if (page.IsDisposed || browser.IsDisposed) return;
         var area = page.DisplayRectangle;
-        var rect = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height));
+        var zoom = letterboxZoomLevels.GetValueOrDefault(browser);
+        var rect = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), zoom);
         var bounds = new Rectangle(area.X + rect.X, area.Y + rect.Y, rect.Width, rect.Height);
         if (browser.Bounds != bounds) browser.Bounds = bounds;
+    }
+
+    private void RefreshLetterboxZoom()
+    {
+        if (closing || IsDisposed || !IsHandleCreated ||
+            tabs.SelectedTab is not { } page || Current is not { } browser ||
+            page.IsDisposed || browser.IsDisposed || !browser.IsBrowserInitialized) return;
+        try
+        {
+            if (!letterboxZoomQueries.TryGetValue(browser, out var query))
+            {
+                // CefSharp caches this browser-owned host wrapper. Do not
+                // dispose it here: the browser uses it for later operations.
+                var host = browser.GetBrowserHost();
+                if (host is null) return;
+                var task = host.GetZoomLevelAsync();
+                _ = task.ContinueWith(t => { _ = t.Exception; }, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                letterboxZoomQueries[browser] = (task, DateTime.UtcNow);
+                return;
+            }
+            if (!query.Task.IsCompleted)
+            {
+                // Never queue repeated queries for a stuck CEF callback, and
+                // do not prevent other tabs from being measured.
+                if (DateTime.UtcNow - query.Started > TimeSpan.FromSeconds(3))
+                    status.Text = "Could not adjust letterboxing for page zoom; close and reopen this tab.";
+                return;
+            }
+            letterboxZoomQueries.Remove(browser);
+            var zoom = query.Task.GetAwaiter().GetResult();
+            if (closing || IsDisposed || page.IsDisposed || browser.IsDisposed ||
+                tabs.SelectedTab != page || Current != browser || !double.IsFinite(zoom)) return;
+            if (!letterboxZoomLevels.TryGetValue(browser, out var previous) || previous != zoom)
+            {
+                letterboxZoomLevels[browser] = zoom;
+                ResizeLetterboxedTab(page, browser);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or TaskCanceledException)
+        {
+            // CEF and the WinForms tab can be destroyed while the query is in flight.
+        }
+        catch (Exception)
+        {
+            // Keep the current bounds and surface an unavailable zoom adjustment
+            // rather than letting an async timer exception terminate the UI.
+            if (!closing && !IsDisposed) status.Text = "Could not adjust letterboxing for page zoom; close and reopen this tab.";
+        }
     }
 
     private void NewTab(string url)
@@ -215,6 +280,7 @@ public sealed class MainForm : Form
             page.BackColor = Color.FromArgb(32, 37, 46);
             page.ClientSizeChanged += (_, _) => ResizeLetterboxedTab(page, browser);
             page.VisibleChanged += (_, _) => { if (page.Visible) ResizeLetterboxedTab(page, browser); };
+            page.Disposed += (_, _) => { letterboxZoomLevels.Remove(browser); letterboxZoomQueries.Remove(browser); };
         }
         void Report(string message) => Post(() =>
         {
