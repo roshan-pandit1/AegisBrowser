@@ -28,6 +28,8 @@ The stock AegisBrowser browser-test project built locally for Release win-x64 wi
 
 On the ARM64 workstation under x64 emulation, the stock `fingerprint-write` probe passed 128 checks, exited 0 and reported completed CEF shutdown. Its positive controls created WebGL 1 and 2 contexts in HTMLCanvas and in document and dedicated-worker OffscreenCanvas. With the existing browser setting enabled, tested HTMLCanvas contexts were unavailable in the main document, same-origin and cross-origin frames, and native popup; document and dedicated-worker OffscreenCanvas WebGL 1 and 2 remained functional. Canvas 2D was functional. This reproduces the stock-runtime gap and does not test either source patch.
 
+The stock `fingerprint-read` probe then restarted against the same disposable profile: 128 checks passed, exit 0, and CEF shutdown completed. The same dedicated-worker WebGL 1/2 gap remained. WebGPU was inconclusive. The local core test executable also exited 0, including its privacy and profile-policy suites; its Release build likewise reported unreachable NuGet vulnerability metadata. These results are local stock-runtime observations, not patched-engine validation.
+
 ## Worker policy and isolation limitations
 
 The prototype is not yet a reviewed policy for all execution contexts. Its alternate `WorkerSettings` construction path and missing-settings behavior require explicit tests; a default-initialized value must not silently stand in for an independently established security policy. Worker creation, nested copying, termination and recreation also require actual execution.
@@ -42,7 +44,7 @@ At parent commit `54e7679c4ad1fba5a8077a7929fc100fd82774c1`, the stock Windows [
 
 The failed attempt's bounded trace recorded the listener stopped, then the offline navigation requested and `LOADING`, followed by the timeout approximately 25 seconds later. Browser close was requested after the timeout; an `Aborted` load error then occurred, followed by browser close and `SHUTDOWN_RETURNED`. The final trace reported zero dropped events. That sequence does not establish why the expected pre-close failure callback was absent.
 
-The parent source-subset [push](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/43073689342) and [PR](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/43073700381) checks passed. These workflows verify only the stated subset and stock AegisBrowser behavior, not patched Chromium. Final P4-FP-06 commit and its actual workflow results are pending verification.
+The parent source-subset [push](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/43073689342) and [PR](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/43073700381) checks passed. On the first P4-FP-06 research commit `4eeb7fbfcffba50fe3b00953e7cd019ba12c3dad`, source-subset [push](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/43140919092) and [PR](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/43141016388) checks passed. Its stock Windows [push](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/43140919106) and [PR](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/43141016450) runs were still in progress when this report was updated. Inspect the draft PR for the final-head workflow results. These workflows verify only the stated subset and stock AegisBrowser behavior, not patched Chromium.
 
 ## Security and next action
 
