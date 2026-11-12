@@ -97,20 +97,26 @@ The workflow runs on `windows-latest`, installs .NET 8, requires the harness's c
 
 The profile-local **Letterbox page viewport** setting defaults to **off**.
 When enabled and the profile is restarted, AegisBrowser centers each normal
-Chromium tab within a display area rounded down to 200-by-100 WinForms-control
-size buckets. This may reduce variation in a page's viewport dimensions, but
-it also reduces usable content space and can affect responsive layouts.
-Tiny panes remain usable without bucketing below the minimum step.
+Chromium tab in a size intended to produce 200-by-100 CSS viewport buckets.
+The control sizing accounts for the browser's page zoom, and is recalculated
+when applicable layout or zoom changes are observed. This may reduce variation
+in a page's viewport dimensions, but it also reduces usable content space and
+can affect responsive layouts. Tiny panes remain usable without bucketing below
+the minimum step. Zoom changes are detected asynchronously for the selected
+tab, so a page can briefly observe the previous size; background tabs are
+adjusted after selection.
 
 This is inspired by Tor Browser's letterboxing principle, **not** a port of
 Tor's browser-engine protections. It does not change JavaScript-visible
 `screen` values, GPU/Canvas/audio/font characteristics, IP address or the
-other fingerprint signals. Actual CSS viewport bucketing at different Windows
-display scaling and browser zoom has **not** been accepted on Windows yet.
+other fingerprint signals. Integer rounding, scrollbars and Windows display
+scaling can affect the viewport a page observes. Actual bucketing across
+different display-scaling configurations has **not** been established.
 The option applies at the next profile launch; network rules remain live.
 Popups are not letterboxed. No identity spoofing or anti-fraud evasion is added.
 
-See [Tor and GoLogin public-behavior comparison and testing limitations](tor-gologin-fingerprint-privacy-study.md).
+See the [zoom-aware viewport verification](p4-fp-07-zoom-letterboxing.md) and
+[Tor and GoLogin public-behavior comparison](tor-gologin-fingerprint-privacy-study.md).
 
 ## Optional browser-native fingerprint-surface restrictions
 
