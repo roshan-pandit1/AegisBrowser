@@ -5,8 +5,8 @@ This is a release candidate, not a stable-release certification. Check BUILD-STA
 ## Install and start
 
 1. Use Windows 10/11 x64. The archive includes the .NET runtime; the .NET SDK is not needed to run it. CefSharp may require the Microsoft Visual C++ x64 Redistributable: https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist . Install that prerequisite using Microsoft's installer if native runtime DLLs are missing.
-2. Download the portable artifact from the PR's successful Windows Actions run. The Actions artifact wrapper contains `AegisBrowser-v0.1.0-rc1-win-x64-portable.zip` and its `.sha256` file.
-3. Verify the inner ZIP using PowerShell `Get-FileHash .\AegisBrowser-v0.1.0-rc1-win-x64-portable.zip -Algorithm SHA256` and compare it with the accompanying checksum and CI log.
+2. Download the portable artifact from the PR's successful Windows Actions run. The Actions artifact wrapper contains `AegisBrowser-RC1-win-x64.zip` and its `.sha256` file.
+3. Verify the inner ZIP using PowerShell `Get-FileHash .\AegisBrowser-RC1-win-x64.zip -Algorithm SHA256` and compare it with the accompanying checksum and CI log.
 4. Extract the ZIP completely to a writable folder. Keep every file and subfolder together. Do not run the executable inside the ZIP or copy only the EXE.
 5. Open `AegisBrowser\AegisBrowser.exe`. No administrator privileges are required for the browser. This build is not code-signed; follow your organization's application trust policy.
 

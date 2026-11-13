@@ -11,13 +11,14 @@ New-Item -ItemType Directory -Force $bundle | Out-Null
 Copy-Item "$source/*" $bundle -Recurse
 Copy-Item docs/INSTALL-WINDOWS.md (Join-Path $bundle 'INSTALL-WINDOWS.md')
 Copy-Item docs/privacy.md (Join-Path $bundle 'PRIVACY.md')
+Copy-Item docs/release-rc1.md (Join-Path $bundle 'release-rc1.md')
 Copy-Item docs/search.md (Join-Path $bundle 'SEARCH.md')
 Copy-Item docs/profile-manager.md (Join-Path $bundle 'PROFILE-MANAGER.md')
 Copy-Item BUILD-STATUS.md (Join-Path $bundle 'BUILD-STATUS.md')
 $revision = git rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not record source revision' }
 @("Aegis Browser v0.1.0 release candidate", "Source: $revision", "Target: win-x64, self-contained", "Manual release acceptance remains required. See BUILD-STATUS.md.") | Set-Content (Join-Path $bundle 'VERSION.txt')
-$zip = Join-Path $output 'AegisBrowser-v0.1.0-rc1-win-x64-portable.zip'
+$zip = Join-Path $output 'AegisBrowser-RC1-win-x64.zip'
 Compress-Archive -Path $bundle -DestinationPath $zip -CompressionLevel Optimal -Force
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 "$hash  $([IO.Path]::GetFileName($zip))" | Set-Content "$zip.sha256"

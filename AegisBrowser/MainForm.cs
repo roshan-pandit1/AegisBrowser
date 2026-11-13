@@ -16,6 +16,17 @@ public sealed class MainForm : Form
     private bool closeComplete;
     private readonly PrivacySession privacy;
     private readonly PrivacySettingsStore? privacyStore;
+    private readonly ThirdPartyCookiePolicy.Result cookiePolicy;
+    private readonly bool cookiePolicyBlocksTabs;
+    private readonly WebRtcPrivacyPolicy.Result webRtcPolicy;
+    private readonly bool webRtcPolicyBlocksTabs;
+    private readonly bool letterboxingAtStartup;
+    private readonly bool disableWebGlAtStartup;
+    private readonly bool disableRemoteFontsAtStartup;
+    private readonly System.Windows.Forms.Timer letterboxZoomTimer = new() { Interval = 250 };
+    private readonly Dictionary<ChromiumWebBrowser, double> letterboxZoomLevels = new();
+    private readonly Dictionary<ChromiumWebBrowser, ViewportZoomQuery> letterboxZoomQueries = new();
+    private readonly Func<ChromiumWebBrowser, Task<double>> letterboxZoomQuery;
     private PrivacyForm? privacyWindow;
     private SearchSettings searchSettings = new();
     private readonly SearchSettingsStore? searchStore;
@@ -24,8 +35,12 @@ public sealed class MainForm : Form
     private readonly HashSet<TabPage> retiring = new();
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
-    public MainForm(string profile, string? profilePath = null)
+    public MainForm(string profile, string? profilePath = null) : this(profile, profilePath, null) { }
+
+    internal MainForm(string profile, string? profilePath, Func<ChromiumWebBrowser, Task<double>>? zoomQuery)
     {
+        letterboxZoomQuery = zoomQuery ?? (browser =>
+            (browser.GetBrowserHost() ?? throw new InvalidOperationException("CEF browser host unavailable.")).GetZoomLevelAsync());
         var configuration = new PrivacyConfiguration();
         string? privacyWarning = null;
         if (profilePath is not null)
@@ -38,7 +53,24 @@ public sealed class MainForm : Form
             catch (IOException ex) { privacyWarning = ex.Message; }
         }
         privacy = new(configuration);
+        letterboxingAtStartup = configuration.LetterboxWebContent;
+        disableWebGlAtStartup = configuration.DisableWebGl;
+        disableRemoteFontsAtStartup = configuration.DisableRemoteFonts;
+        cookiePolicy = ThirdPartyCookiePolicy.ApplyAtStartup(configuration.BlockThirdPartyCookies);
+        cookiePolicyBlocksTabs = ThirdPartyCookiePolicy.PreventBrowsing(configuration.BlockThirdPartyCookies, cookiePolicy);
+        webRtcPolicy = WebRtcPrivacyPolicy.ApplyAtStartup(configuration.RestrictWebRtcNonProxiedUdp);
+        webRtcPolicyBlocksTabs = WebRtcPrivacyPolicy.PreventBrowsing(configuration.RestrictWebRtcNonProxiedUdp, webRtcPolicy);
         if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
+        if (!cookiePolicy.Succeeded) Shown += (_, _) => MessageBox.Show(this,
+            cookiePolicy.Error + (cookiePolicyBlocksTabs
+                ? "\n\nNo browser tabs will open. Disable the setting in Privacy and restart this profile."
+                : "\n\nThe existing Chromium cookie policy remains in effect; it could not be restored to the default."),
+            "Cookie protection could not be applied");
+        if (!webRtcPolicy.Succeeded) Shown += (_, _) => MessageBox.Show(this,
+            webRtcPolicy.Error + (webRtcPolicyBlocksTabs
+                ? "\n\nNo browser tabs will open. Disable the setting in Privacy and restart this profile."
+                : "\n\nThe existing Chromium WebRTC policy could not be restored to the default."),
+            "WebRTC privacy setting could not be applied");
         Text = $"Aegis Browser — {profile}";
         Width = 1250;
         Height = 850;
@@ -61,7 +93,7 @@ public sealed class MainForm : Form
         bar.Controls.Add(MakeButton("Privacy", () =>
         {
             if (privacyWindow is null || privacyWindow.IsDisposed)
-                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save));
+                privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save), cookiePolicy.Status, letterboxingAtStartup, disableWebGlAtStartup, disableRemoteFontsAtStartup, webRtcPolicy.Status);
             privacyWindow.Show(this); privacyWindow.BringToFront();
         }), 8, 0);
         bar.Controls.Add(MakeButton("Search", () =>
@@ -95,7 +127,33 @@ public sealed class MainForm : Form
         Controls.Add(tabs);
         Controls.Add(bar);
         Controls.Add(bottom);
-        tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
+        tabs.SelectedIndexChanged += (_, _) =>
+        {
+            UpdateNavigation();
+            if (letterboxingAtStartup)
+            {
+                // A result captured before a tab was backgrounded may no
+                // longer reflect its current origin or zoom when reselected.
+                var selected = Current;
+                foreach (var (owner, query) in letterboxZoomQueries)
+                    if (owner != selected) query.Invalidate();
+                RefreshLetterboxZoom();
+            }
+        };
+        if (letterboxingAtStartup)
+        {
+            // CEF has no zoom-changed event in this binding. Poll only the
+            // selected live browser, without blocking the WinForms or CEF UI thread.
+            letterboxZoomTimer.Tick += (_, _) => RefreshLetterboxZoom();
+            letterboxZoomTimer.Start();
+        }
+        Disposed += (_, _) =>
+        {
+            letterboxZoomTimer.Stop();
+            letterboxZoomTimer.Dispose();
+            foreach (var query in letterboxZoomQueries.Values) query.Retire();
+            letterboxZoomQueries.Clear();
+        };
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
         FormClosing += (_, e) =>
         {
@@ -103,6 +161,9 @@ public sealed class MainForm : Form
             e.Cancel = true;
             if (closing) return;
             closing = true;
+            letterboxZoomTimer.Stop();
+            foreach (var query in letterboxZoomQueries.Values) query.Retire();
+            letterboxZoomQueries.Clear();
             foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
             {
                 retiring.Add(page);
@@ -155,11 +216,91 @@ public sealed class MainForm : Form
         catch (InvalidOperationException) { }
     }
 
+    private void ResizeLetterboxedTab(TabPage page, ChromiumWebBrowser browser)
+    {
+        if (page.IsDisposed || browser.IsDisposed) return;
+        var area = page.DisplayRectangle;
+        var zoom = letterboxZoomLevels.GetValueOrDefault(browser);
+        var rect = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), zoom);
+        var bounds = new Rectangle(area.X + rect.X, area.Y + rect.Y, rect.Width, rect.Height);
+        if (browser.Bounds != bounds) browser.Bounds = bounds;
+    }
+
+    private void RefreshLetterboxZoom()
+    {
+        if (closing || IsDisposed || !IsHandleCreated) return;
+        var selectedBrowser = Current;
+        foreach (var (owner, pending) in letterboxZoomQueries)
+        {
+            pending.Expire();
+            if (owner != selectedBrowser) pending.DiscardCompletedBackground();
+        }
+        if (
+            tabs.SelectedTab is not { } page || Current is not { } browser ||
+            retiring.Contains(page) || page.IsDisposed || browser.IsDisposed || !browser.IsBrowserInitialized) return;
+        try
+        {
+            if (!letterboxZoomQueries.TryGetValue(browser, out var query))
+                letterboxZoomQueries[browser] = query = new ViewportZoomQuery();
+            // GetBrowserHost returns a browser-owned wrapper; it must not be
+            // disposed by this poller. Poll never waits on an incomplete task.
+            var result = query.Poll(() => letterboxZoomQuery(browser));
+            if (result.Warn) status.Text = result.Status is ViewportZoomQueryStatus.TimedOut or ViewportZoomQueryStatus.Blocked
+                ? "Page zoom query timed out; close and reopen this tab to restore letterboxing."
+                : "Could not read page zoom; letterboxing will retry.";
+            if (result.Status != ViewportZoomQueryStatus.Succeeded) return;
+            var zoom = result.Zoom;
+            if (!letterboxZoomLevels.TryGetValue(browser, out var previous) || previous != zoom)
+            {
+                letterboxZoomLevels[browser] = zoom;
+                ResizeLetterboxedTab(page, browser);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or TaskCanceledException)
+        {
+            // CEF and the WinForms tab can be destroyed while the query is in flight.
+        }
+        catch (Exception)
+        {
+            // Keep the current bounds and surface an unavailable zoom adjustment
+            // rather than letting an async timer exception terminate the UI.
+            if (!closing && !IsDisposed) status.Text = "Could not adjust letterboxing for page zoom; close and reopen this tab.";
+        }
+    }
+
     private void NewTab(string url)
     {
         if (closing) return;
+        if (cookiePolicyBlocksTabs)
+        {
+            status.Text = "Cookie protection unavailable; change the setting in Privacy and restart.";
+            return;
+        }
+        if (webRtcPolicyBlocksTabs)
+        {
+            status.Text = "WebRTC privacy setting unavailable; change the setting in Privacy and restart.";
+            return;
+        }
         var page = new TabPage("New tab") { Tag = "Loading…" };
-        var browser = new BrowserView(url) { Dock = DockStyle.Fill };
+        var browser = new BrowserView(url) { Dock = letterboxingAtStartup ? DockStyle.None : DockStyle.Fill };
+        // Apply browser-native restrictions before this control gets a native CEF host.
+        // The default-off path deliberately leaves BrowserSettings untouched.
+        var exposureSettings = FingerprintSurfacePolicy.CreateSettings(disableWebGlAtStartup, disableRemoteFontsAtStartup);
+        if (exposureSettings is not null) browser.BrowserSettings = exposureSettings;
+        if (letterboxingAtStartup)
+        {
+            // Keep Chromium itself inside a centered size bucket. No JS or browser
+            // identity overrides; normal tabs retain the existing Dock=Fill path.
+            browser.Bounds = Rectangle.Empty;
+            page.BackColor = Color.FromArgb(32, 37, 46);
+            page.ClientSizeChanged += (_, _) => ResizeLetterboxedTab(page, browser);
+            page.VisibleChanged += (_, _) => { if (page.Visible) ResizeLetterboxedTab(page, browser); };
+            page.Disposed += (_, _) =>
+            {
+                letterboxZoomLevels.Remove(browser);
+                if (letterboxZoomQueries.Remove(browser, out var query)) query.Retire();
+            };
+        }
         void Report(string message) => Post(() =>
         {
             if (page.IsDisposed) return;
@@ -203,7 +344,15 @@ public sealed class MainForm : Form
             page.Text = title.Length > 28 ? title[..28] + "…" : title;
             page.ToolTipText = title;
         });
-        browser.FrameLoadStart += (_, e) => { if (e.Frame.IsMain) Report("Loading…"); };
+        browser.FrameLoadStart += (_, e) =>
+        {
+            if (!e.Frame.IsMain) return;
+            if (letterboxingAtStartup) Post(() =>
+            {
+                if (letterboxZoomQueries.TryGetValue(browser, out var query)) query.Invalidate();
+            });
+            Report("Loading…");
+        };
         browser.FrameLoadEnd += (_, e) =>
         {
             if (!e.Frame.IsMain) return;
@@ -217,6 +366,7 @@ public sealed class MainForm : Form
         page.Controls.Add(browser);
         tabs.TabPages.Add(page);
         tabs.SelectedTab = page;
+        if (letterboxingAtStartup) ResizeLetterboxedTab(page, browser);
     }
 
     private void UpdateNavigation()
@@ -235,6 +385,8 @@ public sealed class MainForm : Form
         if (tabs.SelectedTab is not { } page) return;
         var browser = Current!;
         if (!retiring.Add(page)) return;
+        if (letterboxZoomQueries.Remove(browser, out var query)) query.Retire();
+        letterboxZoomLevels.Remove(browser);
         ((SafePopups)browser.LifeSpanHandler).ClosePopups();
         // Keep the TabPage parent HWND alive until CEF reports DoClose readiness; disposing during creation can destroy a window CEF still uses.
         if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
