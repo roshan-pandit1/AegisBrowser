@@ -60,6 +60,7 @@ internal static partial class Program
                     browser.RequestHandler = new SafeRequests(Console.WriteLine);
                     Observe(browser); host.Controls.Add(browser); await Ready(browser);
                     await VerifySocksOutcomeFailures();
+                    VerifySocksNavigationObserver();
                     await AwaitConcurrentProxyProbe(root);
                     await AwaitProcessObservation();
                     var baseUrl = "http://127.0.0.1:" + origin.Port;
@@ -115,6 +116,9 @@ internal static partial class Program
                     }
                     finally { browser.LoadError -= onError; }
                     await ObserveHttpsThroughProxy(browser, context);
+                    // Keep protocol denial independently observable even if
+                    // the following stopped-listener navigation times out.
+                    await ObserveSocksRejection(browser, context, socksTrace);
                     await ObserveSocksThroughProxy(browser, context, socksTrace);
                     await ObserveSocksCancellation(browser, context, socksTrace);
                     await ObserveHttpsProxyCertificate(browser, context);
@@ -127,7 +131,15 @@ internal static partial class Program
                     {
                         try { socksTrace.Add("CEF_LIFECYCLE_EVENT", "BROWSER_CLOSE_REQUESTED"); await CloseWeb(browser); socksTrace.Add("CEF_LIFECYCLE_EVENT", "BROWSER_CLOSED"); }
                         catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
-                        finally { socksTrace.Detach(); }
+                        finally
+                        {
+                            socksTrace.Detach();
+                            if (socksTrace.PostCloseViolation)
+                            {
+                                result = 1;
+                                Console.Error.WriteLine("SOCKS-offline navigation had a contradictory successful response before teardown completed.");
+                            }
+                        }
                     }
                     host.Close();
                 }
@@ -139,6 +151,11 @@ internal static partial class Program
         {
             try { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); socksTrace.Add("CEF_LIFECYCLE_EVENT", "SHUTDOWN_RETURNED"); } }
             finally { socksTrace.Print(); }
+        }
+        if (socksTrace.Dropped != 0)
+        {
+            result = 1;
+            Console.Error.WriteLine("SOCKS trace overflowed; callback evidence is incomplete.");
         }
         if (result == 0) Console.WriteLine("PASS: CEF proxy probe shutdown completed");
         return result;
