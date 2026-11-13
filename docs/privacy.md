@@ -30,7 +30,7 @@ The starter list is a deliberately limited set of common analytics hosts. It is 
 
 Open **Privacy** on the toolbar. Choose a mode; edit one resource hostname or site-exception hostname per line. To remove an exception or rule, delete its line. User network rules use the syntax above. The Tracking list tab imports/replaces a UTF-8 list, restores the starter list or clears it. **Apply settings** validates and publishes the configuration for new requests; reload pages to retry previously blocked resources. Unsupported active list rules appear in their own tab.
 
-The profile can also opt in to third-party cookie blocking, WebRTC UDP restriction, viewport letterboxing, WebGL restriction and remote-font blocking. Restart the profile after changing these settings. They can break embedded sign-in, calls or graphics; see [RC1 limitations](release-rc1.md). The WebGL setting does not cover all worker OffscreenCanvas contexts, and these controls do not establish anonymity or network containment.
+The profile can also opt in to third-party cookie blocking, WebRTC UDP restriction, viewport letterboxing, WebGL restriction and remote-font blocking. Restart the profile after changing these settings. They can break embedded sign-in, calls or graphics; see [RC1 limitations](release-rc1.md). The WebGL setting does not cover all OffscreenCanvas contexts in pages or workers, and these controls do not establish anonymity or network containment.
 
 The current site's hostname can be added to site exceptions. **Pause filtering** applies across this profile's tabs until resumed or browser exit. It never persists across restarts. Neither action weakens Chromium security protections.
 

@@ -8,12 +8,14 @@ RC1 is a Windows x64, .NET 8 and CefSharp 154 release candidate. It is not a cla
 | --- | --- | --- |
 | Profiles, leases, navigation, filtering, permissions and native popups | Existing `main` | Included; profiles remain separate and a lease prevents concurrent use of one profile. |
 | Third-party cookie blocking | #59 | Included as an opt-in profile setting; embedded sign-in and other content may break. |
-| WebGL and remote-font restrictions | #64 | Included as separate opt-in settings. WebGL restriction covers tested document contexts, not OffscreenCanvas in workers; remote-font blocking does not hide installed fonts. |
+| WebGL and remote-font restrictions | #64 | Included as separate opt-in settings. WebGL restriction covers tested HTMLCanvas contexts, not OffscreenCanvas in pages or workers; remote-font blocking does not hide installed fonts. |
 | WebRTC UDP preference | #66 | Included as an opt-in setting; it can break calls and does not provide network containment. |
 | Viewport letterboxing and zoom-aware layout | #63, #71, #72 | Included as opt-in. Exact CSS buckets, scrollbars, display scaling and mixed-DPI behavior have limits; screen properties remain visible. |
 | SOCKS test outcome hardening | #73 | Included as test-only coverage. The intermittent stopped-listener timeout remains unresolved. |
 | Clear current-profile cookies | #74 | Deferred: safe finite shutdown with a missing CEF callback has not been established. |
 | Chromium OffscreenCanvas prototype and custom engine | #69, #70 | Experimental; excluded. Production uses the pinned CefSharp packages. |
+
+On a local Windows ARM64 host using x64 emulation, one viewport restart test failed its initial centered-geometry assertion; the actual and expected bounds were not captured, and the cause is unconfirmed. Hosted Windows x64 results must be assessed independently.
 
 Privacy settings are profile-local and relevant Chromium settings require a profile restart. Filtering and cookie protection can affect embedded authentication; no automatic exceptions are added.
 
