@@ -7,7 +7,6 @@ $profilePath = Join-Path $env:LOCALAPPDATA "AegisBrowser/Profiles/profile-$profi
 $process = $null
 $listener = $null
 try {
-    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -17,11 +16,19 @@ public static class AegisSmokeInput {
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowCallback callback, IntPtr parameter);
     [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumWindowCallback callback, IntPtr parameter);
+    [DllImport("user32.dll")]
+    private static extern bool IsChild(IntPtr parent, IntPtr child);
+    [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hwnd, StringBuilder text, int maxCount);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr SendTextTimeout(IntPtr hwnd, uint msg, IntPtr wparam, string text, uint flags, uint timeout, out IntPtr result);
 
     public static bool IsOwnedBy(IntPtr hwnd, int expectedProcessId) {
         uint actualProcessId;
@@ -42,6 +49,29 @@ public static class AegisSmokeInput {
             }
             return true;
         }, IntPtr.Zero);
+        return match;
+    }
+
+    // Require exactly one matching descendant of the test-owned browser.
+    public static IntPtr FindUniqueChild(IntPtr parent, int expectedProcessId, string classPrefix, string expectedCaption) {
+        if (!IsOwnedBy(parent, expectedProcessId)) return IntPtr.Zero;
+        IntPtr match = IntPtr.Zero;
+        int count = 0;
+        EnumChildWindows(parent, (hwnd, parameter) => {
+            if (!IsOwnedBy(hwnd, expectedProcessId) || !IsChild(parent, hwnd)) return true;
+            var className = new StringBuilder(256);
+            GetClassName(hwnd, className, className.Capacity);
+            if (!className.ToString().StartsWith(classPrefix, StringComparison.OrdinalIgnoreCase)) return true;
+            if (expectedCaption != null) {
+                var caption = new StringBuilder(512);
+                GetWindowText(hwnd, caption, caption.Capacity);
+                if (!String.Equals(caption.ToString(), expectedCaption, StringComparison.Ordinal)) return true;
+            }
+            match = hwnd;
+            count++;
+            return true;
+        }, IntPtr.Zero);
+        if (count > 1) throw new InvalidOperationException("More than one matching browser control was found.");
         return match;
     }
 }
@@ -71,16 +101,13 @@ public static class AegisSmokeInput {
     $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
     $accept = $listener.AcceptTcpClientAsync()
     if (![AegisSmokeInput]::IsOwnedBy($browserHandle, $process.Id)) { throw 'Browser window no longer belongs to the test-owned process.' }
-    $window = [System.Windows.Automation.AutomationElement]::FromHandle($browserHandle)
-    if (!$window) { throw 'Browser UI Automation root is unavailable.' }
-    $addressCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::NameProperty, 'Search or enter address')
-    $addressElement = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $addressCondition)
-    if (!$addressElement) { throw 'Browser address control was not found.' }
-    $value = $addressElement.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-    $value.SetValue("http://127.0.0.1:$port/aegis-rc1-smoke")
-    $addressHandle = [IntPtr]::new($addressElement.Current.NativeWindowHandle)
-    if (![AegisSmokeInput]::IsOwnedBy($addressHandle, $process.Id)) { throw 'Browser address control is not owned by the test process.' }
+    $addressHandle = [AegisSmokeInput]::FindUniqueChild($browserHandle, $process.Id, 'WindowsForms10.EDIT.', $null)
+    if ($addressHandle -eq [IntPtr]::Zero) { throw 'Unique browser address control was not found.' }
+    $messageResult = [IntPtr]::Zero
+    # WM_SETTEXT is delivered only to the selected test-owned address control.
+    if ([AegisSmokeInput]::SendTextTimeout($addressHandle, 0x000C, [IntPtr]::Zero,
+            "http://127.0.0.1:$port/aegis-rc1-smoke", 2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero -or
+            $messageResult -eq [IntPtr]::Zero) { throw 'Browser address control did not accept the controlled URL.' }
     $messageResult = [IntPtr]::Zero
     # WM_KEYDOWN/WM_KEYUP directed only to this browser's address control;
     # no global keyboard input or foreground-window change is used.
@@ -106,12 +133,12 @@ public static class AegisSmokeInput {
     } finally { $client.Dispose() }
     Write-Output 'PASS: launched browser requested the controlled loopback HTTP page.'
 
-    $privacyCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::NameProperty, 'Privacy')
-    $privacyButton = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $privacyCondition)
-    if (!$privacyButton) { throw 'Privacy toolbar action was not found.' }
-    $invoke = $privacyButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    $invoke.Invoke()
+    $privacyButton = [AegisSmokeInput]::FindUniqueChild($browserHandle, $process.Id, 'WindowsForms10.BUTTON.', 'Privacy')
+    if ($privacyButton -eq [IntPtr]::Zero) { throw 'Unique Privacy toolbar action was not found.' }
+    $messageResult = [IntPtr]::Zero
+    # BM_CLICK invokes the selected button without global input or focus changes.
+    if ([AegisSmokeInput]::SendMessageTimeout($privacyButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero,
+            2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero) { throw 'Privacy toolbar action did not accept the click.' }
     $privacyHandle = [IntPtr]::Zero
     $privacyTitle = 'Aegis Privacy ' + [char]0x2014 + ' profile settings and network inspector'
     $privacyDeadline = [DateTime]::UtcNow.AddSeconds(10)
