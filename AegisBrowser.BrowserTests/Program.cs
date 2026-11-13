@@ -26,9 +26,19 @@ internal static partial class Program
         if (args.Length == 2 && args[0] == "packet-control-client") return PacketControlProbe(args[1]);
         if (args.Length == 2 && args[0] == "private-network-control-client") return PrivateNetworkControlProbe(args[1]);
         if (args.Length == 2 && args[0] == "proxy-probe") return ProxyProbe(args[1]);
+        if (args.Length == 2 && args[0] is "webrtc-baseline" or "webrtc-restrict") return WebRtcStartupProbe(args[1], args[0] == "webrtc-restrict");
         if (args.Length == 2 && args[0] == "external-egress-probe") return ExternalEgressProbe(args[1]);
         if (args.Length == 2 && args[0] == "hwnd-repro") return NativeWindowRepro(args[1]);
         if (args.Length == 2 && args[0] == "proxy-auth-probe") return ProxyAuthProbe(args[1]);
+        if (args.Length == 2 && args[0] is "viewport-write" or "viewport-read") return ViewportCssProbe(args[1], args[0]);
+        if (args.Length == 2 && args[0] is "fingerprint-write" or "fingerprint-read") return FingerprintSurfaceProbe(args[1], args[0]);
+        if (args.Length == 2 && args[0] is "webgl-process-baseline" or "webgl-process-restricted" or "webgl-process-3d") return WebGlProcessProbe(args[1], args[0]);
+        if (args.Length == 2 && args[0] is "storage-policy-probe" or "storage-policy-write" or "storage-policy-read")
+            return StoragePolicyProbe(args[1], args[0]);
+        if (args.Length == 2 && args[0] == "https-privacy-preflight") return HttpsPrivacyPreflight(args[1]);
+        if (args.Length == 2 && args[0] == "https-privacy-remove-root") return HttpsPrivacyRemoveRoot(args[1]);
+        if (args.Length == 3 && args[0] is "https-privacy-write" or "https-privacy-read")
+            return HttpsPrivacyProbe(args[1], args[2], args[0]);
         if (args.Length != 2 || args[0] is not ("write" or "read")) return 2;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -529,6 +539,10 @@ internal static partial class Program
         ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
         await Wait(() => tabs.TabCount == 1, "initial tab"); await Ready(Current());
         Check(await Js(Current(), "document.querySelector('#result').textContent.includes('userAgent')") == "True", "embedded diagnostics renders in CEF");
+        Check(await Js(Current(), "document.querySelector('#exposure').textContent.includes('Canvas 2D')") == "True",
+            "local fingerprint exposure audit renders in CEF");
+        Check(await Js(Current(), "Object.keys(JSON.parse(document.querySelector('#exposure').textContent)).length === 9") == "True",
+            "local exposure audit covers nine documented API surfaces");
         var navigating = Current();
         await LoadReady(navigating, Origin + "one");
         await LoadReady(navigating, Origin + "two");
@@ -607,6 +621,8 @@ internal static partial class Program
         public IResourceHandler Create(IBrowser browser, IFrame frame, string schemeName, IRequest request)
         {
             var uri = new Uri(request.Url);
+            if (uri.Host == "browser-tests.invalid" && uri.AbsolutePath.StartsWith("/viewport", StringComparison.Ordinal))
+                return ResourceHandler.FromString(ViewportFixturePage(), mimeType: "text/html");
             var script = uri.Host == "provider-tests.invalid"
                 ? "location.replace('https://browser-tests.invalid/callback');"
                 : uri.AbsolutePath == "/callback" ? "window.opener.postMessage('oauth-ok','https://browser-tests.invalid');window.close();" : "";

@@ -48,6 +48,201 @@ jobs:
               throw "Browser $phase phase did not complete CEF shutdown"
             }
           }
+      - name: Measure Chromium CSS viewport and profile restart
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-viewport-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('viewport-write', 'viewport-read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
+                ($output -join "`n") -notmatch "PASS: \d+ CSS viewport checks \($phase\)" -or
+                ($output -join "`n") -notmatch "PASS: viewport CEF shutdown completed \($phase\)" -or
+                ($output -join "`n") -notmatch 'P4LB_CSS_VIEWPORT:' -or
+                ($output -join "`n") -notmatch 'P4FP07_CSS_BUCKET: VERIFIED zoom_1' -or
+                ($output -join "`n") -notmatch 'P4FP08_ROUNDING: VERIFIED zoom_minus_1') {
+              throw "CSS viewport probe $phase failed or did not complete native shutdown."
+            }
+          }
+      - name: Controlled WebGL and remote-font privacy restrictions
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-fingerprint-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('fingerprint-write', 'fingerprint-read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            $body = $output | Out-String
+            if ($code -ne 0 -or $body -match 'Check failed:' -or
+                $body -notmatch "PASS: \d+ fingerprint surface checks \($phase\)" -or
+                $body -notmatch "PASS: fingerprint surface CEF shutdown completed \($phase\)" -or
+                $body -notmatch 'P4FP_FONT_REQUESTS: baseline=[1-9]' -or
+                $body -notmatch 'restricted=0' -or
+                $body -notmatch 'P4FP_WEBGL: mode=restricted contextAvailable=False' -or
+                $body -notmatch 'P4FP02_CAPABILITY: mode=baseline context=main surface=canvas' -or
+                $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=cross surface=webgpu' -or
+                $body -notmatch 'P4FP02_CAPABILITY: mode=restricted context=worker surface=webgl state=' -or
+                $body -notmatch 'P4FP03_POPUP_WEBGL: mode=restricted contextAvailable=False' -or
+                $body -notmatch 'P4FP04_POPUP_WEBGL2: mode=restricted contextAvailable=False' -or
+                $body -notmatch 'P4FP03_POPUP_FONT_REQUESTS: baseline=[1-9][0-9]* restricted=0') {
+              throw "Fingerprint surface probe $phase failed or did not complete native shutdown"
+            }
+            if ($body -match 'P4FP02_CAPABILITY: mode=restricted context=worker surface=webgl state=FEATURE_FUNCTIONAL') {
+              Write-Warning 'WebGL remains functional in the controlled dedicated worker with the per-browser restriction enabled.'
+              'WebGL dedicated worker: restriction did not prevent the observed OffscreenCanvas WebGL context.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            } else {
+              'WebGL dedicated worker: see bounded capability observation; no universal worker-enforcement claim.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            }
+          }
+      - name: Diagnose process-wide WebGL candidate
+        timeout-minutes: 5
+        run: |
+          $observations = @{}
+          foreach ($mode in @('baseline', 'restricted', '3d')) {
+            $root = Join-Path $env:RUNNER_TEMP ('aegis-webgl-process-' + $mode + '-' + [guid]::NewGuid().ToString('N'))
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webgl-process-$mode" $root 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            $body = $output | Out-String
+            if ($code -ne 0 -or $body -match 'Check failed:' -or $body -notmatch 'PASS: WebGL process experiment completed and CEF shut down') {
+              throw "WebGL process diagnostic $mode failed or did not shut down (exit $code)"
+            }
+            foreach ($surface in @('offscreenWebgl', 'offscreenWebgl2')) {
+              $matches = [regex]::Matches($body, "P4FP04_PROCESS_GL: mode=$mode context=worker surface=$surface state=(FEATURE_FUNCTIONAL|API_UNAVAILABLE|UNSUPPORTED|INCONCLUSIVE)")
+              if ($matches.Count -ne 1) { throw "WebGL diagnostic $mode worker $surface missing or ambiguous" }
+              $observations["$mode-$surface"] = $matches[0].Groups[1].Value
+            }
+            foreach ($surface in @('webgl', 'webgl2')) {
+              $matches = [regex]::Matches($body, "P4FP04_PROCESS_GL: mode=$mode context=main surface=$surface state=(FEATURE_FUNCTIONAL|API_UNAVAILABLE|UNSUPPORTED|INCONCLUSIVE)")
+              if ($matches.Count -ne 1) { throw "WebGL diagnostic $mode main $surface missing or ambiguous" }
+              $observations["$mode-main-$surface"] = $matches[0].Groups[1].Value
+            }
+            if ($mode -ne 'baseline' -and $body -notmatch 'P4FP04_SWITCH_RESULT: (INEFFECTIVE|INCONCLUSIVE|NO_CONTEXT_OBSERVED)') { throw 'Missing candidate classification' }
+          }
+          foreach ($mode in @('restricted', '3d')) {
+            foreach ($surface in @('offscreenWebgl', 'offscreenWebgl2')) {
+              $baseline = $observations["baseline-$surface"]
+              $restricted = $observations["$mode-$surface"]
+              $mainSurface = if ($surface -eq 'offscreenWebgl') { 'webgl' } else { 'webgl2' }
+              $mainBaseline = $observations["baseline-main-$mainSurface"]
+              $mainRestricted = $observations["$mode-main-$mainSurface"]
+              $decision = if ($baseline -eq 'FEATURE_FUNCTIONAL' -and $restricted -eq 'FEATURE_FUNCTIONAL' -and $mainBaseline -eq 'FEATURE_FUNCTIONAL' -and $mainRestricted -eq 'API_UNAVAILABLE') { 'GAP_REPRODUCED' } else { 'INCONCLUSIVE' }
+              "Worker $surface candidate $mode`: $decision (baseline=$baseline, switch=$restricted); no protection claim." | Out-File $env:GITHUB_STEP_SUMMARY -Append
+              if ($decision -eq 'GAP_REPRODUCED') { Write-Warning "Candidate $mode did not block worker $surface in this run." }
+            }
+          }
+      - name: Controlled cross-site cookie and restart probe
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-cookie-probe-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('storage-policy-write', 'storage-policy-read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+            if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: isolated CEF storage policy probe completed')) {
+              throw "Cookie probe $phase failed or was incomplete"
+            }
+            if (!(($output -join "`n") -match 'PASS: isolated CEF storage policy probe shutdown completed')) {
+              throw "Cookie probe $phase did not complete CEF shutdown"
+            }
+          }
+      - name: Controlled CEF storage input preflight
+        timeout-minutes: 3
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-p404-input-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe storage-policy-probe $profileRoot 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
+              ($output -join "`n") -notmatch 'PASS: isolated CEF storage policy probe shutdown completed') {
+            throw 'CEF input preflight failed or did not complete shutdown.'
+          }
+          $inputResults = [regex]::Matches(($output -join "`n"), 'P404_CROSS_ORIGIN_INPUT: (VERIFIED|INCONCLUSIVE)\b')
+          if ($inputResults.Count -ne 2) { throw 'Missing cross-origin input preflight results.' }
+          foreach ($check in @('script-generated iframe click is not trusted input', 'wrong frame URL is rejected before input',
+                               'hidden iframe is rejected before input', 'offscreen iframe coordinates are rejected before input',
+                               'destroyed iframe is rejected before input')) {
+            if ([regex]::Matches(($output -join "`n"), [regex]::Escape("PASS: $check")).Count -ne 2) {
+              throw "Missing frame-input negative check: $check"
+            }
+          }
+          if (($output -join "`n") -match 'P405_INPUT_TRACE:.*dropped=[1-9]') { throw 'Frame-input trace was truncated.' }
+          if (($output -join "`n") -match 'P404_CROSS_ORIGIN_INPUT: INCONCLUSIVE') {
+            Write-Warning 'Cross-origin test input was not observed; Storage Access gesture qualification remains inconclusive.'
+            'P404 cross-origin input preflight: INCONCLUSIVE (see logs)' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          } else {
+            'P405 cross-origin input preflight: trusted automated input observed in the in-process fixture; HTTPS permission results are separate.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
+      - name: HTTPS fixture certificate preflight
+        timeout-minutes: 2
+        run: |
+          & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe https-privacy-preflight $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'HTTPS certificate preflight failed' }
+      - name: Prepare disposable HTTPS trust directory
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'A disposable hosted runner is required' }
+          $trustDir = Join-Path $env:RUNNER_TEMP ('aegis-p403-trust-' + [guid]::NewGuid().ToString('N'))
+          $profileDir = Join-Path $env:RUNNER_TEMP ('aegis-p403-profile-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $trustDir -ErrorAction Stop | Out-Null
+          "P403_TRUST_DIR=$trustDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "P403_PROFILE_DIR=$profileDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Controlled real HTTPS cookie and startup probe
+        timeout-minutes: 5
+        run: |
+          foreach ($phase in @('https-privacy-write', 'https-privacy-read')) {
+            $logFile = Join-Path $env:RUNNER_TEMP ($phase + '.log')
+            & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $env:P403_PROFILE_DIR $env:P403_TRUST_DIR 2>&1 | Tee-Object -FilePath $logFile
+            $code = $LASTEXITCODE
+            $output = Get-Content -LiteralPath $logFile -Raw
+            if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+            if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: real HTTPS privacy probe completed')) {
+              throw "HTTPS privacy probe $phase failed or was incomplete"
+            }
+            if (!(($output -join "`n") -match 'PASS: real HTTPS CEF shutdown completed') -or
+                !(($output -join "`n") -match 'P403_TRUST: temporary user root removed')) {
+              throw "HTTPS privacy probe $phase did not finish shutdown and root removal"
+            }
+            $required = if ($phase -eq 'https-privacy-write') {
+              @('P404_AUTH_EVENT:.*scenario=baseline ', 'P404_AUTH_EVENT:.*scenario=enabled ',
+                'P404_STORAGE_ACCESS_EVENT:.*scenario=baseline ', 'P404_STORAGE_ACCESS_EVENT:.*scenario=enabled ',
+                'P404_STORAGE_ACCESS_EVENT:.*scenario=sandboxed_enabled ', 'P404_PERMISSION_SUMMARY:',
+                'P405_INPUT_TRACE:.*scenario=baseline ', 'P405_INPUT_TRACE:.*scenario=enabled ',
+                'P405_INPUT_TRACE:.*scenario=sandboxed_enabled ')
+            } else { @('P404_STORAGE_ACCESS_PERSISTENCE:.*scenario=restart_enabled ', 'P404_PERMISSION_SUMMARY:') }
+            foreach ($marker in $required) {
+              if ($output -notmatch $marker) { throw "Missing HTTPS research observation: $marker" }
+            }
+            if ($output -match 'P405_INPUT_TRACE:.*dropped=[1-9]') { throw 'Frame-input trace was truncated.' }
+            if ($phase -eq 'https-privacy-write') {
+              foreach ($scenario in @('baseline', 'enabled', 'sandboxed_enabled')) {
+                $event = [regex]::Match($output, "P404_STORAGE_ACCESS_EVENT:[^`r`n]*scenario=$scenario (?<details>[^`r`n]*)")
+                if (-not $event.Success) { throw "Missing Storage Access result for $scenario" }
+                if ($event.Groups['details'].Value -notmatch 'result=INCONCLUSIVE' -and
+                    ($output -notmatch "P405_STORAGE_ACCESS_REQUESTED: scenario=$scenario " -or
+                     $output -notmatch "P405_STORAGE_ACCESS_RESULT: scenario=$scenario ")) {
+                  throw "Missing Storage Access request or result for $scenario"
+                }
+                if ($scenario -eq 'enabled' -and $event.Groups['details'].Value -notmatch 'result=INCONCLUSIVE' -and
+                    $output -notmatch 'P405_PERMISSION_DECISION: scenario=enabled result=(DENIED_BY_HANDLER|INCONCLUSIVE)') {
+                  throw 'Missing production permission-handler decision classification.'
+                }
+              }
+            }
+            if ($output -match 'P405_PERMISSION_DECISION: scenario=enabled result=INCONCLUSIVE') {
+              Write-Warning 'The production Storage Access denial was not independently observed.'
+              'P405 production Storage Access denial: INCONCLUSIVE (see logs)' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            }
+            if ($output -match 'P404_STORAGE_ACCESS_EVENT:.*result=INCONCLUSIVE') {
+              Write-Warning 'A real HTTPS Storage Access gesture was not observed; grant, denial and persistence are not verified.'
+              'P404 HTTPS Storage Access gesture: INCONCLUSIVE (see logs)' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            }
+          }
+      - name: Remove disposable HTTPS test roots
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: ./tests/acceptance/p403-cleanup-test-ca.ps1 -TrustDirectory $env:P403_TRUST_DIR
       - name: Controlled CEF proxy routing and bypass probe
         timeout-minutes: 3
         run: |
@@ -58,6 +253,13 @@ jobs:
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy probe checks')) { throw 'CEF proxy probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy probe shutdown completed')) { throw 'CEF proxy probe did not complete native shutdown' }
+          foreach ($check in @('synthetic missing SOCKS callback remains a timeout', 'synthetic successful offline navigation is rejected',
+                               'synthetic SOCKS trace reports dropped events', 'wrong frame or URL cannot satisfy SOCKS navigation',
+                               'missing callback times out and late error cannot change result',
+                               "explicit SOCKS rejection produces Chromium's SOCKS connection failure",
+                               'explicit SOCKS rejection did not reach the independently reachable origin')) {
+            if (($output -join "`n") -notmatch [regex]::Escape("PASS: $check")) { throw "Missing SOCKS negative check: $check" }
+          }
       - name: Controlled CEF proxy authentication probe
         timeout-minutes: 3
         run: |
@@ -68,6 +270,48 @@ jobs:
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy authentication probe checks')) { throw 'CEF proxy authentication probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy authentication probe shutdown completed')) { throw 'CEF authentication probe did not complete native shutdown' }
+      - name: Observe WebRTC startup policy in independent profiles
+        timeout-minutes: 5
+        run: |
+          $observations = @{}
+          $contexts = @{}
+          foreach ($mode in @('baseline', 'restrict')) {
+            $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-webrtc-' + $mode + '-' + [guid]::NewGuid().ToString('N'))
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webrtc-$mode" $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            $joined = $output -join "`n"
+            if ($code -ne 0 -or $joined -notmatch 'PASS: WebRTC startup observation shutdown completed') { throw "WebRTC $mode probe failed or did not shut down" }
+            if ($joined -match 'Check failed:') { throw 'Native Chromium assertion detected' }
+            foreach ($context in @('main', 'same', 'cross', 'popup')) {
+              $match = [regex]::Matches($joined, "P4FP03_RTC:.*context=$context .*udp4=(STUN_OBSERVED|OTHER_PACKET|NOT_OBSERVED|UNSUPPORTED) udp6=(STUN_OBSERVED|OTHER_PACKET|NOT_OBSERVED|UNSUPPORTED) tcp4=(CONNECTION_OBSERVED|NOT_OBSERVED|UNSUPPORTED) tcp6=(CONNECTION_OBSERVED|NOT_OBSERVED|UNSUPPORTED) ice=([a-z]+) offer=([a-z]+)")
+              if ($match.Count -ne 1) { throw "WebRTC $mode context $context result missing or ambiguous" }
+              $contexts["$mode-$context"] = @($match[0].Groups[1].Value, $match[0].Groups[2].Value, $match[0].Groups[3].Value, $match[0].Groups[4].Value, $match[0].Groups[5].Value, $match[0].Groups[6].Value)
+            }
+            foreach ($context in @('dedicated', 'shared', 'service')) {
+              if ([regex]::Matches($joined, "P4FP03_WORKER:.*context=$context ").Count -ne 1) { throw "WebRTC $mode worker $context result missing or ambiguous" }
+            }
+            $stunMatches = [regex]::Matches($joined, 'WEBRTC_STARTUP_STUN: (STUN|OTHERPACKET|NOTOBSERVED|UNSUPPORTED)')
+            if ($stunMatches.Count -ne 1) { throw "WebRTC $mode observation missing or ambiguous" }
+            $observations[$mode] = $stunMatches[0].Groups[1].Value
+          }
+          if ($observations.baseline -eq 'STUN' -and $observations.restrict -eq 'NOTOBSERVED') {
+            'WebRTC loopback STUN: one baseline packet; none observed in one restricted run. This is not network containment.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          } else {
+            'WebRTC loopback STUN comparison: INCONCLUSIVE (positive control or restricted observation incomplete).' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
+          foreach ($context in @('main', 'same', 'cross', 'popup')) {
+            $before = $contexts["baseline-$context"]
+            $after = $contexts["restrict-$context"]
+            foreach ($index in 0, 1) {
+              $family = if ($index -eq 0) { 'IPv4' } else { 'IPv6' }
+              $result = if ($before[$index] -eq 'STUN_OBSERVED' -and $before[5] -eq 'applied' -and $after[$index] -eq 'NOT_OBSERVED' -and $after[4] -eq 'complete' -and $after[5] -eq 'applied') { 'SCOPED_COMPARISON_OBSERVED' } else { 'INCONCLUSIVE' }
+              "WebRTC $context $family loopback STUN: $result; baseline=$($before[$index]), restricted=$($after[$index]). No containment claim." | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            }
+          }
+      - name: Verify test-owned proxy process timeout cleanup
+        timeout-minutes: 2
+        run: ./tests/acceptance/test-concurrent-proxy-cleanup.ps1
       - name: Concurrent independent CEF proxy probes
         timeout-minutes: 5
         run: ./tests/acceptance/concurrent-proxy-probes.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
