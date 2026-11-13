@@ -158,6 +158,12 @@ public sealed class MainForm : Form
         FormClosing += (_, e) =>
         {
             if (closeComplete) return;
+            if (privacyWindow?.CookieClearInProgress == true)
+            {
+                e.Cancel = true;
+                status.Text = "Please wait for profile cookie clearing to finish before closing.";
+                return;
+            }
             e.Cancel = true;
             if (closing) return;
             closing = true;
