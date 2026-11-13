@@ -20,13 +20,18 @@ internal sealed class PrivacyForm : Form
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1000 };
     private readonly CheckBox thirdParty = new() { Text = "Third-party only", AutoSize = true };
     private readonly Action<PrivacyConfiguration> apply;
+    private readonly Func<Task> clearCookies;
+    private readonly Button clearCookiesButton = new() { Name = "ClearProfileCookies", Text = "Clear profile cookies...", AutoSize = true };
+    internal bool CookieClearInProgress { get; private set; }
+    internal enum CookieClearOutcome { Cancelled, Completed, Failed }
 
     public PrivacyForm(PrivacySession session, string? currentUrl, Action<PrivacyConfiguration>? apply = null,
         string cookiePolicyStatus = "Existing Chromium setting (no Aegis override)", bool letterboxingActive = false,
         bool webGlRestrictionActive = false, bool remoteFontRestrictionActive = false,
-        string webRtcPolicyStatus = "Existing Chromium setting (no Aegis override)")
+        string webRtcPolicyStatus = "Existing Chromium setting (no Aegis override)", Func<Task>? clearCookies = null)
     {
         this.session = session;
+        this.clearCookies = clearCookies ?? ProfileCookieClearing.ClearCurrentProfileAsync;
         mode.Name = "PrivacyMode"; blocks.Name = "BlockedDomains"; allows.Name = "AllowedDomains";
         sites.Name = "SiteExceptions"; rules.Name = "UserRules"; list.Name = "TrackingList"; network.Name = "Requests";
         this.apply = apply ?? (configuration => session.Apply(configuration));
@@ -58,6 +63,7 @@ internal sealed class PrivacyForm : Form
         var pause = new CheckBox { Text = "Pause filtering until resumed or browser exit", AutoSize = true, Checked = session.Paused };
         pause.CheckedChanged += (_, _) => session.Paused = pause.Checked;
         controls.Controls.Add(pause);
+        clearCookiesButton.Click += async (_, _) => await ConfirmAndClearCookiesAsync();
         var host = SiteClassifier.Host(currentUrl);
         if (host is not null && host != "aegis-diagnostics.invalid")
             controls.Controls.Add(Button("Add site exception: " + host, () => AddLine(sites, host)));
@@ -85,10 +91,51 @@ internal sealed class PrivacyForm : Form
         requests.Controls.Add(new Label { Dock = DockStyle.Bottom, Height = 40,
             Text = "Last 500 decisions across this profile's tabs. Origins only; paths, queries, headers and bodies are not recorded. Counts are decisions, not completed downloads. Host edits require Apply settings." });
         var rejected = new TabPage("Unsupported list rules"); unsupported.ReadOnly = true; rejected.Controls.Add(unsupported);
-        pages.TabPages.AddRange([settings, lists, requests, rejected]); Controls.Add(pages);
+        var profileData = new TabPage("Profile data");
+        var dataControls = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(12) };
+        dataControls.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(700, 0),
+            Text = "Clear cookies for this profile. You may be signed out; open sites may create cookies again. Cache, history and other site data are not cleared. Please wait for completion before closing the browser." });
+        dataControls.Controls.Add(clearCookiesButton);
+        profileData.Controls.Add(dataControls);
+        pages.TabPages.AddRange([settings, lists, requests, rejected, profileData]); Controls.Add(pages);
         timer.Tick += (_, _) => RefreshInspector(); timer.Start();
         FormClosed += (_, _) => timer.Dispose();
+        FormClosing += (_, e) => { if (CookieClearInProgress) e.Cancel = true; };
         RefreshInspector();
+    }
+
+    private async Task ConfirmAndClearCookiesAsync()
+    {
+        var confirmed = MessageBox.Show(this,
+            "Clear all cookies for this profile? You may be signed out of websites. Open sites may create new cookies. Other browsing data will not be cleared.",
+            "Clear profile cookies", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+        var outcome = await ClearCookiesConfirmedAsync(confirmed);
+        if (IsDisposed || outcome == CookieClearOutcome.Cancelled) return;
+        MessageBox.Show(this, outcome == CookieClearOutcome.Completed
+            ? "Profile cookies were cleared. Open sites may create new cookies."
+            : "Cookie clearing could not be confirmed. Some cookies may already have been removed. Please try again.",
+            "Clear profile cookies", MessageBoxButtons.OK,
+            outcome == CookieClearOutcome.Completed ? MessageBoxIcon.Information : MessageBoxIcon.Error);
+    }
+
+    internal async Task<CookieClearOutcome> ClearCookiesConfirmedAsync(bool confirmed)
+    {
+        if (!confirmed) return CookieClearOutcome.Cancelled;
+        if (CookieClearInProgress) return CookieClearOutcome.Failed;
+        CookieClearInProgress = true;
+        clearCookiesButton.Enabled = false;
+        clearCookiesButton.Text = "Clearing cookies...";
+        try { await clearCookies(); return CookieClearOutcome.Completed; }
+        catch (Exception) { return CookieClearOutcome.Failed; }
+        finally
+        {
+            CookieClearInProgress = false;
+            if (!IsDisposed)
+            {
+                clearCookiesButton.Text = "Clear profile cookies...";
+                clearCookiesButton.Enabled = true;
+            }
+        }
     }
     private static TextBox Editor() => new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Both,
         WordWrap = false, MaxLength = 8_000_000, AcceptsReturn = true };

@@ -148,6 +148,21 @@ jobs:
               throw "Cookie probe $phase did not complete CEF shutdown"
             }
           }
+      - name: Current-profile cookie clearing and restart
+        timeout-minutes: 5
+        run: |
+          $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-cookie-clear-' + [guid]::NewGuid().ToString('N'))
+          foreach ($phase in @('cookie-clear-write', 'cookie-clear-read')) {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            $body = $output -join "`n"
+            if ($code -ne 0 -or $body -match 'Check failed:' -or
+                $body -notmatch 'PASS: cookie clear probe completed' -or
+                $body -notmatch 'PASS: cookie clear probe CEF shutdown completed') {
+              throw "Cookie clear $phase failed or did not shut down (exit $code)"
+            }
+          }
       - name: Controlled CEF storage input preflight
         timeout-minutes: 3
         run: |
