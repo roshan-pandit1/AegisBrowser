@@ -254,7 +254,10 @@ jobs:
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy probe checks')) { throw 'CEF proxy probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy probe shutdown completed')) { throw 'CEF proxy probe did not complete native shutdown' }
           foreach ($check in @('synthetic missing SOCKS callback remains a timeout', 'synthetic successful offline navigation is rejected',
-                               'synthetic SOCKS trace reports dropped events')) {
+                               'synthetic SOCKS trace reports dropped events', 'wrong frame or URL cannot satisfy SOCKS navigation',
+                               'missing callback times out and late error cannot change result',
+                               "explicit SOCKS rejection produces Chromium's SOCKS connection failure",
+                               'explicit SOCKS rejection did not reach the independently reachable origin')) {
             if (($output -join "`n") -notmatch [regex]::Escape("PASS: $check")) { throw "Missing SOCKS negative check: $check" }
           }
       - name: Controlled CEF proxy authentication probe
@@ -306,6 +309,9 @@ jobs:
               "WebRTC $context $family loopback STUN: $result; baseline=$($before[$index]), restricted=$($after[$index]). No containment claim." | Out-File $env:GITHUB_STEP_SUMMARY -Append
             }
           }
+      - name: Verify test-owned proxy process timeout cleanup
+        timeout-minutes: 2
+        run: ./tests/acceptance/test-concurrent-proxy-cleanup.ps1
       - name: Concurrent independent CEF proxy probes
         timeout-minutes: 5
         run: ./tests/acceptance/concurrent-proxy-probes.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
