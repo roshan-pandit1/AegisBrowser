@@ -6,6 +6,7 @@ $profile = 'smoke-' + [guid]::NewGuid().ToString('N')
 $profilePath = Join-Path $env:LOCALAPPDATA "AegisBrowser/Profiles/profile-$profile"
 $process = $null
 $listener = $null
+$idlePeer = $null
 try {
     Add-Type -TypeDefinition @'
 using System;
@@ -99,7 +100,11 @@ public static class AegisSmokeInput {
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
-    $accept = $listener.AcceptTcpClientAsync()
+    # A test-owned connection that sends no data deterministically exercises
+    # the idle-socket path. It cannot satisfy the HTTP navigation assertion.
+    $idlePeer = [Net.Sockets.TcpClient]::new()
+    if (!$idlePeer.ConnectAsync([Net.IPAddress]::Loopback, $port).Wait(2000)) { throw 'Controlled idle connection could not start.' }
+    $idlePort = ([Net.IPEndPoint]$idlePeer.Client.LocalEndPoint).Port
     if (![AegisSmokeInput]::IsOwnedBy($browserHandle, $process.Id)) { throw 'Browser window no longer belongs to the test-owned process.' }
     $addressHandle = [AegisSmokeInput]::FindUniqueChild($browserHandle, $process.Id, 'WindowsForms10.EDIT.', $null)
     if ($addressHandle -eq [IntPtr]::Zero) { throw 'Unique browser address control was not found.' }
@@ -115,22 +120,67 @@ public static class AegisSmokeInput {
         if ([AegisSmokeInput]::SendMessageTimeout($addressHandle, $message, [IntPtr]13, [IntPtr]0,
                 2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero) { throw 'Address control did not accept navigation input.' }
     }
-    if (!$accept.Wait(15000)) { throw 'Controlled loopback navigation did not reach the listener.' }
-    $client = $accept.GetAwaiter().GetResult()
+    # Chromium can open a connection before sending a request. Keep a bounded
+    # set of test-owned sockets and observe their request lines independently;
+    # an idle socket must not prevent another socket from delivering the page.
+    $clients = [Collections.Generic.List[object]]::new()
+    $accepted = 0
+    $responded = $false
+    $idleObserved = $false
+    $watch = [Diagnostics.Stopwatch]::StartNew()
     try {
-        $client.ReceiveTimeout = 5000
-        $stream = $client.GetStream()
-        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::ASCII, $false, 1024, $true)
-        $requestLine = $reader.ReadLine()
-        if ($requestLine -notmatch '^GET /aegis-rc1-smoke HTTP/1\.[01]$') { throw 'Unexpected controlled navigation request.' }
-        while (($line = $reader.ReadLine()) -and $line.Length -gt 0) { }
-        $body = '<!doctype html><title>Aegis RC1 fixture</title><p>Controlled local page</p>'
-        $bytes = [Text.Encoding]::UTF8.GetBytes($body)
-        $headers = [Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/html; charset=utf-8`r`nContent-Length: $($bytes.Length)`r`nConnection: close`r`n`r`n")
-        $stream.Write($headers, 0, $headers.Length)
-        $stream.Write($bytes, 0, $bytes.Length)
-        $stream.Flush()
-    } finally { $client.Dispose() }
+        while (!$responded -and $watch.ElapsedMilliseconds -lt 15000) {
+            while ($listener.Pending()) {
+                if (++$accepted -gt 16) { throw 'Too many controlled loopback connections.' }
+                $client = $listener.AcceptTcpClient()
+                try {
+                    if (([Net.IPEndPoint]$client.Client.RemoteEndPoint).Port -eq $idlePort) { $idleObserved = $true }
+                    $client.SendTimeout = 2000
+                    $stream = $client.GetStream()
+                    $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::ASCII, $false, 1024, $true)
+                    $clients.Add([pscustomobject]@{ Client = $client; Stream = $stream; Reader = $reader; Line = $reader.ReadLineAsync() })
+                } catch { $client.Dispose(); throw }
+            }
+            for ($i = $clients.Count - 1; $i -ge 0; $i--) {
+                $connection = $clients[$i]
+                if (!$connection.Line.IsCompleted) { continue }
+                $requestLine = $connection.Line.GetAwaiter().GetResult()
+                if ([string]::IsNullOrEmpty($requestLine)) {
+                    $connection.Client.Dispose()
+                    $connection.Reader.Dispose()
+                    $clients.RemoveAt($i)
+                    continue
+                }
+                if ($requestLine -notmatch '^GET /aegis-rc1-smoke HTTP/1\.[01]$') { throw 'Unexpected controlled navigation request.' }
+                $headerCount = 0
+                do {
+                    if (++$headerCount -gt 100) { throw 'Too many controlled request headers.' }
+                    $lineTask = $connection.Reader.ReadLineAsync()
+                    $remaining = 15000 - [int]$watch.ElapsedMilliseconds
+                    if ($remaining -le 0 -or !$lineTask.Wait($remaining)) { throw 'Controlled request headers timed out.' }
+                    $line = $lineTask.GetAwaiter().GetResult()
+                    if ($null -eq $line) { throw 'Controlled request ended before its headers.' }
+                } while ($line.Length -gt 0)
+                $body = '<!doctype html><title>Aegis RC1 fixture</title><p>Controlled local page</p>'
+                $bytes = [Text.Encoding]::UTF8.GetBytes($body)
+                $headers = [Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/html; charset=utf-8`r`nContent-Length: $($bytes.Length)`r`nConnection: close`r`n`r`n")
+                $connection.Stream.Write($headers, 0, $headers.Length)
+                $connection.Stream.Write($bytes, 0, $bytes.Length)
+                $connection.Stream.Flush()
+                $responded = $true
+                break
+            }
+            if (!$responded) { Start-Sleep -Milliseconds 50 }
+        }
+        if (!$responded) { throw "Controlled loopback navigation did not deliver a request within 15 seconds (connections: $accepted)." }
+        if (!$idleObserved) { throw 'Controlled idle connection was not observed.' }
+    } finally {
+        foreach ($connection in $clients) {
+            $connection.Client.Dispose()
+            $connection.Reader.Dispose()
+        }
+    }
+    Write-Output 'PASS: a controlled idle loopback connection did not prevent navigation.'
     Write-Output 'PASS: launched browser requested the controlled loopback HTTP page.'
 
     $privacyButton = [AegisSmokeInput]::FindUniqueChild($browserHandle, $process.Id, 'WindowsForms10.BUTTON.', 'Privacy')
@@ -160,6 +210,7 @@ public static class AegisSmokeInput {
     Write-Output 'NOT TESTED: HTTPS/TLS, rendered content, permissions, cookie behavior or visual correctness.'
 }
 finally {
+    if ($idlePeer) { $idlePeer.Dispose() }
     if ($listener) { $listener.Stop() }
     if ($process) {
         if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
