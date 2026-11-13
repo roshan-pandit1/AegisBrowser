@@ -11,24 +11,53 @@ try {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class AegisSmokeInput {
+    private delegate bool EnumWindowCallback(IntPtr hwnd, IntPtr parameter);
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowCallback callback, IntPtr parameter);
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int maxCount);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam, uint flags, uint timeout, out IntPtr result);
+
+    public static bool IsOwnedBy(IntPtr hwnd, int expectedProcessId) {
+        uint actualProcessId;
+        return hwnd != IntPtr.Zero && GetWindowThreadProcessId(hwnd, out actualProcessId) != 0 && actualProcessId == (uint)expectedProcessId;
+    }
+
+    // Process.MainWindowHandle ignores hidden windows. Limit discovery to the
+    // test-owned process and the unique expected title, even when hidden.
+    public static IntPtr FindWindow(int expectedProcessId, string expectedTitle) {
+        IntPtr match = IntPtr.Zero;
+        EnumWindows((hwnd, parameter) => {
+            if (!IsOwnedBy(hwnd, expectedProcessId)) return true;
+            var title = new StringBuilder(512);
+            GetWindowText(hwnd, title, title.Capacity);
+            if (String.Equals(title.ToString(), expectedTitle, StringComparison.Ordinal)) {
+                match = hwnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return match;
+    }
 }
 '@
     $process = Start-Process -FilePath $exe -ArgumentList "--profile=$profile" -WindowStyle Hidden -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
-    $ready = $false
+    $browserHandle = [IntPtr]::Zero
+    $expectedTitle = 'Aegis Browser ' + [char]0x2014 + ' ' + $profile
     do {
         Start-Sleep -Milliseconds 250
         $process.Refresh()
         if ($process.HasExited) { throw "Browser exited during startup: $($process.ExitCode)" }
-        if ($process.MainWindowHandle -ne 0 -and $process.MainWindowTitle -eq "Aegis Browser — $profile") {
-            $ready = $true
-            break
-        }
+        $browserHandle = [AegisSmokeInput]::FindWindow($process.Id, $expectedTitle)
+        if ($browserHandle -ne [IntPtr]::Zero) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
-    if (!$ready) { throw "Expected browser window was not found. Last title: $($process.MainWindowTitle)" }
+    if ($browserHandle -eq [IntPtr]::Zero) { throw 'Expected browser window was not found for the test-owned process.' }
     # Let asynchronous Chromium startup progress; an early window alone is insufficient.
     Start-Sleep -Seconds 5
     $process.Refresh()
@@ -41,7 +70,8 @@ public static class AegisSmokeInput {
     $listener.Start()
     $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
     $accept = $listener.AcceptTcpClientAsync()
-    $window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+    if (![AegisSmokeInput]::IsOwnedBy($browserHandle, $process.Id)) { throw 'Browser window no longer belongs to the test-owned process.' }
+    $window = [System.Windows.Automation.AutomationElement]::FromHandle($browserHandle)
     if (!$window) { throw 'Browser UI Automation root is unavailable.' }
     $addressCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, 'Search or enter address')
@@ -50,7 +80,7 @@ public static class AegisSmokeInput {
     $value = $addressElement.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     $value.SetValue("http://127.0.0.1:$port/aegis-rc1-smoke")
     $addressHandle = [IntPtr]::new($addressElement.Current.NativeWindowHandle)
-    if ($addressHandle -eq [IntPtr]::Zero) { throw 'Browser address control has no native handle.' }
+    if (![AegisSmokeInput]::IsOwnedBy($addressHandle, $process.Id)) { throw 'Browser address control is not owned by the test process.' }
     $messageResult = [IntPtr]::Zero
     # WM_KEYDOWN/WM_KEYUP directed only to this browser's address control;
     # no global keyboard input or foreground-window change is used.
@@ -82,20 +112,21 @@ public static class AegisSmokeInput {
     if (!$privacyButton) { throw 'Privacy toolbar action was not found.' }
     $invoke = $privacyButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     $invoke.Invoke()
-    $ownerCondition = [System.Windows.Automation.AndCondition]::new(
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id),
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,
-            ('Aegis Privacy ' + [char]0x2014 + ' profile settings and network inspector')))
-    $privacyWindow = $null
+    $privacyHandle = [IntPtr]::Zero
+    $privacyTitle = 'Aegis Privacy ' + [char]0x2014 + ' profile settings and network inspector'
     $privacyDeadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        $privacyWindow = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-            [System.Windows.Automation.TreeScope]::Children, $ownerCondition)
-        if (!$privacyWindow) { Start-Sleep -Milliseconds 100 }
-    } while (!$privacyWindow -and [DateTime]::UtcNow -lt $privacyDeadline)
-    if (!$privacyWindow) { throw 'Privacy window did not open for the launched browser.' }
+        $privacyHandle = [AegisSmokeInput]::FindWindow($process.Id, $privacyTitle)
+        if ($privacyHandle -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 100 }
+    } while ($privacyHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $privacyDeadline)
+    if ($privacyHandle -eq [IntPtr]::Zero) { throw 'Privacy window did not open for the launched browser.' }
     Write-Output 'PASS: launched browser opened its Privacy window.'
-    if (!$process.CloseMainWindow()) { throw 'Could not request a normal window close.' }
+    if (![AegisSmokeInput]::IsOwnedBy($browserHandle, $process.Id)) { throw 'Browser window no longer belongs to the test-owned process.' }
+    # WM_CLOSE follows the normal form close path; it targets only the retained
+    # test-owned browser window and does not terminate a Chromium process.
+    $messageResult = [IntPtr]::Zero
+    if ([AegisSmokeInput]::SendMessageTimeout($browserHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero,
+            2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero) { throw 'Could not request a normal window close.' }
     if (!$process.WaitForExit(15000)) { throw 'Browser did not exit within 15 seconds of normal close.' }
     if ($process.ExitCode -ne 0) { throw "Browser exited with code $($process.ExitCode)" }
     Write-Output 'PASS: Windows published-app window startup, profile cache creation and normal close.'
