@@ -354,8 +354,9 @@ internal static partial class Program
         if (enabled)
         {
             var expected = ViewportLetterboxing.Calculate(Math.Max(0, available.Width), Math.Max(0, available.Height), zoom);
-            Check(bounds == new Rectangle(available.X + expected.X, available.Y + expected.Y, expected.Width, expected.Height),
-                "letterboxed control matches centered geometry (" + scenario + ")");
+            var expectedBounds = new Rectangle(available.X + expected.X, available.Y + expected.Y, expected.Width, expected.Height);
+            Check(bounds == expectedBounds,
+                $"letterboxed control matches centered geometry ({scenario}); actual={bounds}; expected={expectedBounds}; available={available}; zoom={zoom:R}");
             // The fixture is independently checked in CSS pixels when the
             // observed renderer scale matches the zoom factor. Other DPI
             // configurations remain measured, not assumed equivalent.

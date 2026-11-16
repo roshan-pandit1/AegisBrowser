@@ -15,7 +15,7 @@ RC1 is a Windows x64, .NET 8 and CefSharp 154 release candidate. It is not a cla
 | Clear current-profile cookies | #74 | Deferred: safe finite shutdown with a missing CEF callback has not been established. |
 | Chromium OffscreenCanvas prototype and custom engine | #69, #70 | Experimental; excluded. Production uses the pinned CefSharp packages. |
 
-On a local Windows ARM64 host using x64 emulation, one viewport restart test failed its initial centered-geometry assertion; the actual and expected bounds were not captured, and the cause is unconfirmed. Hosted Windows x64 results must be assessed independently.
+On a local Windows ARM64 host using x64 emulation, one viewport restart test failed its initial centered-geometry assertion; the actual and expected bounds were not captured, and the cause is unconfirmed. A later disposable-profile run passed 158 write and 119 restart checks with normal CEF shutdown; this does not establish the cause of the original failure. The assertion now reports the relevant bounds and zoom on failure. Hosted Windows x64 results must be assessed independently.
 
 Privacy settings are profile-local and relevant Chromium settings require a profile restart. Filtering and cookie protection can affect embedded authentication; no automatic exceptions are added.
 

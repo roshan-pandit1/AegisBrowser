@@ -299,7 +299,9 @@ internal static partial class Program
                         await stream.WriteAsync(redirect, timeout.Token);
                         return;
                     }
-                    var body = path == "/p404-access" ? StorageAccessGesturePage()
+                    var body = path == "/rc1-package-https"
+                        ? "<!doctype html><title>RC1 controlled HTTPS</title><img src='/rc1-package-rendered' alt=''>"
+                        : path == "/p404-access" ? StorageAccessGesturePage()
                         : path == "/p404-embedded-auth"
                         ? "<!doctype html><script>parent.postMessage({kind:'p404-embedded-auth',signedIn:"
                             + ((normal && httpOnly) ? "true" : "false") + "},'*');</script>"
@@ -318,10 +320,10 @@ internal static partial class Program
                             + Third + "early-child'></iframe>"
                         : "<!doctype html><title>Controlled HTTPS privacy fixture</title>";
                     if (path == "/third-script") body = "window.p403script=true;";
-                    var bytes = path == "/third-image"
+                    var bytes = path is "/third-image" or "/rc1-package-rendered"
                         ? Convert.FromBase64String("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
                         : Encoding.UTF8.GetBytes(body);
-                    var contentType = path == "/third-image" ? "image/gif"
+                    var contentType = path is "/third-image" or "/rc1-package-rendered" ? "image/gif"
                         : path is "/third-script" or "/sw/worker.js" ? "application/javascript" : "text/html; charset=utf-8";
                     var headers = "HTTP/1.1 200 OK\r\nContent-Type: " + contentType + "\r\nCache-Control: no-store\r\nConnection: close\r\n";
                     if (path == "/seed")

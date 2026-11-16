@@ -37,6 +37,7 @@ internal static partial class Program
             return StoragePolicyProbe(args[1], args[0]);
         if (args.Length == 2 && args[0] == "https-privacy-preflight") return HttpsPrivacyPreflight(args[1]);
         if (args.Length == 2 && args[0] == "https-privacy-remove-root") return HttpsPrivacyRemoveRoot(args[1]);
+        if (args.Length == 3 && args[0] == "https-package-server") return HttpsPackageServer(args[1], args[2]);
         if (args.Length == 3 && args[0] is "https-privacy-write" or "https-privacy-read")
             return HttpsPrivacyProbe(args[1], args[2], args[0]);
         if (args.Length != 2 || args[0] is not ("write" or "read")) return 2;

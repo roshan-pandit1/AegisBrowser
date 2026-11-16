@@ -384,8 +384,19 @@ jobs:
           name: AegisBrowser-win-x64
           path: artifacts/win-x64/
           if-no-files-found: error
+      - name: Prepare disposable package HTTPS trust directory
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:CI -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'A disposable hosted runner is required' }
+          $trustDir = Join-Path $env:RUNNER_TEMP ('aegis-rc1-package-trust-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $trustDir -ErrorAction Stop | Out-Null
+          "P403_PACKAGE_TRUST_DIR=$trustDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Package and verify portable ZIP
+        timeout-minutes: 8
         run: ./scripts/package-portable.ps1
+      - name: Remove and verify disposable package HTTPS test root
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: ./tests/acceptance/p403-cleanup-test-ca.ps1 -TrustDirectory $env:P403_PACKAGE_TRUST_DIR
       - name: Upload portable release candidate and checksum
         uses: actions/upload-artifact@v4
         with:

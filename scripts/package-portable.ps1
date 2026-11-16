@@ -1,6 +1,9 @@
 param([string]$PublishDirectory = 'artifacts/win-x64', [string]$OutputDirectory = 'artifacts/portable')
 $ErrorActionPreference = 'Stop'
 if (!$IsWindows) { throw 'Packaging verification requires Windows.' }
+if ($env:GITHUB_ACTIONS -eq 'true' -and [string]::IsNullOrWhiteSpace($env:P403_PACKAGE_TRUST_DIR)) {
+    throw 'Hosted packaging requires the disposable HTTPS package fixture.'
+}
 $source = (Resolve-Path $PublishDirectory).Path
 New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
 $output = (Resolve-Path $OutputDirectory).Path

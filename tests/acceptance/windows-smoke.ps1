@@ -7,6 +7,9 @@ $profilePath = Join-Path $env:LOCALAPPDATA "AegisBrowser/Profiles/profile-$profi
 $process = $null
 $listener = $null
 $idlePeer = $null
+$httpsHelper = $null
+$httpsControl = $null
+$httpsUrl = $null
 try {
     Add-Type -TypeDefinition @'
 using System;
@@ -77,6 +80,31 @@ public static class AegisSmokeInput {
     }
 }
 '@
+    if ($env:P403_PACKAGE_TRUST_DIR) {
+        if ($env:GITHUB_ACTIONS -ne 'true' -or $env:CI -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+            throw 'The HTTPS package fixture requires a disposable GitHub-hosted runner.'
+        }
+        $httpsControl = Join-Path $env:RUNNER_TEMP ('aegis-rc1-https-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $httpsControl -ErrorAction Stop | Out-Null
+        $helperExe = (Resolve-Path './AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe').Path
+        $helperOut = Join-Path $httpsControl 'helper.out.log'
+        $helperErr = Join-Path $httpsControl 'helper.err.log'
+        $httpsHelper = Start-Process -FilePath $helperExe -ArgumentList @('https-package-server', ('"' + $env:P403_PACKAGE_TRUST_DIR + '"'), ('"' + $httpsControl + '"')) -WindowStyle Hidden -RedirectStandardOutput $helperOut -RedirectStandardError $helperErr -PassThru
+        $readyFile = Join-Path $httpsControl 'ready.txt'
+        $readyWatch = [Diagnostics.Stopwatch]::StartNew()
+        while (!(Test-Path -LiteralPath $readyFile) -and $readyWatch.ElapsedMilliseconds -lt 45000) {
+            $httpsHelper.Refresh()
+            if ($httpsHelper.HasExited) { throw "Controlled HTTPS helper exited before readiness (exit $($httpsHelper.ExitCode))." }
+            Start-Sleep -Milliseconds 100
+        }
+        if (!(Test-Path -LiteralPath $readyFile)) { throw 'Controlled HTTPS helper did not become ready.' }
+        $httpsUrl = (Get-Content -LiteralPath $readyFile -Raw).Trim()
+        $parsedUrl = [uri]$httpsUrl
+        if ($parsedUrl.Scheme -cne 'https' -or $parsedUrl.Host -cne '127.0.0.1' -or
+            $parsedUrl.AbsolutePath -cne '/rc1-package-https' -or $parsedUrl.Query -ne '' -or $parsedUrl.Fragment -ne '') {
+            throw 'Unexpected controlled HTTPS fixture address.'
+        }
+    }
     $process = Start-Process -FilePath $exe -ArgumentList "--profile=$profile" -WindowStyle Hidden -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     $browserHandle = [IntPtr]::Zero
@@ -183,6 +211,30 @@ public static class AegisSmokeInput {
     Write-Output 'PASS: a controlled idle loopback connection did not prevent navigation.'
     Write-Output 'PASS: launched browser requested the controlled loopback HTTP page.'
 
+    if ($httpsUrl) {
+        if (![AegisSmokeInput]::IsOwnedBy($addressHandle, $process.Id)) { throw 'Browser address control no longer belongs to the test process.' }
+        $messageResult = [IntPtr]::Zero
+        if ([AegisSmokeInput]::SendTextTimeout($addressHandle, 0x000C, [IntPtr]::Zero, $httpsUrl,
+                2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero -or $messageResult -eq [IntPtr]::Zero) {
+            throw 'Browser address control did not accept the controlled HTTPS URL.'
+        }
+        foreach ($message in @(0x0100, 0x0101)) {
+            if ([AegisSmokeInput]::SendMessageTimeout($addressHandle, $message, [IntPtr]13, [IntPtr]0,
+                    2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero) { throw 'HTTPS navigation input was not accepted.' }
+        }
+        $observedFile = Join-Path $httpsControl 'observed.txt'
+        $observedWatch = [Diagnostics.Stopwatch]::StartNew()
+        while (!(Test-Path -LiteralPath $observedFile) -and $observedWatch.ElapsedMilliseconds -lt 25000) {
+            $httpsHelper.Refresh()
+            if ($httpsHelper.HasExited) { throw "Controlled HTTPS helper exited before the request (exit $($httpsHelper.ExitCode))." }
+            Start-Sleep -Milliseconds 100
+        }
+        if (!(Test-Path -LiteralPath $observedFile) -or (Get-Content -LiteralPath $observedFile -Raw).Trim() -cne 'https-request-observed') {
+            throw 'The launched browser did not deliver the controlled HTTPS request.'
+        }
+        Write-Output 'PASS: launched browser delivered controlled HTTPS page and same-origin subresource requests under normal certificate validation.'
+    }
+
     $privacyButton = [AegisSmokeInput]::FindUniqueChild($browserHandle, $process.Id, 'WindowsForms10.BUTTON.', 'Privacy')
     if ($privacyButton -eq [IntPtr]::Zero) { throw 'Unique Privacy toolbar action was not found.' }
     $messageResult = [IntPtr]::Zero
@@ -207,7 +259,19 @@ public static class AegisSmokeInput {
     if (!$process.WaitForExit(15000)) { throw 'Browser did not exit within 15 seconds of normal close.' }
     if ($process.ExitCode -ne 0) { throw "Browser exited with code $($process.ExitCode)" }
     Write-Output 'PASS: Windows published-app window startup, profile cache creation and normal close.'
-    Write-Output 'NOT TESTED: HTTPS/TLS, rendered content, permissions, cookie behavior or visual correctness.'
+    if (!$httpsUrl) { Write-Output 'NOT TESTED: HTTPS/TLS (the hosted-runner fixture was not enabled).' }
+    Write-Output 'NOT TESTED: permissions, cookie behavior or visual correctness.'
+    if ($httpsHelper) {
+        Set-Content -LiteralPath (Join-Path $httpsControl 'stop.txt') -Value 'stop'
+        if (!$httpsHelper.WaitForExit(15000)) { throw 'Controlled HTTPS helper did not shut down.' }
+        if ($httpsHelper.ExitCode -ne 0) { throw "Controlled HTTPS helper failed (exit $($httpsHelper.ExitCode))." }
+        $helperLog = Get-Content -LiteralPath $helperOut -Raw
+        if ($helperLog -notmatch 'PASS: controlled HTTPS server observed the package navigation' -or
+            $helperLog -notmatch 'P403_TRUST: temporary user root removed') {
+            throw 'Controlled HTTPS helper did not confirm its request and root removal.'
+        }
+        Write-Output 'PASS: controlled HTTPS helper removed its exact test root.'
+    }
 }
 finally {
     if ($idlePeer) { $idlePeer.Dispose() }
@@ -215,6 +279,13 @@ finally {
     if ($process) {
         if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
         $process.Dispose()
+    }
+    if ($httpsHelper) {
+        if (!$httpsHelper.HasExited) {
+            try { Set-Content -LiteralPath (Join-Path $httpsControl 'stop.txt') -Value 'stop' } catch { }
+            if (!$httpsHelper.WaitForExit(15000)) { $httpsHelper.Kill(); $httpsHelper.WaitForExit() }
+        }
+        $httpsHelper.Dispose()
     }
     # Keep the isolated profile/logs for failure investigation. Do not delete any user profile.
     Write-Output "Smoke-test profile/logs: $profilePath"
