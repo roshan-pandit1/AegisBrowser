@@ -31,7 +31,7 @@ internal static partial class Program
             host.Shown += async (_, _) =>
             {
                 try { if (args.Length == 2) await RestartProfile(host, root, args[0] == "write");
-                    else { await Run(host, server); await SettingsReview(host, server); }
+                    else { await Run(host, server); await UnknownSiteRules(host, server); await SettingsReview(host, server); }
                     Console.WriteLine($"PASS: {checks} Chromium filtering checks"); exit = 0; }
                 catch (Exception ex) { Console.Error.WriteLine(ex); }
                 finally { host.Close(); }
@@ -41,6 +41,36 @@ internal static partial class Program
         catch (Exception ex) { Console.Error.WriteLine(ex); }
         finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } Console.WriteLine("CEF test profile: " + root); }
         return exit;
+    }
+    private static async Task UnknownSiteRules(Form host, FixtureServer server)
+    {
+        // A fresh about:blank browser supplies a deliberately unknown top site.
+        // The only endpoint is this test-owned loopback server.
+        var config = new PrivacyConfiguration { FilterList = "||localhost^$third-party,image" };
+        var session = new PrivacySession(config);
+        using var web = new BrowserView("about:blank") { LifeSpanHandler = new SafePopups(Console.WriteLine), Dock = DockStyle.Fill };
+        web.RequestHandler = new SafeRequests(Console.WriteLine, session.Evaluate);
+        web.FrameLoadEnd += (_, _) => { };
+        host.Controls.Add(web);
+        await Ready(web);
+        async Task<(int hits, RequestObservation? decision)> LoadImage(bool enabled)
+        {
+            session.Apply(config with { ApplyThirdPartyRulesWhenSiteUnknown = enabled });
+            session.ClearHistory(); server.Clear();
+            var url = server.ThirdOrigin + "/unknown.png?" + Guid.NewGuid().ToString("N");
+            await Js(web, $"window.p401Done=false; window.p401Image=new Image(); window.p401Image.onload=window.p401Image.onerror=()=>window.p401Done=true; window.p401Image.src='{url}'; document.body.append(window.p401Image);");
+            await Wait(async () => await Js(web, "window.p401Done") == "True", "unknown-site image completion");
+            return (server.Hits("/unknown.png"), session.Snapshot().Requests.LastOrDefault(r => r.Type == "image"));
+        }
+        var baseline = await LoadImage(false);
+        Check(baseline.hits == 1 && baseline.decision is { Party: "Unknown", Result: "Allowed" },
+            "unknown-site baseline reaches local third-party-rule endpoint");
+        var enabled = await LoadImage(true);
+        Check(enabled.hits == 0 && enabled.decision is { Party: "Unknown", Result: "Blocked" },
+            "opt-in blocks matching unknown-site request at network boundary");
+        Console.WriteLine($"P4-01 unknown-site controlled requests: baseline={baseline.hits}, opt-in={enabled.hits}; classification remains Unknown");
+        await CloseWeb(web);
+        host.Controls.Remove(web);
     }
     private static void Check(bool ok, string message)
     {

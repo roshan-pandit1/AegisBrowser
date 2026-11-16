@@ -17,6 +17,7 @@ internal static partial class Program
         Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(profileRoot); Directory.CreateDirectory(root);
         var initialized = false; var result = 0;
+        var socksTrace = new SocksTrace();
         try
         {
             Cef.EnableWaitForBrowsersToClose();
@@ -26,6 +27,7 @@ internal static partial class Program
                 CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef-proxy-probe.log")
             });
             if (!initialized) throw new IOException("CEF initialization failed.");
+            socksTrace.Add("CEF_LIFECYCLE_EVENT", "INITIALIZED");
             using var context = Cef.GetGlobalRequestContext();
             using var origin = new LocalHttpFixture("origin");
             // The test-only proxy can connect only to this one loopback origin.
@@ -57,6 +59,8 @@ internal static partial class Program
                     browser = new BrowserView("about:blank") { Dock = DockStyle.Fill };
                     browser.RequestHandler = new SafeRequests(Console.WriteLine);
                     Observe(browser); host.Controls.Add(browser); await Ready(browser);
+                    await VerifySocksOutcomeFailures();
+                    VerifySocksNavigationObserver();
                     await AwaitConcurrentProxyProbe(root);
                     await AwaitProcessObservation();
                     var baseUrl = "http://127.0.0.1:" + origin.Port;
@@ -112,7 +116,11 @@ internal static partial class Program
                     }
                     finally { browser.LoadError -= onError; }
                     await ObserveHttpsThroughProxy(browser, context);
-                    await ObserveSocksThroughProxy(browser, context);
+                    // Keep protocol denial independently observable even if
+                    // the following stopped-listener navigation times out.
+                    await ObserveSocksRejection(browser, context, socksTrace);
+                    await ObserveSocksThroughProxy(browser, context, socksTrace);
+                    await ObserveSocksCancellation(browser, context, socksTrace);
                     await ObserveHttpsProxyCertificate(browser, context);
                     Console.WriteLine($"PASS: {checks} CEF proxy probe checks");
                 }
@@ -121,8 +129,17 @@ internal static partial class Program
                 {
                     if (browser is not null && browser.IsBrowserInitialized)
                     {
-                        try { await CloseWeb(browser); }
+                        try { socksTrace.Add("CEF_LIFECYCLE_EVENT", "BROWSER_CLOSE_REQUESTED"); await CloseWeb(browser); socksTrace.Add("CEF_LIFECYCLE_EVENT", "BROWSER_CLOSED"); }
                         catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
+                        finally
+                        {
+                            socksTrace.Detach();
+                            if (socksTrace.PostCloseViolation)
+                            {
+                                result = 1;
+                                Console.Error.WriteLine("SOCKS-offline navigation had a contradictory successful response before teardown completed.");
+                            }
+                        }
                     }
                     host.Close();
                 }
@@ -130,7 +147,16 @@ internal static partial class Program
             Application.Run(host);
         }
         catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
-        finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
+        finally
+        {
+            try { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); socksTrace.Add("CEF_LIFECYCLE_EVENT", "SHUTDOWN_RETURNED"); } }
+            finally { socksTrace.Print(); }
+        }
+        if (socksTrace.Dropped != 0)
+        {
+            result = 1;
+            Console.Error.WriteLine("SOCKS trace overflowed; callback evidence is incomplete.");
+        }
         if (result == 0) Console.WriteLine("PASS: CEF proxy probe shutdown completed");
         return result;
     }
@@ -215,11 +241,12 @@ internal static partial class Program
                         await stream.WriteAsync("HTTP/1.1 302 Found\r\nLocation: /redirect-target\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray(), token);
                         return;
                     }
-                    var contentType = path == "/proxy-script.js" ? "application/javascript" : "text/html";
+                    var contentType = path is "/proxy-script.js" or "/fp03-worker.js" ? "application/javascript" : "text/html";
                     var content = path switch
                     {
                         "/proxy-page" => "<!doctype html><title>page</title><script src='/proxy-script.js'></script>",
                         "/proxy-script.js" => "document.title='proxied script';",
+                        "/fp03-worker.js" => "self.addEventListener('message',e=>{if(e.source)e.source.postMessage({kind:'fp03-service',rtc:typeof RTCPeerConnection});});",
                         "/proxy-popup" => "<!doctype html><title>popup</title><script>window.close()</script>",
                         _ => "<!doctype html><title>" + (viaProxy ? "proxy" : label) + "</title><p>local fixture</p>"
                     };
