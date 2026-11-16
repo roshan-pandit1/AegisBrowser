@@ -1,0 +1,31 @@
+# Production sandbox remediation: feasibility gate
+
+**Decision: NO GO.** No sandboxed AegisBrowser implementation or native Windows x64 isolation proof was produced by this assessment. Stop the production migration at the sandbox gate; the existing RC1 and hardening builds are not production releases.
+
+## Starting point and evidence
+
+PR #75 (`release/rc1`, `e610ac5b837093975e54457b0808f561046302cb`) and PR #76 (`release/production-hardening`, `8c435ae98455199b73de9ed1d1aedfe0e016ddff`) remain separate drafts. The remediation branch starts at #76 and does not alter those branches. Existing Windows CI passes and the user-reported 8/8 manual acceptance apply to their stated original commits; neither establishes sandbox enforcement in a new build.
+
+The shipped binding is `CefSharp.WinForms.NETCore` 154.0.340, with CEF 154.0.34 and Chromium 154.0.8037.98. The actual pinned CefSharp package's `Readme.txt` says it does not currently support CEF sandboxing. The [v154.0.340 settings implementation](https://github.com/cefsharp/CefSharp/blob/ec1027aa21e1af1217681a349104c15d29bbc21a/CefSharp.Core.Runtime/CefSettingsBase.h) sets `no_sandbox = true` and a separate CefSharp subprocess; its [initialization path](https://github.com/cefsharp/CefSharp/blob/ec1027aa21e1af1217681a349104c15d29bbc21a/CefSharp.Core.Runtime/Cef.h) passes a null Windows sandbox-info pointer. RC1 does not override these defaults. Merely changing a flag would not satisfy the other CEF requirements.
+
+The [pinned CEF Windows sandbox instructions](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/docs/sandbox_setup.md) require the same executable for browser and subprocesses, the sandbox library, and sandbox information forwarded to both process execution and initialization. Starting with M138, an external Windows client normally uses a CEF bootstrap that loads a native client DLL and passes sandbox information; an in-tree Chromium/CEF toolchain build is another documented route. The currently installed CefSharp and CEF runtime package roots do not contain a bootstrap executable; this does not establish whether the official standalone CEF distribution contains one.
+
+## Candidate architectures
+
+| Candidate | Feasibility and decision |
+| --- | --- |
+| Native CEF bootstrap with a managed-host bridge | CEF documents the bootstrap model, but this application has no native client DLL, managed-host bridge, sandbox-info forwarding or validated same-executable lifecycle. A version-matched, supported prototype and native x64 proof are required before this is a production option. |
+| Maintained custom CefSharp binding | Conceptually retains more application integration, but the pinned upstream binding does not support the sandbox. A maintained fork would have to change process startup and propagate sandbox information into both entry points, then build compatible native binaries. No such binding was implemented or validated here. |
+| WebView2 migration | Microsoft documents [renderer security measures](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/measures) and [separate profiles](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/multi-profile-support). This is not drop-in: filtering, native popup ownership, TLS, per-profile cookie/WebRTC/WebGL controls, migration and rollback need supported equivalents and independent tests. An [open WebView2 feature request](https://github.com/MicrosoftEdge/WebView2Feedback/issues/4336) is not proof of equivalent third-party cookie blocking. No migration was implemented. |
+
+No candidate is selected as production-ready. A small, isolated native-x64 feasibility prototype should first establish a supported bootstrap/binding contract and prove renderer identity, restricted token and sandbox policy enforcement with negative controls, controlled navigation and normal shutdown. It must not touch existing profiles, remove required-proxy refusal or silently remove privacy protections. If a WebView2 alternative is pursued, demonstrate protection and profile parity before replacing CEF; Microsoft cautions that [different runtimes sharing user data can be unsafe](https://learn.microsoft.com/en-us/deployedge/webview2-downgrade-runtime).
+
+## Remaining release gates
+
+- **Sandbox: BLOCKED.** No supported integration was implemented, and no independent native Windows x64 renderer-isolation/enforcement test was executed. The local machine is Windows ARM64 with x64 emulation, not a native x64 proof environment. Hosted Windows x64 CI exists, but earlier renderer attribution and sandbox-policy observations were inconclusive.
+- **.NET 10 and engine security: BLOCKED behind sandbox design.** Projects still target .NET 8 and `global.json` pins 8.0.400 with `latestPatch`; no local x64 .NET 10 SDK was identified. Microsoft lists [.NET 8 end of standard support on November 10, 2026 and .NET 10 support through November 14, 2028](https://learn.microsoft.com/en-us/lifecycle/products/microsoft-net-and-net-core). The embedded Chromium build predates subsequent security fixes; exact CEF applicability and backports remain unverified. No migration, dependency upgrade or advisory-closure claim was made.
+- **Behavior and data: INCONCLUSIVE for any future architecture.** Existing RC1 tests do not establish parity, profile isolation across migrations, safe downgrade or rollback for another engine. The required-proxy fail-closed guard and existing security settings were not changed.
+- **Distribution: BLOCKED.** The hardening branch supplies pinned CEF/CefSharp notices but identifies the full version-matched Chromium credits inventory as unresolved. The RC1 executable was observed unsigned. No signing credentials, signed release, SBOM or independently verified reproducible build were established here.
+- **Release verification and review: BLOCKED.** No new production build, final native x64 acceptance, signed artifact or independent remediation review exists. The RC1 artifact and its passing tests remain historical evidence, not proof of remediation.
+
+This document is a feasibility result, not an implementation or approval to ship. Do not merge, tag or publish a production release until every mandatory security and distribution gate is independently satisfied.
