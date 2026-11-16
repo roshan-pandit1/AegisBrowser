@@ -23,7 +23,7 @@ Privacy settings are profile-local and relevant Chromium settings require a prof
 
 Extract the complete portable ZIP to a writable directory and run `AegisBrowser.exe`. Use `--profile=NAME` for a named profile or `--profiles` for the profile manager. Profiles are stored separately under `%LOCALAPPDATA%\AegisBrowser\Profiles`, not inside the portable folder. Open **Privacy** from the browser toolbar to configure the available controls.
 
-Normal Chromium certificate validation and sandbox settings remain in effect. Profiles requiring proxy containment remain blocked by `ProxyRepository.EnsureRuntimeReady`; the test fixtures do not prove system-wide containment. WebGL workers and other graphics, Canvas, audio, font, screen and network surfaces remain observable. Compatibility with every website is not established.
+Normal Chromium certificate validation remains in effect. **The pinned CefSharp binding configures CEF with `no_sandbox = true` by default, and this application does not override it.** Do not rely on the Chromium renderer sandbox as a security boundary in this build; production release requires a supported, independently verified sandboxed configuration. Profiles requiring proxy containment remain blocked by `ProxyRepository.EnsureRuntimeReady`; the test fixtures do not prove system-wide containment. WebGL workers and other graphics, Canvas, audio, font, screen and network surfaces remain observable. Compatibility with every website is not established.
 
 ## Build and verification
 
