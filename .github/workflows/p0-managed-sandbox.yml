@@ -51,6 +51,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Managed host build failed.' }
           dotnet build ./tests/research/p0managed/HttpsFixture/HttpsFixture.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'HTTPS fixture build failed.' }
+          dotnet ./tests/research/p0managed/HttpsFixture/bin/Release/net8.0/HttpsFixture.dll self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Trust confirmation controls failed.' }
           $dotnetRoot = Split-Path -Parent (Get-Command dotnet.exe -ErrorAction Stop).Source
           $hostVersions = @(Get-ChildItem (Join-Path $dotnetRoot 'packs/Microsoft.NETCore.App.Host.win-x64') -Directory | Where-Object { $_.Name -match '^8\.' } | Sort-Object { [Version]$_.Name } -Descending)
           if ($hostVersions.Count -lt 1) { throw 'A .NET 8 x64 host pack is required.' }

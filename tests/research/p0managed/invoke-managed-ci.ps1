@@ -132,6 +132,11 @@ $manifestHash = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
 Write-Output 'DIAGNOSTIC_STAGE: SUPERVISE_PINNED_CLIENT'
 $supervisor = Join-Path $PSScriptRoot '../p0native/GuiSupervisor/bin/Release/net8.0/ProcessSupervisor.exe'
 if (-not (Test-Path -LiteralPath $supervisor -PathType Leaf)) { throw 'Built supervisor is missing.' }
+$evidencePath = Join-Path $runner 'aegis-p0-managed-evidence.json'
+$initial = [ordered]@{ source_sha = $env:GITHUB_SHA; phase = 'FIXTURE_OR_STARTUP_INCOMPLETE';
+    managed_browser = 'BLOCKED'; renderer_identity = 'INCONCLUSIVE';
+    sandbox_enforcement = 'INCONCLUSIVE'; subprocess_cleanup = 'INCONCLUSIVE' }
+[IO.File]::WriteAllText($evidencePath, ($initial | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 $dotnet = Join-Path $DotnetRoot 'dotnet.exe'
 $fixtureDllPath = [IO.Path]::GetFullPath($FixtureDll)
 $trust = [IO.Path]::GetFullPath($TrustDirectory)
@@ -252,7 +257,6 @@ $evidence = [ordered]@{ source_sha = $env:GITHUB_SHA; process_exit = $record.res
     native_exit_code = $record.result.NativeExitCode; output_complete = $record.result.OutputComplete;
     missing_markers = $missing; renderer_identity = 'INCONCLUSIVE'; sandbox_enforcement = 'INCONCLUSIVE';
     subprocess_cleanup = 'INCONCLUSIVE'; https_fixture_exit = $fixtureExit }
-$evidencePath = Join-Path $runner 'aegis-p0-managed-evidence.json'
 [IO.File]::WriteAllText($evidencePath, ($evidence | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 Write-Output ('MANAGED_EVIDENCE_JSON: ' + ($evidence | ConvertTo-Json -Depth 5 -Compress))
 if ($fixtureExit -ne 0 -or $supervisorExit -ne 0 -or $record.result.NativeExitCode -ne 0 -or

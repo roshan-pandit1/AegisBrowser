@@ -10,13 +10,14 @@ using System.Text;
 // A single synthetic loopback fixture on disposable hosted runners only. The
 // public CA manifest is persisted before trust installation so cleanup can be
 // performed in an independent always-run step after a crash or timeout.
-internal static class Program
+internal static partial class Program
 {
     private const string Prefix = "CN=Aegis P0 Disposable Test CA ";
     private static int Main(string[] args)
     {
         try
         {
+            if (args.Length == 1 && args[0] == "self-test") return SelfTest();
             RequireRunner();
             if (args.Length == 2 && args[0] == "cleanup") { Cleanup(args[1]); return 0; }
             if (args.Length != 3 || args[0] != "serve") throw new ArgumentException("EXPECTED_SERVE_OR_CLEANUP");
@@ -24,6 +25,25 @@ internal static class Program
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine("P0_HTTPS_FIXTURE_FAILED: " + ex.GetType().Name + " " + ex.Message); return 1; }
+    }
+
+    private static int SelfTest()
+    {
+        const string subject = "Aegis P0 Disposable Test CA abc";
+        const string fingerprint = "0123456789ABCDEF0123456789ABCDEF01234567";
+        const string content = subject + " " + fingerprint;
+        bool Exact(uint owner = 3, uint expected = 3, string title = "Security Warning",
+            string text = content, bool yes = true, bool removing = false) =>
+            RunnerTrustConfirmation.IsExactPrompt(owner, expected, "#32770", title, text, subject, fingerprint, yes, removing);
+        bool[] checks = {
+            Exact(), !Exact(owner: 4), !Exact(title: "Wrong"), !Exact(text: fingerprint),
+            !Exact(text: subject), !Exact(yes: false),
+            Exact(title: "Root Certificate Store", text: "DELETE " + content, removing: true),
+            !Exact(title: "Root Certificate Store", text: content, removing: true)
+        };
+        if (checks.Any(passed => !passed)) throw new InvalidOperationException("CERT_DIALOG_MATCH_TEST_FAILED");
+        Console.WriteLine("PASS: 8 synthetic certificate-dialog identity checks; no trust store modified");
+        return 0;
     }
 
     private static void RequireRunner()
@@ -43,7 +63,7 @@ internal static class Program
         return dir;
     }
 
-    private static void Certutil(params string[] args)
+    private static void Certutil(X509Certificate2 certificate, bool removing, params string[] args)
     {
         var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "certutil.exe")) {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
@@ -54,7 +74,8 @@ internal static class Program
         var stderr = process.StandardError.ReadToEndAsync();
         process.StandardInput.WriteLine("Y");
         process.StandardInput.Close();
-        if (!process.WaitForExit(20000)) { process.Kill(); process.WaitForExit(); throw new TimeoutException("CERTUTIL_TIMEOUT"); }
+        _ = RunnerTrustConfirmation.WaitForUtility(process, certificate, removing);
+        if (!process.WaitForExit(5000)) { process.Kill(); process.WaitForExit(); throw new TimeoutException("CERTUTIL_TIMEOUT"); }
         Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
         if (process.ExitCode != 0) throw new InvalidOperationException("CERTUTIL_EXIT_" + process.ExitCode);
     }
@@ -82,7 +103,7 @@ internal static class Program
             if (cert.HasPrivateKey || cert.Subject != Prefix + name[6..]) throw new InvalidOperationException("CA_IDENTITY_MISMATCH");
             int count = Count(cert);
             if (count > 1) throw new InvalidOperationException("CA_NOT_UNIQUE");
-            if (count == 1) Certutil("-user", "-f", "-delstore", "Root", cert.Thumbprint);
+            if (count == 1) Certutil(cert, true, "-user", "-f", "-delstore", "Root", cert.Thumbprint);
             if (Count(cert) != 0) throw new InvalidOperationException("CA_CLEANUP_FAILED");
             File.Delete(file);
         }
@@ -117,7 +138,7 @@ internal static class Program
         try
         {
             if (Count(root) != 0) throw new InvalidOperationException("TEST_CA_ALREADY_TRUSTED");
-            Certutil("-user", "-f", "-addstore", "Root", manifest);
+            Certutil(root, false, "-user", "-f", "-addstore", "Root", manifest);
             if (Count(root) != 1) throw new InvalidOperationException("TEST_CA_INSTALL_NOT_VERIFIED");
             using var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
