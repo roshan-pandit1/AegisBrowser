@@ -1,0 +1,2 @@
+# Unified patches require a single-space prefix for blank context lines.
+research/cefsharp-sandbox-bridge/*.patch text eol=lf whitespace=-blank-at-eol
