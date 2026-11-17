@@ -1,6 +1,6 @@
 # Experimental CefSharp sandbox bridge patch
 
-This **uncompiled source prototype** targets CefSharp commit
+This **experimental source prototype** targets CefSharp commit
 `ec1027aa21e1af1217681a349104c15d29bbc21a` (154.0.340). It is not a
 replacement package, production integration, or evidence of sandbox enforcement.
 
@@ -26,8 +26,10 @@ git apply --check path/to/0001-experimental-sandbox-info.patch
 git apply path/to/0001-experimental-sandbox-info.patch
 ```
 
-The exact runtime and BrowserSubprocess.Core projects and native host must all be
-built against compatible CEF binaries. The existing P3-09E baseline does not do
-that automatically. Compilation, native sandbox enforcement, process cleanup,
-and managed WinForms rendering remain unverified. Preserve the original production
-CefSharp packages and the application's proxy guard.
+The [hosted Windows x64 experiment](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44073119021)
+compiled the patched runtime and BrowserSubprocess.Core projects against the
+pinned source and CEF SDK on commit `29e9c00979ac255c3fa64de3a1391affdfb75471`.
+Those binaries were not loaded into the native client or a managed application.
+ABI compatibility, native sandbox enforcement, process cleanup, and managed
+WinForms rendering remain unverified. Preserve the original production CefSharp
+packages and the application's proxy guard.
