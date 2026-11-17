@@ -164,6 +164,7 @@ if ($null -ne $renderer.PipeDaclDiagnostic) {
         $renderer.PipeDaclDiagnostic.SandboxCompatibility -cne 'INCONCLUSIVE' -or
         $renderer.PipeDaclDiagnostic.Status -notin @('DACL_ALLOWED','DACL_DENIED','UNAVAILABLE')) { throw 'Unexpected pipe DACL classification.' }
     Write-Output "PIPE_DACL_DIAGNOSTIC: $($renderer.PipeDaclDiagnostic.Status) STAGE=$($renderer.PipeDaclDiagnostic.Stage) ERROR=$($renderer.PipeDaclDiagnostic.Error)"
+    Write-Output "PIPE_RESTRICTING_SID_CLASS: $($renderer.PipeDaclDiagnostic.RestrictingSidClass)"
 }
 Write-Output 'PIPE_ACCESS_DENIAL_CAUSE: INCONCLUSIVE'
 Write-Output 'PIPE_SANDBOX_COMPATIBILITY: INCONCLUSIVE'

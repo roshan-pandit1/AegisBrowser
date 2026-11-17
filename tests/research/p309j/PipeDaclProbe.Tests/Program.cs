@@ -60,7 +60,7 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
-    private static void RunRestrictedFixture(string currentSid, string restrictionSid, bool allowedExpected)
+    private static void RunRestrictedFixture(string currentSid, string restrictionSid, bool allowedExpected, string expectedClass)
     {
         string name = @"\\.\pipe\aegis-p309j-probe-" + Guid.NewGuid().ToString("N");
         string sddl = "D:P(A;;GA;;;" + currentSid + ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)S:(ML;;NW;;;S-1-16-0)";
@@ -87,6 +87,10 @@ internal static class Program
                     var result = PipeDaclProbe.CheckSyntheticToken(server, restricted);
                     Check(result.Status == (allowedExpected ? "DACL_ALLOWED" : "DACL_DENIED"),
                         "synthetic restricted SID " + restrictionSid + " DACL result: " + result.Status);
+                    Check(result.RestrictingSidClass == expectedClass,
+                        "well-known restricting SID classified without logging actual SIDs: " + result.RestrictingSidClass);
+                    Check(result.ActualOpenCause == "INCONCLUSIVE" && result.SandboxCompatibility == "INCONCLUSIVE",
+                        "SID classification does not establish the previous open failure or sandbox enforcement");
                     if (!DuplicateTokenEx(restricted, 0xC /* TOKEN_QUERY | TOKEN_IMPERSONATE */,
                         IntPtr.Zero, 2, 2, out var impersonation))
                         throw new InvalidOperationException("DUPLICATE_FAILED: " + Marshal.GetLastWin32Error());
@@ -116,7 +120,8 @@ internal static class Program
             // descriptor. It creates only a per-run pipe, never changes it.
             RunFixture("D:P(A;;GA;;;" + sid + ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)S:(ML;;NW;;;S-1-16-0)", "DACL_ALLOWED", true);
             RunFixture("D:P", "DACL_DENIED", false);
-            RunRestrictedFixture(sid, "S-1-1-0", false);
+            RunRestrictedFixture(sid, "S-1-1-0", false, "WORLD_ONLY");
+            RunRestrictedFixture(sid, "S-1-0-0", false, "NULL_ONLY");
             using var process = Process.GetCurrentProcess();
             var invalid = PipeDaclProbe.Check(null, process.SafeHandle);
             Check(invalid.Status == "UNAVAILABLE" && invalid.Stage == "HANDLE_INVALID", "missing server handle remains unavailable");

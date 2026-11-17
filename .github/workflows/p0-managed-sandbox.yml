@@ -1,0 +1,114 @@
+name: P0 managed CEF sandbox experiment
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/p0-managed-sandbox-host
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+
+jobs:
+  managed-bootstrap:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: |
+            6.0.428
+            8.0.427
+      - name: Synthetic managed and observation controls
+        run: |
+          dotnet run --project ./tests/research/p0managed/ManagedHost.Tests -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Managed metadata checks failed.' }
+          dotnet run --project ./tests/research/p309j/PipeDaclProbe.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic pipe diagnostics failed.' }
+          dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Supervisor checks failed.' }
+      - name: Build patched pinned CefSharp bindings
+        id: binding
+        timeout-minutes: 20
+        run: ./tests/research/p0native/build-patched-binding.ps1
+      - name: Build managed host, local TLS fixture, and native client
+        id: build
+        env:
+          P0_CEF_SDK: ${{ steps.binding.outputs.sdk_path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet build ./tests/research/p0managed/ManagedHost/P0ManagedHost.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Managed host build failed.' }
+          dotnet build ./tests/research/p0managed/HttpsFixture/HttpsFixture.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'HTTPS fixture build failed.' }
+          $dotnetRoot = Split-Path -Parent (Get-Command dotnet.exe -ErrorAction Stop).Source
+          $hostVersions = @(Get-ChildItem (Join-Path $dotnetRoot 'packs/Microsoft.NETCore.App.Host.win-x64') -Directory | Where-Object { $_.Name -match '^8\.' } | Sort-Object { [Version]$_.Name } -Descending)
+          if ($hostVersions.Count -lt 1) { throw 'A .NET 8 x64 host pack is required.' }
+          $hostNative = Join-Path $hostVersions[0].FullName 'runtimes/win-x64/native'
+          foreach ($name in @('nethost.dll','nethost.h','hostfxr.h','coreclr_delegates.h')) { if (-not (Test-Path (Join-Path $hostNative $name) -PathType Leaf)) { throw "Missing host pack file $name" } }
+          Write-Output "DOTNET_HOST_PACK_VERSION=$($hostVersions[0].Name)"
+          dotnet --list-runtimes
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = @(& $vswhere -version '[17.0,18.0)' -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.CLI.Support -property installationPath)
+          if ($LASTEXITCODE -ne 0 -or $vs.Count -ne 1 -or -not $vs[0]) { throw 'VS 2022 C++/CLI unavailable.' }
+          $msbuild = Join-Path $vs[0] 'MSBuild/Current/Bin/MSBuild.exe'
+          $buildRoot = Join-Path $env:RUNNER_TEMP ('aegis-p0-managed-build-' + [Guid]::NewGuid().ToString('N'))
+          $out = (Join-Path $buildRoot 'host') + '\'; $obj = (Join-Path $buildRoot 'obj') + '\'
+          $testOut = (Join-Path $buildRoot 'test') + '\'; $testObj = (Join-Path $buildRoot 'test-obj') + '\'
+          New-Item -ItemType Directory -Path $out,$obj,$testOut,$testObj -ErrorAction Stop | Out-Null
+          & $msbuild ./tests/research/p0managed/NativeHost/ManagedDispatchTests.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 "/p:OutDir=$testOut" "/p:IntDir=$testObj" /m:1 /v:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Native dispatch test build failed.' }
+          & (Join-Path $testOut 'ManagedDispatchTests.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Native dispatch tests failed.' }
+          & $msbuild ./tests/research/p0managed/NativeHost/NativeHarness.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 "/p:CefSdkRoot=$env:P0_CEF_SDK" "/p:DotnetHostNativeRoot=$hostNative" "/p:OutDir=$out" "/p:IntDir=$obj" /m:1 /v:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap client build failed.' }
+          "client_path=$(Join-Path $out 'p309f_client.dll')" >> $env:GITHUB_OUTPUT
+          "dotnet_root=$dotnetRoot" >> $env:GITHUB_OUTPUT
+          "nethost_path=$(Join-Path $hostNative 'nethost.dll')" >> $env:GITHUB_OUTPUT
+      - name: Prepare pinned CEF distribution
+        id: prepare
+        timeout-minutes: 12
+        env:
+          P0_CLIENT: ${{ steps.build.outputs.client_path }}
+        run: ./tests/research/p0native/invoke-gui-native.ps1 -ClientPath $env:P0_CLIENT -PrepareOnly
+      - name: Prepare disposable HTTPS trust directory
+        id: trust
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP ('aegis-p0-https-trust-' + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
+          "directory=$dir" >> $env:GITHUB_OUTPUT
+      - name: Run managed browser through GUI bootstrap
+        timeout-minutes: 5
+        env:
+          P0_CLIENT: ${{ steps.build.outputs.client_path }}
+          P0_ROOT: ${{ steps.prepare.outputs.prepared_root }}
+          P0_PATCHED: ${{ steps.binding.outputs.runtime_path }}
+          P0_DOTNET: ${{ steps.build.outputs.dotnet_root }}
+          P0_NETHOST: ${{ steps.build.outputs.nethost_path }}
+          P0_TRUST: ${{ steps.trust.outputs.directory }}
+        run: |
+          ./tests/research/p0managed/invoke-managed-ci.ps1 -ClientPath $env:P0_CLIENT -PreparedRoot $env:P0_ROOT -ManagedOutput ./tests/research/p0managed/ManagedHost/bin/Release/net8.0-windows/win-x64 -PatchedRuntime $env:P0_PATCHED -NethostPath $env:P0_NETHOST -DotnetRoot $env:P0_DOTNET -FixtureDll ./tests/research/p0managed/HttpsFixture/bin/Release/net8.0/HttpsFixture.dll -TrustDirectory $env:P0_TRUST
+      - name: Remove disposable HTTPS root
+        if: always() && steps.trust.outputs.directory != ''
+        env:
+          P0_TRUST: ${{ steps.trust.outputs.directory }}
+        run: |
+          dotnet ./tests/research/p0managed/HttpsFixture/bin/Release/net8.0/HttpsFixture.dll cleanup $env:P0_TRUST
+          if ($LASTEXITCODE -ne 0) { throw 'Independent temporary test root cleanup failed.' }
+      - name: Upload bounded machine-readable result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-managed-evidence
+          path: ${{ runner.temp }}/aegis-p0-managed-evidence.json
+          if-no-files-found: ignore

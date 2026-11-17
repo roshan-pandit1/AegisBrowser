@@ -12,7 +12,8 @@ namespace P309j;
 public static class PipeDaclProbe
 {
     public sealed record Result(string Status, string Stage, int Error,
-        string ActualOpenCause = "INCONCLUSIVE", string SandboxCompatibility = "INCONCLUSIVE");
+        string ActualOpenCause = "INCONCLUSIVE", string SandboxCompatibility = "INCONCLUSIVE",
+        string RestrictingSidClass = "UNAVAILABLE");
 
     private const uint WaitTimeout = 258, TokenQuery = 8, TokenDuplicate = 2;
     // FILE_GENERIC_WRITE is the FILE_OBJECT mapping of GENERIC_WRITE used by
@@ -20,6 +21,10 @@ public static class PipeDaclProbe
     private const uint FileGenericWrite = 0x00120116;
     [StructLayout(LayoutKind.Sequential)] private struct GenericMapping
     { public uint Read, Write, Execute, All; }
+    [StructLayout(LayoutKind.Sequential)] private struct SidAttributes
+    { public IntPtr Sid; public uint Attributes; }
+    [StructLayout(LayoutKind.Sequential)] private struct TokenGroups
+    { public uint Count; public SidAttributes First; }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint WaitForSingleObject(SafeProcessHandle process, uint timeout);
@@ -28,6 +33,15 @@ public static class PipeDaclProbe
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool DuplicateTokenEx(SafeAccessTokenHandle existing, uint access,
         IntPtr attributes, int impersonationLevel, int tokenType, out SafeAccessTokenHandle token);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(SafeAccessTokenHandle token, int informationClass,
+        IntPtr information, int length, out int returnLength);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool IsWellKnownSid(IntPtr sid, int sidType);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool IsValidSid(IntPtr sid);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern uint GetLengthSid(IntPtr sid);
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern uint GetSecurityInfo(SafeHandle handle, int type, uint information,
         out IntPtr owner, out IntPtr group, out IntPtr dacl, IntPtr sacl, out IntPtr descriptor);
@@ -98,10 +112,58 @@ public static class PipeDaclProbe
                 if (!AccessCheck(descriptor, token, FileGenericWrite, ref mapping,
                     privileges, ref length, out _, out bool allowed))
                     return Unknown("ACCESS_CHECK", Marshal.GetLastWin32Error());
-                return new(allowed ? "DACL_ALLOWED" : "DACL_DENIED", "ACCESS_CHECK", 0);
+                return new(allowed ? "DACL_ALLOWED" : "DACL_DENIED", "ACCESS_CHECK", 0,
+                    RestrictingSidClass: ClassifyRestrictingSids(source));
             }
             finally { Marshal.FreeHGlobal(privileges); }
         }
+    }
+
+    // Classification only: never print or persist actual SIDs. The token is
+    // the copied live candidate's primary token, not a verified renderer role
+    // or the effective thread token used by the earlier failed pipe open.
+    private static string ClassifyRestrictingSids(SafeAccessTokenHandle token)
+    {
+        const int TokenRestrictedSids = 11, ErrorInsufficientBuffer = 122;
+        _ = GetTokenInformation(token, TokenRestrictedSids, IntPtr.Zero, 0, out int size);
+        if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer || size < sizeof(uint) || size > 65536)
+            return "UNAVAILABLE";
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            if (!GetTokenInformation(token, TokenRestrictedSids, buffer, size, out int returned) ||
+                returned < sizeof(uint) || returned > size) return "UNAVAILABLE";
+            uint count = unchecked((uint)Marshal.ReadInt32(buffer));
+            int first = checked((int)Marshal.OffsetOf<TokenGroups>(nameof(TokenGroups.First)));
+            int itemSize = Marshal.SizeOf<SidAttributes>();
+            if (count > 128 || first + (long)count * itemSize > returned) return "UNAVAILABLE";
+            if (count == 0) return "NONE";
+            bool hasNull = false, hasWorld = false;
+            long start = buffer.ToInt64(), end = checked(start + returned);
+            for (int i = 0; i < count; i++)
+            {
+                IntPtr sid = Marshal.ReadIntPtr(buffer, first + i * itemSize);
+                long address = sid.ToInt64();
+                // A SID header is eight bytes; do not dereference an address
+                // outside the bounded kernel-returned buffer.
+                if (address < start || address > end - 8) return "UNAVAILABLE";
+                byte subAuthorities = Marshal.ReadByte(sid, 1);
+                if (subAuthorities > 15 || address + 8L + 4L * subAuthorities > end || !IsValidSid(sid))
+                    return "UNAVAILABLE";
+                uint sidLength = GetLengthSid(sid);
+                if (sidLength != 8 + 4 * subAuthorities) return "UNAVAILABLE";
+                hasNull |= IsWellKnownSid(sid, 0 /* WinNullSid */);
+                hasWorld |= IsWellKnownSid(sid, 1 /* WinWorldSid */);
+            }
+            if (count == 1 && hasNull) return "NULL_ONLY";
+            if (count == 1 && hasWorld) return "WORLD_ONLY";
+            if (hasNull) return "CONTAINS_NULL";
+            if (hasWorld) return "CONTAINS_WORLD";
+            return "OTHER";
+        }
+        catch (Exception e) when (e is ArgumentException or OverflowException)
+        { return "UNAVAILABLE"; }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     private static Result Unknown(string stage, int error) => new("UNAVAILABLE", stage, error);
