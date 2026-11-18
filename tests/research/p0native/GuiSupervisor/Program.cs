@@ -288,6 +288,8 @@ internal static class SelfTest
         {
             if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("SELF_TEST: NOT_RUN (Windows required)"); return 2; }
             var zero = await Run("zero");
+            if (zero.ProcessExit != "NORMAL" || zero.NativeExitCode != 0)
+                Console.Error.WriteLine("SELF_TEST_ZERO_RESULT: " + JsonSerializer.Serialize(zero));
             Check(zero.ProcessExit == "NORMAL" && zero.NativeExitCode == 0, "native zero exit observed");
             Check(zero.ProcessIdentity is { Pid: > 0, CreationFileTimeUtc: > 0 }, "handle-bound process identity observed");
             Check(zero.OutputComplete && zero.Stdout.Text == "zero", "stdout drained before completion");

@@ -43,6 +43,13 @@ changing the sandbox or enabling external arguments. The source chain explains
 a plausible module-selection failure; it does not independently establish the
 cause of the observed GPU crash.
 
+The [first matching-name run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44227739249)
+failed in the synthetic supervisor's zero-exit control before CEF started.
+Its original assertion did not record the underlying process outcome. A
+bounded diagnostic now records that outcome on failure; the assertion and its
+deadline are unchanged. The bootstrap-name hypothesis was not tested by that
+run.
+
 Run `.github/workflows/p0-managed-sandbox.yml` on the experiment branch. The
 workflow calls `tests/research/p0native/build-patched-binding.ps1`, builds the
 native and managed projects in `tests/research/p0managed/`, prepares the
