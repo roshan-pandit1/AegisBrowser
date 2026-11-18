@@ -223,3 +223,19 @@ deserializes them as `Int64`. The validator now accepts either integral type
 within the existing bounds and rejects floats, decimals, strings and forged
 security statuses. The corrected synthetic tests passed in local PowerShell
 7.4.22; a new Windows native run is required.
+
+[Run 44310674715](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44310674715)
+first failed because the pinned CEF download host did not resolve. One
+explicit rerun fetched the pinned distribution and exercised the handoff:
+the browser-authenticated main-frame trace named PID 1116, whose live handle
+and creation time were retained before tracing. A separate brokered token
+observation concerned PID 2488; it must not be attributed to PID 1116. The
+fixture loaded controlled HTTPS content and shut down; the independent
+security gate still failed. The test-owned non-CEF positive reader matched
+the held sentinel, while the renderer denial was not bound to it.
+
+The follow-up duplicates the trace candidate's already-retained handle under
+the tracker lock and inspects that duplicate's token without reopening by PID.
+Local synthetic tests cover live and stale handles, ownership and evidence
+schema. This new token observation still requires native CEF execution; it
+does not resolve frame-lifetime races or prove sandbox enforcement.

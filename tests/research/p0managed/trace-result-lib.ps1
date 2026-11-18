@@ -1,5 +1,10 @@
 Set-StrictMode -Version Latest
 
+function Test-P0IntegralRange {
+    param($Value, [long] $Minimum, [long] $Maximum)
+    return (($Value -is [int] -or $Value -is [long]) -and $Value -ge $Minimum -and $Value -le $Maximum)
+}
+
 function Get-P0TraceCorrelation {
     param([Parameter(Mandatory)][object[]] $Decoded)
 
@@ -21,12 +26,13 @@ function Get-P0TraceCorrelation {
     }
     $trace = $record.traceEvidence
     $names = @($trace.PSObject.Properties.Name)
-    $expected = @('Status','Reason','CandidatePid','CandidateCreationFileTimeUtc','Barrier','RendererIdentity','SandboxEnforcement')
+    $expected = @('Status','Reason','CandidatePid','CandidateCreationFileTimeUtc','Barrier','RendererIdentity','SandboxEnforcement','Token')
     if ($names.Count -ne $expected.Count) { throw 'Invalid trace-correlation evidence shape.' }
     foreach ($name in $expected) { if ($name -cnotin $names) { throw 'Invalid trace-correlation evidence shape.' } }
     if ($trace.Status -isnot [string] -or $trace.Status -cnotin @('OBSERVED','INCONCLUSIVE') -or
         $trace.Reason -isnot [string] -or $trace.Reason -cnotmatch '^[A-Za-z0-9_]{1,100}$' -or
-        $trace.RendererIdentity -cne 'INCONCLUSIVE' -or $trace.SandboxEnforcement -cne 'INCONCLUSIVE' -or
+        $trace.RendererIdentity -isnot [string] -or $trace.RendererIdentity -cne 'INCONCLUSIVE' -or
+        $trace.SandboxEnforcement -isnot [string] -or $trace.SandboxEnforcement -cne 'INCONCLUSIVE' -or
         ($trace.Barrier -isnot [int] -and $trace.Barrier -isnot [long]) -or $trace.Barrier -lt 0 -or $trace.Barrier -gt 601) {
         throw 'Unexpected trace-correlation classification.'
     }
@@ -38,8 +44,49 @@ function Get-P0TraceCorrelation {
             $trace.CandidateCreationFileTimeUtc -le 0 -or $trace.Barrier -le 0) {
             throw 'Invalid observed trace-correlation identity.'
         }
+        $token = $trace.Token
+        if ($null -eq $token -or $token -isnot [System.Management.Automation.PSCustomObject]) {
+            throw 'Missing trace-correlated token evidence.'
+        }
+        $tokenNames = @($token.PSObject.Properties.Name)
+        $tokenExpected = @('Status','Reason','ProcessId','CreationFileTimeUtc','IntegrityRid','IsAppContainer',
+            'DenyOnlyGroupCount','RestrictingSidCount','HasRestrictingSids','PrivilegeCount','EnabledPrivilegeCount',
+            'InAnyJob','Win32kSystemCallsDisabled','SystemCallMitigationFlags','ProcessRole','SandboxEnforcement')
+        if ($tokenNames.Count -ne $tokenExpected.Count) { throw 'Invalid trace-token evidence shape.' }
+        foreach ($name in $tokenExpected) { if ($name -cnotin $tokenNames) { throw 'Invalid trace-token evidence shape.' } }
+        if ($token.Status -isnot [string] -or $token.Status -cnotin @('OBSERVED','INCONCLUSIVE') -or
+            $token.Reason -isnot [string] -or $token.Reason -cnotmatch '^[A-Za-z0-9_]{1,100}$' -or
+            $token.ProcessRole -isnot [string] -or $token.ProcessRole -cne 'NOT_ESTABLISHED' -or
+            $token.SandboxEnforcement -isnot [string] -or $token.SandboxEnforcement -cne 'INCONCLUSIVE') {
+            throw 'Unexpected trace-token classification.'
+        }
+        $dataNames = @('ProcessId','CreationFileTimeUtc','IntegrityRid','IsAppContainer','DenyOnlyGroupCount',
+            'RestrictingSidCount','HasRestrictingSids','PrivilegeCount','EnabledPrivilegeCount','InAnyJob',
+            'Win32kSystemCallsDisabled','SystemCallMitigationFlags')
+        if ($token.Status -ceq 'OBSERVED') {
+            if ($token.Reason -cne 'HANDLE_IDENTITY_AND_TOKEN_SNAPSHOT' -or
+                -not (Test-P0IntegralRange $token.ProcessId 1 ([int]::MaxValue)) -or $token.ProcessId -ne $trace.CandidatePid -or
+                -not (Test-P0IntegralRange $token.CreationFileTimeUtc 1 ([long]::MaxValue)) -or
+                $token.CreationFileTimeUtc -ne $trace.CandidateCreationFileTimeUtc) {
+                throw 'Trace-token process identity does not match retained candidate.'
+            }
+            foreach ($name in @('IntegrityRid','DenyOnlyGroupCount','RestrictingSidCount','PrivilegeCount','EnabledPrivilegeCount')) {
+                if (-not (Test-P0IntegralRange $token.$name 0 ([uint32]::MaxValue))) { throw 'Invalid trace-token count.' }
+            }
+            if ($token.IsAppContainer -isnot [bool]) { throw 'Invalid trace-token Boolean.' }
+            foreach ($name in @('HasRestrictingSids','InAnyJob','Win32kSystemCallsDisabled')) {
+                if ($null -ne $token.$name -and $token.$name -isnot [bool]) { throw 'Invalid optional trace-token Boolean.' }
+            }
+            if ($null -ne $token.SystemCallMitigationFlags -and
+                -not (Test-P0IntegralRange $token.SystemCallMitigationFlags 0 ([uint32]::MaxValue))) {
+                throw 'Invalid trace-token mitigation flags.'
+            }
+        } else {
+            if ($token.Reason -ceq 'HANDLE_IDENTITY_AND_TOKEN_SNAPSHOT') { throw 'Inconclusive token has observed reason.' }
+            foreach ($name in $dataNames) { if ($null -ne $token.$name) { throw 'Inconclusive token contains observation data.' } }
+        }
     } elseif ($null -ne $trace.CandidatePid -or $null -ne $trace.CandidateCreationFileTimeUtc -or $trace.Barrier -ne 0 -or
-        $trace.Reason -ceq 'LIVE_HANDLE_RETAINED_BEFORE_TRACE') {
+        $trace.Reason -ceq 'LIVE_HANDLE_RETAINED_BEFORE_TRACE' -or $null -ne $trace.Token) {
         throw 'Invalid inconclusive trace-correlation identity.'
     }
     return $trace

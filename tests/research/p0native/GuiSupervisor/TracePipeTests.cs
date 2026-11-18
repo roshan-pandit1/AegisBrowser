@@ -14,6 +14,8 @@ internal static class TracePipeTests
     private static extern bool GetProcessTimes(SafeProcessHandle process, out long creation, out long exit, out long kernel, out long user);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint WaitForSingleObject(SafeProcessHandle process, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint GetProcessId(SafeProcessHandle process);
     private static int checks;
     private static void Check(bool condition, string name)
     { if (!condition) throw new InvalidOperationException(name); checks++; Console.WriteLine("PASS: " + name); }
@@ -56,6 +58,12 @@ internal static class TracePipeTests
             {
                 var tracker = PassiveTrackingSession.Start(self.SafeHandle, (uint)self.Id, created, image, 10000);
                 Check(await tracker.FirstScanAsync().WaitAsync(TimeSpan.FromSeconds(5)), "tracker initial scan completed");
+                var copied = tracker.DuplicateMatchBeforeBarrier((uint)child.Id, tracker.CaptureBarrier(), out var duplicateHandle);
+                using var duplicateLifetime = duplicateHandle;
+                Check(copied.Status == "OBSERVED" && duplicateHandle != null && !duplicateHandle.IsInvalid &&
+                    GetProcessId(duplicateHandle) == child.Id, "pre-barrier child handle duplicated without reopening PID");
+                var missing = tracker.DuplicateMatchBeforeBarrier((uint)child.Id, 0, out var missingHandle);
+                Check(missing.Status == "INCONCLUSIVE" && missingHandle == null, "invalid barrier cannot duplicate a handle");
                 async Task<TracePipeObserver.Evidence> Scenario(string payload, bool closeChild = false)
                 {
                     using var observer = TracePipeObserver.Create();
@@ -87,6 +95,19 @@ internal static class TracePipeTests
                 Check(ok.Status == "OBSERVED" && ok.CandidatePid == child.Id && ok.CandidateCreationFileTimeUtc > 0 &&
                     ok.RendererIdentity == "INCONCLUSIVE" && ok.SandboxEnforcement == "INCONCLUSIVE",
                     "browser report binds a pre-barrier live handle without proving renderer role");
+                Check(ok.Token?.Status == "OBSERVED" && ok.Token.ProcessId == child.Id &&
+                    ok.Token.CreationFileTimeUtc == ok.CandidateCreationFileTimeUtc &&
+                    ok.Token.ProcessRole == "NOT_ESTABLISHED" && ok.Token.SandboxEnforcement == "INCONCLUSIVE",
+                    "actual retained-handle token snapshot matches the candidate without promoting role");
+                using (var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(ok)))
+                {
+                    var tokenJson = json.RootElement.GetProperty("Token");
+                    Check(tokenJson.GetProperty("ProcessId").GetUInt32() == child.Id &&
+                        tokenJson.GetProperty("CreationFileTimeUtc").GetInt64() == ok.CandidateCreationFileTimeUtc &&
+                        tokenJson.GetProperty("ProcessRole").GetString() == "NOT_ESTABLISHED" &&
+                        tokenJson.GetProperty("SandboxEnforcement").GetString() == "INCONCLUSIVE",
+                        "serialized token evidence preserves handle identity and inconclusive security status");
+                }
                 var duplicate = await Scenario(valid + valid);
                 Check(duplicate.Reason == "TRACE_DUPLICATE_MESSAGE", "duplicate trace messages rejected: " + duplicate.Reason);
                 var malformed = await Scenario("P0TRACE1 not-a-pid BAD\n");
@@ -94,7 +115,14 @@ internal static class TracePipeTests
                 var stale = await Scenario(valid, true);
                 Check(stale.Status == "INCONCLUSIVE" && stale.Reason == "RETAINED_LIFETIME_NOT_LIVE",
                     "exited process rejected: status=" + stale.Status + " reason=" + stale.Reason);
+                var exitedCopy = tracker.DuplicateMatchBeforeBarrier((uint)child.Id, tracker.CaptureBarrier(), out var exitedHandle);
+                Check(exitedCopy.Status == "INCONCLUSIVE" && exitedHandle == null, "exited candidate cannot yield a new duplicate");
                 await tracker.FinishAsync();
+                var afterFinish = tracker.DuplicateMatchBeforeBarrier((uint)child.Id, 1, out var afterFinishHandle);
+                Check(afterFinish.Reason == "SESSION_FINISHED" && afterFinishHandle == null,
+                    "finished tracking session cannot issue a duplicate handle");
+                Check(duplicateHandle != null && !duplicateHandle.IsClosed && GetProcessId(duplicateHandle) == child.Id &&
+                    WaitForSingleObject(duplicateHandle, 0) == 0, "owned duplicate outlives tracker and observes the same exited process");
             }
             finally { await Release(child); }
 

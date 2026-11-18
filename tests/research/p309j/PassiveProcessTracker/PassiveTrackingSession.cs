@@ -86,6 +86,18 @@ public sealed class PassiveTrackingSession
             new("INCONCLUSIVE", "SESSION_FINISHED", null, null);
     }
 
+    // The returned duplicate has independent ownership and must be disposed by
+    // the caller. Tracker shutdown cannot close it while token inspection runs.
+    public PassiveProcessTracker.BarrierMatch DuplicateMatchBeforeBarrier(uint pid, int barrier, out SafeProcessHandle? duplicate)
+    {
+        lock (sync)
+        {
+            duplicate = null;
+            return Volatile.Read(ref finished) == 0 ? tracker.DuplicateMatchBeforeBarrier(pid, barrier, out duplicate) :
+                new("INCONCLUSIVE", "SESSION_FINISHED", null, null);
+        }
+    }
+
     // Must be awaited exactly once. It stops the worker, reports only observed
     // lifetimes and releases its handles; it never kills any process.
     public async Task<PassiveProcessTracker.Report> FinishAsync()

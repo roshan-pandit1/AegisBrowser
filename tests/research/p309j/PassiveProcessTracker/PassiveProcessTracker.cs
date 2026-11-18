@@ -65,6 +65,11 @@ public sealed class PassiveProcessTracker : IDisposable
     private static extern uint WaitForSingleObject(SafeProcessHandle process, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint code);
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DuplicateHandle(IntPtr sourceProcess, SafeProcessHandle sourceHandle,
+        IntPtr targetProcess, out SafeProcessHandle targetHandle, uint access, bool inherit, uint options);
     [DllImport("ntdll.dll")]
     private static extern int NtQueryInformationProcess(SafeProcessHandle process, int infoClass,
         out BasicInformation information, int length, out int returned);
@@ -216,6 +221,20 @@ public sealed class PassiveProcessTracker : IDisposable
             !Matches(candidate.Handle, candidate.Pid, candidate.Created, expectedImage))
             return new("INCONCLUSIVE", "RETAINED_LIFETIME_NOT_LIVE", null, null);
         return new("OBSERVED", "LIVE_HANDLE_RETAINED_BEFORE_TRACE", candidate.Pid, candidate.Created);
+    }
+
+    // Caller serializes against Scan/Dispose and owns any returned duplicate.
+    // DuplicateHandle refers to the same kernel object; this never reopens a PID.
+    public BarrierMatch DuplicateMatchBeforeBarrier(uint pid, int barrier, out SafeProcessHandle? duplicate)
+    {
+        duplicate = null;
+        var match = MatchBeforeBarrier(pid, barrier);
+        if (match.Status != "OBSERVED") return match;
+        var current = GetCurrentProcess();
+        if (!DuplicateHandle(current, held[pid].Handle, current, out var copy, 0, false, 2))
+        { copy?.Dispose(); return new("INCONCLUSIVE", "HANDLE_DUPLICATION_FAILED", null, null); }
+        duplicate = copy;
+        return match;
     }
 
     private static bool HasParent(SafeProcessHandle child, uint pid, uint parentPid)

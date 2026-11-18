@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Text;
+using AegisBrowser.P309G;
 using AegisBrowser.P309J;
 using Microsoft.Win32.SafeHandles;
 
@@ -14,7 +15,13 @@ internal sealed class TracePipeObserver : IDisposable
 {
     internal sealed record Evidence(string Status, string Reason, uint? CandidatePid = null,
         long? CandidateCreationFileTimeUtc = null, int Barrier = 0,
-        string RendererIdentity = "INCONCLUSIVE", string SandboxEnforcement = "INCONCLUSIVE");
+        string RendererIdentity = "INCONCLUSIVE", string SandboxEnforcement = "INCONCLUSIVE", TraceTokenEvidence? Token = null);
+    internal sealed record TraceTokenEvidence(string Status, string Reason, uint? ProcessId = null,
+        long? CreationFileTimeUtc = null, uint? IntegrityRid = null, bool? IsAppContainer = null,
+        uint? DenyOnlyGroupCount = null, uint? RestrictingSidCount = null, bool? HasRestrictingSids = null,
+        uint? PrivilegeCount = null, uint? EnabledPrivilegeCount = null, bool? InAnyJob = null,
+        bool? Win32kSystemCallsDisabled = null, uint? SystemCallMitigationFlags = null,
+        string ProcessRole = "NOT_ESTABLISHED", string SandboxEnforcement = "INCONCLUSIVE");
     private const string Prefix = "aegis-p0trace-";
     private readonly NamedPipeServerStream pipe;
     private readonly CancellationTokenSource stop = new();
@@ -88,11 +95,27 @@ internal sealed class TracePipeObserver : IDisposable
                 !uint.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out uint pid) || pid == 0 || pid > int.MaxValue ||
                 fields[2].Length != 32 || fields[2].Any(c => !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'))))
                 return Failure("TRACE_MESSAGE_INVALID");
-            var match = tracking.MatchBeforeBarrier(pid, barrier);
+            var match = tracking.DuplicateMatchBeforeBarrier(pid, barrier, out var candidate);
+            using var candidateLifetime = candidate;
+            TraceTokenEvidence? tokenEvidence = null;
+            if (match.Status == "OBSERVED" && candidate != null && match.CreationFileTimeUtc is long candidateCreated)
+            {
+                // Read from the duplicated retained kernel handle, never reopen
+                // the PID. TokenObserver validates identity and liveness twice.
+                var token = TokenObserver.Observe(candidate, pid, candidateCreated, browser.ImagePath);
+                tokenEvidence = token.Status == "OBSERVED" && token.ProcessId == pid && token.CreationFileTimeUtc == candidateCreated
+                    ? new(token.Status, token.Reason, token.ProcessId, token.CreationFileTimeUtc, token.IntegrityRid,
+                        token.IsAppContainer, token.DenyOnlyGroupCount, token.RestrictingSidCount, token.HasRestrictingSids,
+                        token.PrivilegeCount, token.EnabledPrivilegeCount, token.InAnyJob, token.Win32kSystemCallsDisabled,
+                        token.SystemCallMitigationFlags)
+                    : new("INCONCLUSIVE", token.Status == "OBSERVED" ? "TOKEN_IDENTITY_MISMATCH" : token.Reason);
+            }
             await pipe.WriteAsync(Encoding.ASCII.GetBytes("P0TRACE1 RECEIVED\n"), deadline.Token).ConfigureAwait(false);
             await pipe.FlushAsync(deadline.Token).ConfigureAwait(false);
             if (await ReadLine(pipe, deadline.Token).ConfigureAwait(false) != null) return Failure("TRACE_DUPLICATE_MESSAGE");
-            return match.Status == "OBSERVED" ? new("OBSERVED", match.Reason, match.Pid, match.CreationFileTimeUtc, barrier) : Failure(match.Reason);
+            return match.Status == "OBSERVED" && tokenEvidence != null
+                ? new("OBSERVED", match.Reason, match.Pid, match.CreationFileTimeUtc, barrier, Token: tokenEvidence)
+                : Failure(match.Status == "OBSERVED" ? "TOKEN_HANDLE_UNAVAILABLE" : match.Reason);
         }
         catch (OperationCanceledException) { return Failure("TRACE_TIMEOUT_OR_PARENT_EXIT"); }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception)
