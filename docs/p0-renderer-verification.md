@@ -178,3 +178,21 @@ The relevant upstream implementations are pinned
 and [CEF frame_host_impl.cc](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/libcef/browser/frame_host_impl.cc).
 Renderer identity, real enforcement, full CefSharp compatibility and
 complete cleanup remain release blockers.
+
+The first native run of the tracing probe, on commit `ef23b7b`, is
+[run 44303868493](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44303868493).
+It reported one current-main-frame trace candidate and a different earlier
+broker candidate; a process with the trace PID also appeared in passive
+tracking. The managed HTTPS and shutdown fixture succeeded, but the security
+gate failed: shared output and independently sampled PIDs did not authenticate
+the trace or bind it to a live handle at the trace time.
+
+The subsequent test-only handoff uses a separate supervisor pipe, verifies the
+kernel-reported browser client PID against the retained browser handle and
+creation time, and establishes a process-tracker scan barrier before tracing.
+The supervisor accepts only a live process handle retained before that barrier.
+Malformed, duplicate, stale and wrong-peer messages remain inconclusive. Local
+synthetic controls passed, but this handoff has not yet proved that the frame
+remained associated with the same renderer throughout navigation or that the
+sentinel access targeted the held file. It does not promote renderer identity,
+sandbox enforcement or descendant cleanup to verified.

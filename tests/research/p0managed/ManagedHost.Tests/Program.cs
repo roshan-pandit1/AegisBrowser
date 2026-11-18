@@ -77,4 +77,20 @@ if (ParseTrace("{\"value\":[" + other + "]}").count != 0) throw new Exception("T
 if (!ParseTrace("{").loss) throw new Exception("TRACE_MALFORMED_ACCEPTED");
 if (!ParseTrace(new string(' ', 1024 * 1024 + 1)).loss) throw new Exception("TRACE_OVERSIZED_ACCEPTED");
 Console.WriteLine("PASS: 5 synthetic trace parsing checks; no renderer role or sandbox accepted");
+var senderType = typeof(ManagedEntry).Assembly.GetType("P0ManagedHost.TraceCorrelationClient")
+    ?? throw new Exception("TRACE_SENDER_MISSING");
+var encode = senderType.GetMethod("Encode", BindingFlags.Static | BindingFlags.NonPublic)
+    ?? throw new Exception("TRACE_ENCODER_MISSING");
+string validFrame = new string('A', 32);
+string encoded = System.Text.Encoding.ASCII.GetString((byte[])encode.Invoke(null, new object[] { 42, validFrame })!);
+if (encoded != "P0TRACE1 42 " + validFrame + "\n") throw new Exception("TRACE_ENCODER_WRONG_FRAME");
+bool Reject(int pid, string frame)
+{
+    try { encode.Invoke(null, new object[] { pid, frame }); return false; }
+    catch (TargetInvocationException ex) when (ex.InnerException is InvalidDataException) { return true; }
+}
+if (!Reject(0, validFrame) || !Reject(-1, validFrame) || !Reject(1, new string('A', 31)) ||
+    !Reject(1, new string('a', 32)) || !Reject(1, new string('A', 31) + "\n"))
+    throw new Exception("TRACE_ENCODER_INVALID_INPUT_ACCEPTED");
+Console.WriteLine("PASS: 6 synthetic trace message validation checks");
 Console.WriteLine("PASS: 4 synthetic managed contracts; CEF and sandbox NOT_TESTED");

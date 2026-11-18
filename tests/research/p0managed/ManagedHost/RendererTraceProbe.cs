@@ -36,6 +36,7 @@ internal sealed class RendererTraceProbe : IDevToolsMessageObserver
     {
         var observer = new RendererTraceProbe();
         IDisposable? registration = null;
+        TraceCorrelationClient? correlation = null;
         bool startSent = false, endSent = false;
         bool lifecycleUnconfirmed = false;
         try
@@ -55,6 +56,9 @@ internal sealed class RendererTraceProbe : IDevToolsMessageObserver
                 throw;
             }
             if (registration is null) throw new InvalidOperationException("OBSERVER_UNAVAILABLE");
+            // The authenticated supervisor must establish its handle-retention
+            // barrier before Chromium is asked to emit its trace snapshot.
+            correlation = await TraceCorrelationClient.ConnectAsync();
             // Submission can complete after our managed timeout; attempting a
             // bounded stop in finally does not assert native cancellation.
             startSent = true;
@@ -77,18 +81,20 @@ internal sealed class RendererTraceProbe : IDevToolsMessageObserver
                 throw new InvalidOperationException("TRACE_END_REJECTED");
             endSent = true;
             await observer.completed.Task.WaitAsync(TimeSpan.FromSeconds(8));
+            (string Frame, int Pid)[] matches;
+            bool lost;
             lock (observer.sync)
             {
-                var matches = observer.frames.Where(x => x.Frame == mainFrame && x.Pid > 0).ToArray();
-                string status = !observer.dataLoss && mainFrame is not null && matches.Length == 1
-                    ? "FRAME_PROCESS_REPORTED_UNCORRELATED" : "INCONCLUSIVE";
-                Console.WriteLine("MANAGED_TRACE: " + status + " MATCHES=" + matches.Length +
-                    " DATA_LOSS=" + observer.dataLoss +
-                    (matches.Length == 1 ? " CANDIDATE_PID=" + matches[0].Pid : "") +
-                    " RENDERER_IDENTITY=INCONCLUSIVE");
-                // A PID from this trace has not yet been bound to a retained OS
-                // process handle or creation time. Never claim verification.
+                matches = observer.frames.Where(x => x.Frame == mainFrame && x.Pid > 0).ToArray();
+                lost = observer.dataLoss;
             }
+            bool unique = !lost && mainFrame is not null && matches.Length == 1;
+            Console.WriteLine("MANAGED_TRACE: " + (unique ? "FRAME_PROCESS_REPORTED_UNCORRELATED" : "INCONCLUSIVE") +
+                " MATCHES=" + matches.Length + " DATA_LOSS=" + lost +
+                (matches.Length == 1 ? " CANDIDATE_PID=" + matches[0].Pid : "") +
+                " RENDERER_IDENTITY=INCONCLUSIVE");
+            if (unique)
+                await correlation.SendAsync(matches[0].Pid, matches[0].Frame);
         }
         catch (Exception ex)
         {
@@ -97,6 +103,7 @@ internal sealed class RendererTraceProbe : IDevToolsMessageObserver
         }
         finally
         {
+            correlation?.Dispose();
             if (startSent && !endSent)
             {
                 try

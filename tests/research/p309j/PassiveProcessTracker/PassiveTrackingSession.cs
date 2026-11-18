@@ -17,6 +17,7 @@ public sealed class PassiveTrackingSession
     private readonly SafeProcessHandle rootCopy;
     private readonly PassiveProcessTracker tracker;
     private readonly CancellationTokenSource stop = new();
+    private readonly object sync = new();
     private readonly TaskCompletionSource<bool> firstScan = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Task worker;
     private int finished;
@@ -59,7 +60,8 @@ public sealed class PassiveTrackingSession
         {
             while (!stop.IsCancellationRequested)
             {
-                bool scanned = tracker.Scan();
+                bool scanned;
+                lock (sync) scanned = tracker.Scan();
                 firstScan.TrySetResult(scanned);
                 if (!scanned) return;
                 await Task.Delay(PassiveProcessTracker.ScanIntervalMilliseconds, stop.Token).ConfigureAwait(false);
@@ -73,6 +75,17 @@ public sealed class PassiveTrackingSession
     // means no successful first scan and never means no children existed.
     public Task<bool> FirstScanAsync() => firstScan.Task;
 
+    public int CaptureBarrier()
+    {
+        lock (sync) return Volatile.Read(ref finished) == 0 ? tracker.CaptureBarrier() : 0;
+    }
+
+    public PassiveProcessTracker.BarrierMatch MatchBeforeBarrier(uint pid, int barrier)
+    {
+        lock (sync) return Volatile.Read(ref finished) == 0 ? tracker.MatchBeforeBarrier(pid, barrier) :
+            new("INCONCLUSIVE", "SESSION_FINISHED", null, null);
+    }
+
     // Must be awaited exactly once. It stops the worker, reports only observed
     // lifetimes and releases its handles; it never kills any process.
     public async Task<PassiveProcessTracker.Report> FinishAsync()
@@ -82,11 +95,11 @@ public sealed class PassiveTrackingSession
         try
         {
             await worker.ConfigureAwait(false);
-            return tracker.Finish();
+            lock (sync) return tracker.Finish();
         }
         finally
         {
-            tracker.Dispose();
+            lock (sync) tracker.Dispose();
             rootCopy.Dispose();
             stop.Dispose();
         }

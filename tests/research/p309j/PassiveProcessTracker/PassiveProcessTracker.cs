@@ -69,7 +69,8 @@ public sealed class PassiveProcessTracker : IDisposable
     private static extern int NtQueryInformationProcess(SafeProcessHandle process, int infoClass,
         out BasicInformation information, int length, out int returned);
 
-    private sealed record Held(uint Pid, long Created, uint ParentPid, int Depth, SafeProcessHandle Handle);
+    public sealed record BarrierMatch(string Status, string Reason, uint? Pid, long? CreationFileTimeUtc);
+    private sealed record Held(uint Pid, long Created, uint ParentPid, int Depth, int FirstScan, SafeProcessHandle Handle);
     private readonly SafeProcessHandle root;
     private readonly uint rootPid;
     private readonly long rootCreated;
@@ -77,7 +78,7 @@ public sealed class PassiveProcessTracker : IDisposable
     private readonly string expectedName;
     private readonly int scanBudget;
     private readonly Dictionary<uint, Held> held = new();
-    private int scans, successfulScans, rejected;
+    private int scans, successfulScans, lastSuccessfulScan, rejected;
     private bool limit, disposed;
     private string lastError = "";
 
@@ -167,7 +168,7 @@ public sealed class PassiveProcessTracker : IDisposable
                         !HasParent(child, entry.Pid, entry.Parent) ||
                         !Matches(parentHandle, entry.Parent, parentCreated, expectedImage))
                     { rejected++; rejectedThisScan.Add(entry.Pid); continue; }
-                    held.Add(entry.Pid, new Held(entry.Pid, created, entry.Parent, depth, child));
+                    held.Add(entry.Pid, new Held(entry.Pid, created, entry.Parent, depth, scans, child));
                     retain = true;
                     added = true;
                 }
@@ -177,6 +178,7 @@ public sealed class PassiveProcessTracker : IDisposable
         }
         lastError = "";
         successfulScans++;
+        lastSuccessfulScan = scans;
         return true;
     }
 
@@ -197,6 +199,23 @@ public sealed class PassiveProcessTracker : IDisposable
         return new Report(successfulScans > 0 ? "PARTIAL" : "INCONCLUSIVE",
             successfulScans > 0 ? "PARTIAL" : "INCONCLUSIVE", "INCONCLUSIVE", scans,
             rejected, limit, lastError, records) { ScanBudget = scanBudget };
+    }
+
+    // Caller must serialize this method with Scan and Dispose. A positive
+    // result only matches a live handle retained before the caller's barrier;
+    // it cannot establish a Chromium process role or sandbox enforcement.
+    public int CaptureBarrier() => lastError.Length == 0 ? lastSuccessfulScan : 0;
+
+    public BarrierMatch MatchBeforeBarrier(uint pid, int barrier)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (barrier <= 0 || barrier > lastSuccessfulScan) return new("INCONCLUSIVE", "BARRIER_INVALID", null, null);
+        if (!held.TryGetValue(pid, out var candidate)) return new("INCONCLUSIVE", "CANDIDATE_NOT_RETAINED", null, null);
+        if (candidate.FirstScan > barrier) return new("INCONCLUSIVE", "CANDIDATE_RETAINED_AFTER_BARRIER", null, null);
+        if (!Matches(root, rootPid, rootCreated, expectedImage) ||
+            !Matches(candidate.Handle, candidate.Pid, candidate.Created, expectedImage))
+            return new("INCONCLUSIVE", "RETAINED_LIFETIME_NOT_LIVE", null, null);
+        return new("OBSERVED", "LIVE_HANDLE_RETAINED_BEFORE_TRACE", candidate.Pid, candidate.Created);
     }
 
     private static bool HasParent(SafeProcessHandle child, uint pid, uint parentPid)

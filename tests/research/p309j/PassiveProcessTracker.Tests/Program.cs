@@ -85,6 +85,7 @@ try
     Check(rejected, "wrong parent image rejected");
 
     using var tracker = new PassiveProcessTracker(self.SafeHandle, (uint)self.Id, created, image);
+    Check(tracker.CaptureBarrier() == 0, "barrier is unavailable before the first successful scan");
     var initial = tracker.Finish();
     Check(initial.Accounting == "INCONCLUSIVE" && initial.Cleanup == "INCONCLUSIVE", "no scan cannot establish accounting");
     using var child = Process.Start(ChildInfo("nested")) ?? throw new InvalidOperationException("child start failed");
@@ -97,6 +98,22 @@ try
         Check(await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)) == "READY", "child ready barrier");
         Check(await sibling.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)) == "READY", "second child ready barrier");
         Check(tracker.Scan(), "bounded real snapshot completed");
+        int barrier = tracker.CaptureBarrier();
+        var matched = tracker.MatchBeforeBarrier((uint)child.Id, barrier);
+        Check(matched.Status == "OBSERVED" && matched.Pid == child.Id && matched.CreationFileTimeUtc > 0,
+            "live child retained before barrier matches its stable handle");
+        Check(tracker.MatchBeforeBarrier((uint)child.Id, 0).Reason == "BARRIER_INVALID", "missing barrier rejected");
+        using (var late = Process.Start(ChildInfo()) ?? throw new InvalidOperationException("late child start failed"))
+        {
+            try
+            {
+                Check(await late.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)) == "READY", "late child ready");
+                Check(tracker.Scan(), "post-barrier snapshot completed");
+                Check(tracker.MatchBeforeBarrier((uint)late.Id, barrier).Reason == "CANDIDATE_RETAINED_AFTER_BARRIER",
+                    "post-barrier child cannot satisfy earlier trace barrier");
+            }
+            finally { await late.StandardInput.WriteLineAsync("exit"); await late.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+        }
         var live = tracker.Finish();
         Check(live.Processes.Any(p => p.Pid == child.Id && p.ParentPid == self.Id && p.Depth == 1 && p.Exit == "STILL_RUNNING"), "live direct child discovered");
         Check(live.Processes.Any(p => p.Pid == sibling.Id && p.ParentPid == self.Id && p.Depth == 1), "second direct child discovered");
@@ -108,6 +125,8 @@ try
         await child.StandardInput.WriteLineAsync("exit");
         await sibling.StandardInput.WriteLineAsync("exit");
         await Task.WhenAll(child.WaitForExitAsync(), sibling.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(8));
+        Check(tracker.MatchBeforeBarrier((uint)child.Id, barrier).Reason == "RETAINED_LIFETIME_NOT_LIVE",
+            "exited retained child cannot satisfy live correlation");
         Check(child.ExitCode == 0 && sibling.ExitCode == 0, "owned helpers exited normally");
         var exited = tracker.Finish();
         Check(exited.Processes.Any(p => p.Pid == child.Id && p.Exit == "EXITED" && p.ExitCode == 0), "retained direct child handle observes exit zero");
