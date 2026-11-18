@@ -11,7 +11,8 @@ internal sealed class BundlePins : IDisposable
 {
     private readonly List<FileStream> streams = new();
     private readonly Dictionary<string, string> hashes = new(StringComparer.OrdinalIgnoreCase);
-    internal string BootstrapHash => hashes["bootstrap.exe"];
+    private string bootstrapName = "bootstrap.exe";
+    internal string BootstrapHash => hashes[bootstrapName];
 
     private static bool SafeName(string s)
     {
@@ -31,9 +32,12 @@ internal sealed class BundlePins : IDisposable
         if (fields.Count != names.Length) throw new InvalidDataException("MANIFEST_FIELD_MISSING");
         return fields;
     }
-    internal static BundlePins Open(string directory, string manifestPath, string manifestHash)
+    internal static BundlePins Open(string directory, string manifestPath, string manifestHash, string bootstrapName = "bootstrap.exe")
     {
-        var bundle = new BundlePins();
+        if (!string.Equals(bootstrapName, "bootstrap.exe", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(bootstrapName, "p309f_client.exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("BOOTSTRAP_NAME_INVALID");
+        var bundle = new BundlePins { bootstrapName = bootstrapName };
         try
         {
             string root = Path.GetFullPath(directory);
@@ -59,7 +63,7 @@ internal sealed class BundlePins : IDisposable
                     throw new InvalidDataException("MANIFEST_FILE_INVALID_OR_DUPLICATE");
                 if (bundle.hashes.Count > 1024) throw new InvalidDataException("MANIFEST_TOO_MANY_FILES");
             }
-            foreach (string name in new[] { "bootstrap.exe", "p309f_client.dll", "libcef.dll", "chrome_elf.dll" })
+            foreach (string name in new[] { bootstrapName, "p309f_client.dll", "libcef.dll", "chrome_elf.dll" })
                 if (!bundle.hashes.ContainsKey(name)) throw new InvalidDataException("MANIFEST_REQUIRED_FILE_MISSING");
 
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

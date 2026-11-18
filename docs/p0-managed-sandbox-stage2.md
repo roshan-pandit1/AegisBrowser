@@ -21,6 +21,28 @@ manifest for independent always-run cleanup. Missing fixtures, certificates,
 entry points, callback markers or normal exit are failures, not passes.
 Synthetic restricted-token and pipe tests are separate from Chromium evidence.
 
+The [first hosted attempt](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44081541723)
+failed before launching the browser because the disposable CA utility timed
+out at the Windows trust prompt. Independent cleanup passed. After adding the
+existing exact-dialog confirmation pattern and synthetic negative controls, the
+[second attempt](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44083628351)
+installed and removed its test root, reached hostfxr, and reported managed CEF
+initialization. It then terminated before showing a window: the parent and
+observed child candidates exited `0x80000003`, with Chromium reporting an
+unusable GPU process. This is a failed managed run; no rendering or shutdown
+claim follows from it.
+
+The pinned CEF source [clears browser command-line switches](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/libcef/common/chrome/chrome_main_delegate_cef.cc#L154-L170)
+when `command_line_args_disabled` is enabled, [propagates `--module` only when
+present](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/libcef/browser/chrome/chrome_content_browser_client_cef.cc#L215-L223),
+and [uses the executable basename](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/libcef_dll/bootstrap/bootstrap_win.cc#L820-L829)
+as a sandboxed child's module fallback. The failing run named its executable
+`bootstrap.exe` and client `p309f_client.dll`. The next controlled comparison
+uses CEF's documented matching-executable-and-DLL naming convention without
+changing the sandbox or enabling external arguments. The source chain explains
+a plausible module-selection failure; it does not independently establish the
+cause of the observed GPU crash.
+
 Run `.github/workflows/p0-managed-sandbox.yml` on the experiment branch. The
 workflow calls `tests/research/p0native/build-patched-binding.ps1`, builds the
 native and managed projects in `tests/research/p0managed/`, prepares the

@@ -23,14 +23,16 @@ internal static class Program
         try
         {
             var bootstrap = Path.GetFullPath(args[1]);
+            var executableName = Path.GetFileName(bootstrap);
             if (!Path.IsPathFullyQualified(args[1]) || !OperatingSystem.IsWindows() ||
-                !string.Equals(Path.GetFileName(bootstrap), "bootstrap.exe", StringComparison.OrdinalIgnoreCase))
+                (!string.Equals(executableName, "bootstrap.exe", StringComparison.OrdinalIgnoreCase) &&
+                 !string.Equals(executableName, "p309f_client.exe", StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidDataException("BOOTSTRAP_PATH_INVALID");
             var dir = Path.GetDirectoryName(bootstrap)!;
             if (new DriveInfo(Path.GetPathRoot(dir)!).DriveType == DriveType.Network) throw new InvalidDataException("NETWORK_PATH_REJECTED");
             // The independently approved manifest hash is the trust root;
             // a manifest copied from the same untrusted bundle is not one.
-            using var bundle = BundlePins.Open(dir, args[2], args[3]);
+            using var bundle = BundlePins.Open(dir, args[2], args[3], executableName);
             if (!string.Equals(FileVersionInfo.GetVersionInfo(Path.Combine(dir, "libcef.dll")).FileVersion,
                 RuntimeVersion, StringComparison.Ordinal)) throw new InvalidDataException("CEF_VERSION_MISMATCH");
             RendererPipeObserver? observer = null;
@@ -42,7 +44,9 @@ internal static class Program
             using var observerLifetime = observer;
             AegisBrowser.P309J.PassiveTrackingSession? tracking = null;
             string trackingFailure = "TRACKING_NOT_STARTED";
-            var result = await ProcessRunner.RunAsync(bootstrap, bundle.BootstrapHash, new[] { "--module=p309f_client" }, dir, timeout, true,
+            var bootstrapArgs = string.Equals(executableName, "bootstrap.exe", StringComparison.OrdinalIgnoreCase)
+                ? new[] { "--module=p309f_client" } : Array.Empty<string>();
+            var result = await ProcessRunner.RunAsync(bootstrap, bundle.BootstrapHash, bootstrapArgs, dir, timeout, true,
                 (id, handle) => {
                     Console.WriteLine(JsonSerializer.Serialize(new { kind = "PROCESS_IDENTITY", identity = id }));
                     observer?.Start(id, handle);
@@ -265,6 +269,17 @@ internal static class SelfTest
         File.WriteAllText(traversal, "{\"schema\":\"p309g-bundle-v1\",\"files\":[{\"name\":\"../escape.dll\",\"sha256\":\"" + new string('0', 64) + "\"}]}");
         Check(Reject(() => BundlePins.Open(dir, traversal, Hash(traversal)).Dispose()), "manifest traversal rejected");
         Check(Reject(() => BundlePins.Open(dir, Path.Combine(dir, "bootstrap.exe"), files[0].sha256).Dispose()), "manifest inside bundle rejected");
+        var renamedDir = Path.Combine(root, "renamed-bundle");
+        Directory.CreateDirectory(renamedDir);
+        var renamedNames = new[] { "p309f_client.exe", "p309f_client.dll", "libcef.dll", "chrome_elf.dll" };
+        foreach (string name in renamedNames) File.WriteAllText(Path.Combine(renamedDir, name), "synthetic " + name);
+        var renamedFiles = renamedNames.Select(name => new { name, sha256 = Hash(Path.Combine(renamedDir, name)) }).ToArray();
+        var renamedManifest = Path.Combine(root, "renamed-manifest.json");
+        File.WriteAllText(renamedManifest, JsonSerializer.Serialize(new { schema = "p309g-bundle-v1", files = renamedFiles }), new UTF8Encoding(false));
+        using (var renamed = BundlePins.Open(renamedDir, renamedManifest, Hash(renamedManifest), "p309f_client.exe"))
+            Check(renamed.BootstrapHash == renamedFiles[0].sha256, "renamed bootstrap remains hash-pinned");
+        Check(Reject(() => BundlePins.Open(renamedDir, renamedManifest, Hash(renamedManifest)).Dispose()), "renamed bundle rejected for original bootstrap name");
+        Check(Reject(() => BundlePins.Open(renamedDir, renamedManifest, Hash(renamedManifest), "unapproved.exe").Dispose()), "unapproved bootstrap name rejected");
         Console.WriteLine("SYNTHETIC_BUNDLE_TEST_DIRECTORY=" + root);
     }
     internal static async Task<int> Run()

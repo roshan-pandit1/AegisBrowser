@@ -80,7 +80,8 @@ if ($releaseItems.Count -ne $releaseFiles.Count) { throw 'Unexpected CEF release
 foreach ($file in $releaseItems) {
     if ($file.PSIsContainer -or $releaseFiles -cnotcontains $file.Name) { throw 'Unknown CEF release entry.' }
     if ($file.Name -cin @('bootstrapc.exe','libcef.lib')) { continue }
-    Copy-BundleFile $file (Join-Path $bundle $file.Name)
+    $destinationName = if ($file.Name -ceq 'bootstrap.exe') { 'p309f_client.exe' } else { $file.Name }
+    Copy-BundleFile $file (Join-Path $bundle $destinationName)
 }
 foreach ($item in @(Get-ChildItem -LiteralPath $resources -Force)) {
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Resource link rejected.' }
@@ -108,7 +109,7 @@ Copy-BundleFile (Get-Item -LiteralPath $NethostPath) (Join-Path $bundle 'nethost
 if ((Get-FileHash -LiteralPath $patched -Algorithm SHA256).Hash -cne
     (Get-FileHash -LiteralPath (Join-Path $bundle 'CefSharp.Core.Runtime.dll') -Algorithm SHA256).Hash) { throw 'Patched binding copy mismatch.' }
 Write-Output "PATCHED_BINDING_SHA256: $((Get-FileHash -LiteralPath $patched -Algorithm SHA256).Hash)"
-foreach ($pair in @(@('bootstrap.exe',$expectedBootstrap), @('libcef.dll',$expectedCef), @('chrome_elf.dll',$expectedElf))) {
+foreach ($pair in @(@('p309f_client.exe',$expectedBootstrap), @('libcef.dll',$expectedCef), @('chrome_elf.dll',$expectedElf))) {
     $file = Join-Path $bundle $pair[0]
     if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -cne $pair[1]) { throw 'Pinned native dependency mismatch.' }
 }
@@ -169,7 +170,7 @@ try {
     $env:AEGIS_P0_MANAGED_EXECUTE = 'YES'
     $env:AEGIS_P0_MANAGED_DOTNET_ROOT = [IO.Path]::GetFullPath($DotnetRoot)
     $ErrorActionPreference = 'Continue'
-    $output = @(& $supervisor 'supervise' (Join-Path $bundle 'bootstrap.exe') $manifest $manifestHash '90000' 2>&1)
+    $output = @(& $supervisor 'supervise' (Join-Path $bundle 'p309f_client.exe') $manifest $manifestHash '90000' 2>&1)
     $supervisorExit = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $previous
