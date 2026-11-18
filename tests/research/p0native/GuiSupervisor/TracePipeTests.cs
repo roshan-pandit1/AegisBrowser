@@ -12,6 +12,8 @@ internal static class TracePipeTests
 {
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetProcessTimes(SafeProcessHandle process, out long creation, out long exit, out long kernel, out long user);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(SafeProcessHandle process, uint milliseconds);
     private static int checks;
     private static void Check(bool condition, string name)
     { if (!condition) throw new InvalidOperationException(name); checks++; Console.WriteLine("PASS: " + name); }
@@ -62,7 +64,18 @@ internal static class TracePipeTests
                     {
                         await Write(client, "P0TRACE1 HELLO\n");
                         Check(await Read(client) == "P0TRACE1 ACK", "authenticated browser receives pre-trace barrier");
-                        if (closeChild) await Release(child);
+                        if (closeChild)
+                        {
+                            await Release(child);
+                            // Process.HasExited can observe an exit code before
+                            // Windows signals the process object. The tracker
+                            // deliberately requires the stronger kernel signal.
+                            uint wait = WaitForSingleObject(child.SafeHandle, 5000);
+                            Check(wait == 0, "released child kernel handle signals exit: wait=" + wait);
+                            var direct = tracker.MatchBeforeBarrier((uint)child.Id, tracker.CaptureBarrier());
+                            Check(direct.Status == "INCONCLUSIVE" && direct.Reason == "RETAINED_LIFETIME_NOT_LIVE",
+                                "tracker confirms child exit before pipe message: status=" + direct.Status + " reason=" + direct.Reason);
+                        }
                         await Write(client, payload);
                         if (payload.Contains(" 0123456789ABCDEF0123456789ABCDEF\n", StringComparison.Ordinal))
                             Check(await Read(client) == "P0TRACE1 RECEIVED", "valid message receipt acknowledged");
@@ -79,7 +92,8 @@ internal static class TracePipeTests
                 var malformed = await Scenario("P0TRACE1 not-a-pid BAD\n");
                 Check(malformed.Reason == "TRACE_MESSAGE_INVALID", "malformed trace message rejected");
                 var stale = await Scenario(valid, true);
-                Check(stale.Status == "INCONCLUSIVE" && stale.Reason == "RETAINED_LIFETIME_NOT_LIVE", "exited process rejected");
+                Check(stale.Status == "INCONCLUSIVE" && stale.Reason == "RETAINED_LIFETIME_NOT_LIVE",
+                    "exited process rejected: status=" + stale.Status + " reason=" + stale.Reason);
                 await tracker.FinishAsync();
             }
             finally { await Release(child); }

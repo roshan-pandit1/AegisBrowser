@@ -196,3 +196,14 @@ synthetic controls passed, but this handoff has not yet proved that the frame
 remained associated with the same renderer throughout navigation or that the
 sentinel access targeted the held file. It does not promote renderer identity,
 sandbox enforcement or descendant cleanup to verified.
+
+The handoff's initial hosted run
+[44306036881](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44306036881)
+failed its synthetic exited-process assertion before starting the native CEF
+fixture. Its output did not include the actual status or reason. A local
+reproduction observed a still-live retained handle after the fixture's
+managed exit check. The test now waits for the owned Windows process handle
+to signal and confirms that the tracker rejects it before submitting the
+stale PID. Fifty bounded local synthetic runs passed after this change; that
+does not establish the exact cause of the hosted failure or prove that the
+failure cannot recur. Native CEF and final security gates require a new run.
