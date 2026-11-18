@@ -1,0 +1,12 @@
+--- a/CefSharp.Core.Runtime/Internals/CefSharpApp.h
++++ b/CefSharp.Core.Runtime/Internals/CefSharpApp.h
+@@ -152,6 +152,9 @@
+ 
+             virtual void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> commandLine) override
+             {
++                // Fixed research-only intent marker; it is not sandbox evidence.
++                // The native child still rejects missing sandbox info and unsafe switches.
++                commandLine->AppendSwitch("aegis-p309f-child-opt-in");
+ #ifndef NETCOREAPP
+                 if (CefSharpSettings::WcfEnabled)
+                 {

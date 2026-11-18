@@ -50,6 +50,17 @@ bounded diagnostic now records that outcome on failure; the assertion and its
 deadline are unchanged. The bootstrap-name hypothesis was not tested by that
 run.
 
+The [matching-name comparison](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44228364247)
+reached the managed WinForms `Shown` callback and returned from CEF shutdown,
+but its local-page load timed out and the parent exited 1. The bounded process
+observer recorded many direct child candidates exiting 10, without establishing
+their Chromium roles or complete cleanup. Exit 10 is also the test client's
+missing-opt-in result; filtered child environment or missing propagation is a
+plausible cause, not an independently established attribution. The test-only
+CefSharp source patch now appends the existing fixed child-intent marker from
+its browser-process launch callback. Child sandbox-context and forbidden-switch
+checks are unchanged. The marker is not identity or sandbox evidence.
+
 Run `.github/workflows/p0-managed-sandbox.yml` on the experiment branch. The
 workflow calls `tests/research/p0native/build-patched-binding.ps1`, builds the
 native and managed projects in `tests/research/p0managed/`, prepares the

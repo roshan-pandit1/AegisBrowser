@@ -4,6 +4,7 @@ import unittest
 
 
 PATCH = (Path(__file__).parent / "0001-experimental-sandbox-info.patch").read_text(encoding="utf-8")
+CHILD_PATCH = (Path(__file__).parent / "0002-experimental-child-opt-in.patch").read_text(encoding="utf-8")
 ADDED = "\n".join(line[1:] for line in PATCH.splitlines() if line.startswith("+") and not line.startswith("+++"))
 
 
@@ -24,6 +25,12 @@ class PrototypeContract(unittest.TestCase):
         self.assertIn("!cefSettings->CommandLineArgsDisabled", ADDED)
         self.assertIn("cefSettings->CefCommandLineArgs->Count != 0", ADDED)
         self.assertIn("if (performDependencyCheck)", ADDED)
+
+    def test_child_patch_only_appends_the_fixed_test_marker(self):
+        added = [line[1:] for line in CHILD_PATCH.splitlines() if line.startswith("+") and not line.startswith("+++")]
+        self.assertEqual(sum("AppendSwitch(" in line for line in added), 1)
+        self.assertIn('commandLine->AppendSwitch("aegis-p309f-child-opt-in");', "\n".join(added))
+        self.assertNotIn('AppendSwitch("no-sandbox")', "\n".join(added))
 
 
 if __name__ == "__main__":

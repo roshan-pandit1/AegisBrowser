@@ -37,6 +37,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic pipe diagnostics failed.' }
           dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Supervisor checks failed.' }
+          python -B -m unittest discover -s research/cefsharp-sandbox-bridge -p 'test_patch_contract.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Experimental binding patch checks failed.' }
       - name: Build patched pinned CefSharp bindings
         id: binding
         timeout-minutes: 20

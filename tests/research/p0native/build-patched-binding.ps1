@@ -20,9 +20,12 @@ if (-not [Environment]::Is64BitProcess) { throw 'The baseline requires an x64 pr
 
 $sourceRevision = 'ec1027aa21e1af1217681a349104c15d29bbc21a'
 $patchFile = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../research/cefsharp-sandbox-bridge/0001-experimental-sandbox-info.patch'))
+$childPatchFile = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../research/cefsharp-sandbox-bridge/0002-experimental-child-opt-in.patch'))
 if (-not (Test-Path -LiteralPath $patchFile -PathType Leaf)) { throw 'Experimental binding patch missing.' }
+if (-not (Test-Path -LiteralPath $childPatchFile -PathType Leaf)) { throw 'Experimental child marker patch missing.' }
 $patchHash = (Get-FileHash -LiteralPath $patchFile -Algorithm SHA256).Hash
 Write-Host "EXPERIMENTAL_PATCH_SHA256=$patchHash"
+Write-Host "EXPERIMENTAL_CHILD_PATCH_SHA256=$((Get-FileHash -LiteralPath $childPatchFile -Algorithm SHA256).Hash)"
 $sdkVersion = '154.0.34'
 $sdkSha512 = '92616C6776D5A4E445CCD8C4147C4F60B05BDD7802D8495CED42C700CD1D4C3A18C8B13CF9A5B2C48D92A2B753626B03DFEEB822C53E1550A92488156CE6266B'
 $root = Join-Path $env:RUNNER_TEMP ('aegis-p309e-' + [Guid]::NewGuid().ToString('N'))
@@ -79,11 +82,14 @@ $dirty = @(& $git -C $source status --porcelain --untracked-files=all)
 if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'Pinned source checkout is not clean.' }
 Invoke-Checked $git @('-C', $source, 'apply', '--check', $patchFile)
 Invoke-Checked $git @('-C', $source, 'apply', '--whitespace=error', $patchFile)
+Invoke-Checked $git @('-C', $source, 'apply', '--check', $childPatchFile)
+Invoke-Checked $git @('-C', $source, 'apply', '--whitespace=error', $childPatchFile)
 Invoke-Checked $git @('-C', $source, 'diff', '--check')
 $modified = @(& $git -C $source diff --name-only)
-if ($LASTEXITCODE -ne 0 -or $modified.Count -ne 2 -or
+if ($LASTEXITCODE -ne 0 -or $modified.Count -ne 3 -or
     $modified -cnotcontains 'CefSharp.Core.Runtime/Cef.h' -or
-    $modified -cnotcontains 'CefSharp.BrowserSubprocess.Core/SubProcess.h') {
+    $modified -cnotcontains 'CefSharp.BrowserSubprocess.Core/SubProcess.h' -or
+    $modified -cnotcontains 'CefSharp.Core.Runtime/Internals/CefSharpApp.h') {
     throw 'Unexpected experimental patch scope.'
 }
 
