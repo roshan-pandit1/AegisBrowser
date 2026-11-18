@@ -164,8 +164,17 @@ Windows x64 test must be assessed separately.
 
 The pinned CEF internal frame implementation exposes its render-frame host,
 but the public CEF frame API does not expose the corresponding OS process
-handle. Chromium's browser-side tracing emits a frame/process mapping; its
-frame-token mapping, event origin, liveness, race behavior and availability in
-this fixture are unverified. Neither observation is yet an authoritative,
-live renderer-to-handle correlation. Renderer identity, real enforcement,
-full CefSharp compatibility and complete cleanup remain release blockers.
+handle. Pinned Chromium's browser-side tracing emits a frame/process mapping.
+The experimental managed fixture now tries a bounded page-target tracing
+probe through CefSharp's in-process DevTools API, with no remote debugging
+port. It accepts only a matching browser PID and DevTools main-frame ID,
+limits data and rejects ambiguous observations; unconfirmed tracing shutdown
+fails the fixture. Five synthetic parsing checks pass locally. Actual CEF
+tracing, process-handle binding, liveness and navigation races are not yet
+verified. This diagnostic does not establish authoritative renderer identity.
+
+The relevant upstream implementations are pinned
+[Chromium tracing_handler.cc](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/content/browser/devtools/protocol/tracing_handler.cc)
+and [CEF frame_host_impl.cc](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/libcef/browser/frame_host_impl.cc).
+Renderer identity, real enforcement, full CefSharp compatibility and
+complete cleanup remain release blockers.

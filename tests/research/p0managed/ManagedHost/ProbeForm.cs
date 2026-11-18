@@ -71,6 +71,7 @@ internal sealed class ProbeForm : Form
             if (!body.Success || !string.Equals(body.Result as string, "AEGIS_P0_HTTPS_OK", StringComparison.Ordinal))
                 throw new InvalidOperationException("HTTPS_FIXTURE_CONTENT_MISMATCH");
             Console.WriteLine("MANAGED_EVENT: HTTPS_PAGE_VERIFIED");
+            await RendererTraceProbe.ObserveAsync(browser.GetBrowser());
             Result = 0;
         }
         catch (Exception ex)

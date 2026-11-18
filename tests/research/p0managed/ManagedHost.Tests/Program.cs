@@ -53,4 +53,28 @@ try
 }
 finally { Environment.SetEnvironmentVariable("AEGIS_P0_HTTPS_URL", old); }
 Console.WriteLine("PASS: HTTPS fixture destination validation");
+// Synthetic event parsing only; no CEF or renderer is launched.
+var probeType = typeof(ManagedEntry).Assembly.GetType("P0ManagedHost.RendererTraceProbe")
+    ?? throw new Exception("TRACE_PROBE_MISSING");
+var eventMethod = probeType.GetMethod("OnDevToolsEvent") ?? throw new Exception("TRACE_EVENT_MISSING");
+var framesField = probeType.GetField("frames", BindingFlags.Instance | BindingFlags.NonPublic)
+    ?? throw new Exception("TRACE_FRAMES_MISSING");
+var lossField = probeType.GetField("dataLoss", BindingFlags.Instance | BindingFlags.NonPublic)
+    ?? throw new Exception("TRACE_LOSS_MISSING");
+(int count, bool loss) ParseTrace(string payload)
+{
+    var probe = Activator.CreateInstance(probeType, true) ?? throw new Exception("TRACE_PROBE_CREATE_FAILED");
+    using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(payload));
+    eventMethod.Invoke(probe, new object?[] { null, "Tracing.dataCollected", stream });
+    return (((System.Collections.ICollection)framesField.GetValue(probe)!).Count, (bool)lossField.GetValue(probe)!);
+}
+string item = "{\"name\":\"TracingStartedInBrowser\",\"pid\":" + Environment.ProcessId +
+    ",\"args\":{\"data\":{\"frames\":[{\"frame\":\"synthetic\",\"processId\":123}]}}}";
+if (ParseTrace("{\"value\":[" + item + "]}") != (1, false)) throw new Exception("TRACE_FRAME_NOT_PARSED");
+if (ParseTrace("{\"value\":[" + item + "," + item + "]}").count != 2) throw new Exception("TRACE_DUPLICATE_LOST");
+string other = item.Replace("\"pid\":" + Environment.ProcessId, "\"pid\":0", StringComparison.Ordinal);
+if (ParseTrace("{\"value\":[" + other + "]}").count != 0) throw new Exception("TRACE_WRONG_BROWSER_ACCEPTED");
+if (!ParseTrace("{").loss) throw new Exception("TRACE_MALFORMED_ACCEPTED");
+if (!ParseTrace(new string(' ', 1024 * 1024 + 1)).loss) throw new Exception("TRACE_OVERSIZED_ACCEPTED");
+Console.WriteLine("PASS: 5 synthetic trace parsing checks; no renderer role or sandbox accepted");
 Console.WriteLine("PASS: 4 synthetic managed contracts; CEF and sandbox NOT_TESTED");
