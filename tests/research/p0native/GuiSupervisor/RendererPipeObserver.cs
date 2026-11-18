@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO.Pipes;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -37,6 +38,14 @@ internal sealed class RendererPipeObserver : IDisposable
         out IntPtr descriptor, out uint size);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(SafeAccessTokenHandle token, int infoClass,
+        IntPtr buffer, int length, out int bytesNeeded);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool IsValidSid(IntPtr sid);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern uint GetLengthSid(IntPtr sid);
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafePipeHandle CreateNamedPipeW(string name, uint openMode, uint pipeMode,
         uint maxInstances, uint outBuffer, uint inBuffer, uint defaultTimeout, ref SecurityAttributes security);
@@ -87,23 +96,66 @@ internal sealed class RendererPipeObserver : IDisposable
     private RendererPipeObserver(string fullName, NamedPipeServerStream pipe, string expectedUserSid)
     { FullName = fullName; this.pipe = pipe; this.expectedUserSid = expectedUserSid; }
 
+    // USER_LOCKDOWN leaves the logon SID enabled while marking the user SID
+    // and ordinary group SIDs deny-only. Find this exact current logon group
+    // from the OS token; never grant the pipe to Everyone or guess a SID.
+    private static string CurrentLogonSid(WindowsIdentity identity)
+    {
+        const int tokenGroups = 2, insufficientBuffer = 122;
+        const uint logonIdAttributes = 0xC0000000;
+        var token = identity.AccessToken;
+        _ = GetTokenInformation(token, tokenGroups, IntPtr.Zero, 0, out int bytes);
+        if (Marshal.GetLastWin32Error() != insufficientBuffer || bytes < 8 || bytes > 65536)
+            throw new InvalidOperationException("LOGON_GROUP_QUERY_UNAVAILABLE");
+        IntPtr buffer = Marshal.AllocHGlobal(bytes);
+        try
+        {
+            if (!GetTokenInformation(token, tokenGroups, buffer, bytes, out int returned) ||
+                returned < 8 || returned > bytes)
+                throw new InvalidOperationException("LOGON_GROUP_READ_UNAVAILABLE");
+            uint count = unchecked((uint)Marshal.ReadInt32(buffer));
+            int first = IntPtr.Size == 8 ? 8 : 4;
+            int stride = IntPtr.Size == 8 ? 16 : 8;
+            if (count == 0 || count > 256 || first + (long)count * stride > returned)
+                throw new InvalidOperationException("LOGON_GROUP_BUFFER_INVALID");
+            string? found = null;
+            for (int i = 0; i < count; i++)
+            {
+                int offset = first + i * stride;
+                uint attributes = unchecked((uint)Marshal.ReadInt32(buffer, offset + IntPtr.Size));
+                if ((attributes & logonIdAttributes) != logonIdAttributes) continue;
+                IntPtr sidPointer = Marshal.ReadIntPtr(buffer, offset);
+                long ptr = sidPointer.ToInt64(), begin = buffer.ToInt64(), end = begin + returned;
+                if (ptr < begin || ptr > end - 8 || !IsValidSid(sidPointer) ||
+                    GetLengthSid(sidPointer) > end - ptr)
+                    throw new InvalidOperationException("LOGON_GROUP_SID_INVALID");
+                string value = new SecurityIdentifier(sidPointer).Value;
+                if (!value.StartsWith("S-1-5-5-", StringComparison.Ordinal) || found != null)
+                    throw new InvalidOperationException("LOGON_GROUP_NOT_UNIQUE");
+                found = value;
+            }
+            return found ?? throw new InvalidOperationException("LOGON_GROUP_NOT_PRESENT");
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
     internal static RendererPipeObserver Create()
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-        string? sid = WindowsIdentity.GetCurrent().User?.Value;
+        using var identity = WindowsIdentity.GetCurrent();
+        string? sid = identity.User?.Value;
         if (string.IsNullOrWhiteSpace(sid)) throw new InvalidOperationException("CURRENT_USER_SID_UNAVAILABLE");
+        string logonSid = CurrentLogonSid(identity);
         string name = Prefix + Guid.NewGuid().ToString("N");
-        // Research-only, per-run observation pipe. The pinned renderer lockdown
-        // token can contain NULL_SID (S-1-0-0) as its sole restricting SID.
-        // AccessCheck requires both the normal-user SID and the restricting
-        // SID to be allowed. RC/AC alone therefore produced DACL_DENIED for
-        // that observed candidate. Grant only pipe read/write rights to that
-        // restricting SID; this does NOT relax the Chromium sandbox or any
-        // production object ACL. The random endpoint name is not authorization;
-        // independent kernel client PID, same-user impersonation, and retained
-        // process handle must still be validated before accepting evidence.
-        // The untrusted mandatory label intentionally permits client writes.
-        string sddl = "D:P(A;;GA;;;" + sid +
+        // Only this disposable research pipe receives logon-session and NULL
+        // restricting SID read/write ACEs. The Chromium USER_LOCKDOWN token
+        // denies user/group SIDs for allow decisions but preserves its logon
+        // group: a normal-pass logon ACE AND restricting-pass NULL ACE are
+        // both necessary. No Everyone ACE, sandbox bypass or production ACL
+        // change is introduced. The random endpoint is never authentication;
+        // independently validate the kernel client PID and held process token.
+        // An untrusted mandatory label permits lower-integrity writes.
+        string sddl = "D:P(A;;GA;;;" + sid + ")(A;;GRGW;;;" + logonSid +
             ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)(A;;GRGW;;;S-1-0-0)S:(ML;;NW;;;S-1-16-0)";
         if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out var descriptor, out _))
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
