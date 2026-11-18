@@ -93,12 +93,18 @@ internal sealed class RendererPipeObserver : IDisposable
         string? sid = WindowsIdentity.GetCurrent().User?.Value;
         if (string.IsNullOrWhiteSpace(sid)) throw new InvalidOperationException("CURRENT_USER_SID_UNAVAILABLE");
         string name = Prefix + Guid.NewGuid().ToString("N");
-        // Restricted and AppContainer tokens require their own access-check
-        // ACEs; an untrusted mandatory label permits a sandboxed client to
-        // write. Same-user identity is rechecked by pipe impersonation before
-        // any process is opened. The random name is not an authorization credential. Hostile
-        // same-user or privileged local code is outside this test trust model.
-        string sddl = "D:P(A;;GA;;;" + sid + ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)S:(ML;;NW;;;S-1-16-0)";
+        // Research-only, per-run observation pipe. The pinned renderer lockdown
+        // token can contain NULL_SID (S-1-0-0) as its sole restricting SID.
+        // AccessCheck requires both the normal-user SID and the restricting
+        // SID to be allowed. RC/AC alone therefore produced DACL_DENIED for
+        // that observed candidate. Grant only pipe read/write rights to that
+        // restricting SID; this does NOT relax the Chromium sandbox or any
+        // production object ACL. The random endpoint name is not authorization;
+        // independent kernel client PID, same-user impersonation, and retained
+        // process handle must still be validated before accepting evidence.
+        // The untrusted mandatory label intentionally permits client writes.
+        string sddl = "D:P(A;;GA;;;" + sid +
+            ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)(A;;GRGW;;;S-1-0-0)S:(ML;;NW;;;S-1-16-0)";
         if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out var descriptor, out _))
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         try
