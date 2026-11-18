@@ -192,7 +192,8 @@ $decoded = @($output | ForEach-Object {
     try { $_.ToString() | ConvertFrom-Json -ErrorAction Stop }
     catch { throw 'Supervisor returned malformed or unexpected output.' }
 })
-if (@($decoded | Where-Object { $_.kind -notin @('PROCESS_IDENTITY','PROCESS_RESULT','RENDERER_OBSERVATION','PROCESS_DISCOVERY','SENTINEL_CONTROL') }).Count -ne 0) { throw 'Supervisor returned an unknown record kind.' }
+. (Join-Path $PSScriptRoot 'trace-result-lib.ps1')
+$traceCorrelation = Get-P0TraceCorrelation -Decoded $decoded
 $records = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_RESULT' })
 $identities = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_IDENTITY' })
 $renderers = @($decoded | Where-Object { $_.kind -ceq 'RENDERER_OBSERVATION' })
@@ -208,6 +209,7 @@ if ($observedTree.SubprocessCleanup -cne 'INCONCLUSIVE' -or ($null -ne $observed
     ($observedTree.report.Discovery -notin @('PARTIAL','INCONCLUSIVE') -or $observedTree.report.Accounting -notin @('PARTIAL','INCONCLUSIVE') -or
      $observedTree.report.Cleanup -cne 'INCONCLUSIVE'))) { throw 'Unexpected process-discovery classification.' }
 Write-Output ('PROCESS_DISCOVERY_JSON: ' + ($observedTree | ConvertTo-Json -Depth 8 -Compress))
+Write-Output ('TRACE_PROCESS_CORRELATION_JSON: ' + ($traceCorrelation | ConvertTo-Json -Depth 3 -Compress))
 $record = $records[0]
 if ($record.OverallQualification -cne 'INCONCLUSIVE' -or $record.result.SubprocessCleanup -cne 'INCONCLUSIVE' -or
     $record.result.SandboxEnforcement -cne 'INCONCLUSIVE' -or $record.result.ProcessExit -notin @('NORMAL','NONZERO','TIMEOUT','UNAVAILABLE')) { throw 'Unexpected supervisor classification.' }
@@ -265,7 +267,7 @@ $missing = @($markers | Where-Object { -not $record.result.Stdout.Text.Contains(
 $evidence = [ordered]@{ source_sha = $env:GITHUB_SHA; process_exit = $record.result.ProcessExit;
     native_exit_code = $record.result.NativeExitCode; output_complete = $record.result.OutputComplete;
     missing_markers = $missing; renderer_identity = 'INCONCLUSIVE'; sandbox_enforcement = 'INCONCLUSIVE';
-    subprocess_cleanup = 'INCONCLUSIVE'; https_fixture_exit = $fixtureExit;
+    subprocess_cleanup = 'INCONCLUSIVE'; trace_correlation = $traceCorrelation; https_fixture_exit = $fixtureExit;
     positive_control = $sentinel.status; positive_control_same_object = $sentinel.same_object;
     https_navigation_observed = ($fixtureExit -eq 0 -and $fixtureLog.Contains('P0_HTTPS_RESPONSE_SERVED') -and
         $record.result.Stdout.Text.Contains('MANAGED_EVENT: HTTPS_NAVIGATION_COMPLETED')) }

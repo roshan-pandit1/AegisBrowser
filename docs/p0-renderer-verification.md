@@ -207,3 +207,11 @@ to signal and confirms that the tracker rejects it before submitting the
 stale PID. Fifty bounded local synthetic runs passed after this change; that
 does not establish the exact cause of the hosted failure or prove that the
 failure cannot recur. Native CEF and final security gates require a new run.
+
+[Run 44307646689](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44307646689)
+passed the corrected synthetic controls but failed while decoding the native
+fixture's output: the strict record allowlist did not include the new trace
+correlation record. The decoder now requires exactly one record with bounded,
+explicit fields and still rejects unknown kinds and any attempt to promote
+identity or enforcement. The native correlation result from that failed run
+was not reported and must not be inferred.
