@@ -1,12 +1,27 @@
 --- a/CefSharp.Core.Runtime/Internals/CefSharpApp.h
 +++ b/CefSharp.Core.Runtime/Internals/CefSharpApp.h
-@@ -152,6 +152,9 @@
+@@ -152,6 +152,24 @@
  
              virtual void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> commandLine) override
              {
 +                // Fixed research-only intent marker; it is not sandbox evidence.
 +                // The native child still rejects missing sandbox info and unsafe switches.
 +                commandLine->AppendSwitch("aegis-p309f-child-opt-in");
++                // Renderer-only, runner-owned observation endpoint. Not sandbox proof.
++                if (commandLine->GetSwitchValue("type").ToString() == "renderer")
++                {
++                    char pipeName[96] = {};
++                    const DWORD length = ::GetEnvironmentVariableA("AEGIS_P309I_PIPE", pipeName, sizeof(pipeName));
++                    constexpr char prefix[] = "\\\\.\\pipe\\aegis-p309i-";
++                    bool valid = length == sizeof(prefix) - 1 + 32;
++                    for (DWORD i = 0; valid && i < sizeof(prefix) - 1; ++i)
++                        valid = pipeName[i] == prefix[i];
++                    for (DWORD i = sizeof(prefix) - 1; valid && i < length; ++i)
++                        valid = (pipeName[i] >= '0' && pipeName[i] <= '9') ||
++                                (pipeName[i] >= 'a' && pipeName[i] <= 'f');
++                    if (valid)
++                        commandLine->AppendSwitchWithValue("aegis-p309i-pipe", pipeName);
++                }
  #ifndef NETCOREAPP
                  if (CefSharpSettings::WcfEnabled)
                  {
