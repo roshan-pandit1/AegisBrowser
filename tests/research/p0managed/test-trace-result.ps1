@@ -14,6 +14,13 @@ if ((Get-P0TraceCorrelation -Decoded @($other,$observed)).Status -cne 'OBSERVED'
 $checks++; Write-Output 'PASS: bounded observed trace record accepted without identity promotion'
 if ((Get-P0TraceCorrelation -Decoded @($inconclusive)).Status -cne 'INCONCLUSIVE') { throw 'Inconclusive record not accepted.' }
 $checks++; Write-Output 'PASS: inconclusive trace record accepted'
+foreach ($numericType in @([int], [long])) {
+    $typed = Parse ($observed | ConvertTo-Json -Depth 4 -Compress)
+    $typed.traceEvidence.Barrier = [Convert]::ChangeType(3, $numericType)
+    $typed.traceEvidence.CandidatePid = [Convert]::ChangeType(123, $numericType)
+    if ((Get-P0TraceCorrelation -Decoded @($typed)).Status -cne 'OBSERVED') { throw "Integral type $numericType rejected." }
+    $checks++; Write-Output "PASS: integral $numericType trace values accepted"
+}
 Assert-Rejected { Get-P0TraceCorrelation -Decoded @($other) } 'missing trace record rejected'
 Assert-Rejected { Get-P0TraceCorrelation -Decoded @($observed,$inconclusive) } 'duplicate trace records rejected'
 Assert-Rejected { Get-P0TraceCorrelation -Decoded @($observed,[pscustomobject]@{kind='OTHER'}) } 'unknown record kind rejected'
@@ -29,6 +36,12 @@ $fake = Parse ($observed | ConvertTo-Json -Depth 4 -Compress); $fake.traceEviden
 Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'invalid creation time rejected'
 $fake = Parse ($observed | ConvertTo-Json -Depth 4 -Compress); $fake.traceEvidence.Barrier = 602
 Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'out-of-range barrier rejected'
+foreach ($badValue in @([double]3.0, [decimal]3, '3', $true, $null)) {
+    $fake = Parse ($observed | ConvertTo-Json -Depth 4 -Compress); $fake.traceEvidence.Barrier = $badValue
+    Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'non-integral or null barrier rejected'
+}
+$fake = Parse ($observed | ConvertTo-Json -Depth 4 -Compress); $fake.traceEvidence.CandidatePid = [double]123.0
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'floating-point PID rejected'
 $fake = Parse ($inconclusive | ConvertTo-Json -Depth 4 -Compress); $fake.traceEvidence.CandidatePid = 123
 Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'inconclusive identity rejected'
 $fake = Parse ($observed | ConvertTo-Json -Depth 4 -Compress); $fake.traceEvidence | Add-Member -NotePropertyName Unexpected -NotePropertyValue 1

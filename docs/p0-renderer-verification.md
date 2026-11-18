@@ -215,3 +215,11 @@ correlation record. The decoder now requires exactly one record with bounded,
 explicit fields and still rejects unknown kinds and any attempt to promote
 identity or enforcement. The native correlation result from that failed run
 was not reported and must not be inferred.
+
+[Run 44309510925](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44309510925)
+failed the decoder's synthetic positive control before launching CEF. The
+fixture assumed JSON integers deserialize as `Int32`; the hosted PowerShell 7
+deserializes them as `Int64`. The validator now accepts either integral type
+within the existing bounds and rejects floats, decimals, strings and forged
+security statuses. The corrected synthetic tests passed in local PowerShell
+7.4.22; a new Windows native run is required.

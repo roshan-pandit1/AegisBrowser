@@ -27,7 +27,7 @@ function Get-P0TraceCorrelation {
     if ($trace.Status -isnot [string] -or $trace.Status -cnotin @('OBSERVED','INCONCLUSIVE') -or
         $trace.Reason -isnot [string] -or $trace.Reason -cnotmatch '^[A-Za-z0-9_]{1,100}$' -or
         $trace.RendererIdentity -cne 'INCONCLUSIVE' -or $trace.SandboxEnforcement -cne 'INCONCLUSIVE' -or
-        $trace.Barrier -isnot [int] -or $trace.Barrier -lt 0 -or $trace.Barrier -gt 601) {
+        ($trace.Barrier -isnot [int] -and $trace.Barrier -isnot [long]) -or $trace.Barrier -lt 0 -or $trace.Barrier -gt 601) {
         throw 'Unexpected trace-correlation classification.'
     }
     if ($trace.Status -ceq 'OBSERVED') {
