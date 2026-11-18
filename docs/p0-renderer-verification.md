@@ -41,6 +41,13 @@ complete subprocess cleanup; a successful managed browser lifecycle alone
 cannot satisfy it. Synthetic positive and negative controls are identified as
 such and are not renderer enforcement evidence.
 
+The [first verification-branch run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44288296225)
+failed before CEF started: the test-owned zero-exit helper completed with exit
+code zero before the supervisor retained a process identity. The synthetic
+helper now waits for a named event released by the identity callback. The
+supervisor still requires a retained identity and retains its original timeout;
+this change does not affect Chromium process classification.
+
 No runtime migration, browser-engine upgrade, signing, packaging or production
 integration is authorized by this experiment's success alone. Those release
 requirements remain unverified and require separate evidence.

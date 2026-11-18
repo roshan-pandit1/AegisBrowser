@@ -165,6 +165,15 @@ internal static class Program
         switch (mode)
         {
             case "zero": Console.Write("zero"); return 0;
+            case "zero-held":
+                if (!OperatingSystem.IsWindows() || args.Length != 1 || !args[0].StartsWith(@"Local\aegis-p0-zero-", StringComparison.Ordinal) ||
+                    !Guid.TryParseExact(args[0][@"Local\aegis-p0-zero-".Length..], "N", out _)) return 9;
+                using (var release = EventWaitHandle.OpenExisting(args[0]))
+                {
+                    if (!await Task.Run(() => release.WaitOne(TimeSpan.FromSeconds(5)))) return 20;
+                    Console.Write("zero");
+                    return 0;
+                }
             case "nonzero": Console.Error.Write("nonzero"); return 7;
             case "delay": await Task.Delay(250); Console.Write("late"); return 0;
             case "timeout": await Task.Delay(2000); return 0;
@@ -378,7 +387,13 @@ internal static class SelfTest
         try
         {
             if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("SELF_TEST: NOT_RUN (Windows required)"); return 2; }
-            var zero = await Run("zero");
+            string zeroEventName = @"Local\aegis-p0-zero-" + Guid.NewGuid().ToString("N");
+            using var zeroRelease = new EventWaitHandle(false, EventResetMode.AutoReset, zeroEventName, out bool zeroCreated);
+            if (!zeroCreated) throw new InvalidOperationException("ZERO_EVENT_ALREADY_EXISTS");
+            var zeroHelper = HelperStartInfo("zero-held", zeroEventName);
+            var zero = await ProcessRunner.RunAsync(zeroHelper.FileName, Hash(zeroHelper.FileName),
+                zeroHelper.ArgumentList.ToArray(), AppContext.BaseDirectory, 5000, true,
+                (_, _) => zeroRelease.Set());
             if (zero.ProcessExit != "NORMAL" || zero.NativeExitCode != 0)
                 Console.Error.WriteLine("SELF_TEST_ZERO_RESULT: " + JsonSerializer.Serialize(zero));
             Check(zero.ProcessExit == "NORMAL" && zero.NativeExitCode == 0, "native zero exit observed");
