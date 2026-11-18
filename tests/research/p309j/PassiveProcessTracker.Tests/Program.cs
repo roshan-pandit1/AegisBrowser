@@ -53,6 +53,28 @@ try
     string image = Environment.ProcessPath ?? throw new InvalidOperationException("missing executable");
     if (!Native.GetProcessTimes(self.SafeHandle, out long created, out _, out _, out _))
         throw new InvalidOperationException("creation unavailable");
+    Check(PassiveProcessTracker.ScanBudgetForDeadline(1) == 2 &&
+        PassiveProcessTracker.ScanBudgetForDeadline(200) == 2 &&
+        PassiveProcessTracker.ScanBudgetForDeadline(201) == 3,
+        "deadline budget includes the first scan and rounds intervals up");
+    Check(PassiveProcessTracker.ScanBudgetForDeadline(90000) == 451 &&
+        PassiveProcessTracker.ScanBudgetForDeadline(120000) == PassiveProcessTracker.MaximumScanBudget,
+        "90-second and maximum supervisor deadlines have bounded coverage budgets");
+    bool invalidDeadline = false;
+    try { PassiveProcessTracker.ScanBudgetForDeadline(0); } catch (ArgumentOutOfRangeException) { invalidDeadline = true; }
+    Check(invalidDeadline, "zero deadline rejected");
+    invalidDeadline = false;
+    try { PassiveProcessTracker.ScanBudgetForDeadline(120001); } catch (ArgumentOutOfRangeException) { invalidDeadline = true; }
+    Check(invalidDeadline, "deadline beyond supervisor maximum rejected");
+    using (var limited = new PassiveProcessTracker(self.SafeHandle, (uint)self.Id, created, image, 1))
+    {
+        Check(limited.Scan(), "single-budget first actual process snapshot completed");
+        Check(!limited.Scan(), "scan budget is enforced without a delay");
+        var limitedReport = limited.Finish();
+        Check(limitedReport.ScanBudget == 1 && limitedReport.Snapshots == 1 && limitedReport.LimitReached &&
+            limitedReport.LastError == "SCAN_LIMIT" && limitedReport.Accounting == "PARTIAL" && limitedReport.Cleanup == "INCONCLUSIVE",
+            "exhausted scan budget is reported and cannot imply complete cleanup");
+    }
     bool rejected = false;
     try { using var bad = new PassiveProcessTracker(self.SafeHandle, (uint)self.Id, created + 1, image); }
     catch (ArgumentException) { rejected = true; }
@@ -106,9 +128,16 @@ try
     var sessionReport = await session.FinishAsync();
     Check(sessionReport.Snapshots > 0 && sessionReport.Accounting == "PARTIAL" && sessionReport.Cleanup == "INCONCLUSIVE",
         "asynchronous session reports bounded passive coverage");
+    Check(sessionReport.ScanBudget == 128, "legacy callers retain the original default scan budget");
     rejected = false;
     try { await session.FinishAsync(); } catch (InvalidOperationException) { rejected = true; }
     Check(rejected, "session completion is single-use");
+
+    var deadlineSession = PassiveTrackingSession.Start(self.SafeHandle, (uint)self.Id, created, image, 90000);
+    Check(await deadlineSession.FirstScanAsync().WaitAsync(TimeSpan.FromSeconds(5)), "deadline session performs an actual first scan");
+    var deadlineReport = await deadlineSession.FinishAsync();
+    Check(deadlineReport.ScanBudget == 451 && deadlineReport.Accounting == "PARTIAL" && deadlineReport.Cleanup == "INCONCLUSIVE",
+        "session preserves the requested deadline budget without claiming complete accounting");
 
     // The supervisor may dispose its original parent handle after the test
     // parent exits. The session's duplicate must survive through FinishAsync.

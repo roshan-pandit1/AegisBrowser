@@ -15,13 +15,19 @@ public sealed class PassiveProcessTracker : IDisposable
         uint ParentPid, int Depth, string Role, string Exit, uint? ExitCode);
     public sealed record Report(string Discovery, string Accounting, string Cleanup,
         int Snapshots, int CandidatesRejected, bool LimitReached,
-        string LastError, IReadOnlyList<ProcessRecord> Processes);
+        string LastError, IReadOnlyList<ProcessRecord> Processes)
+    {
+        public int ScanBudget { get; init; }
+    }
 
     private const uint QueryLimited = 0x1000, Synchronize = 0x100000;
     private const uint WaitObject0 = 0, WaitTimeout = 258;
     private const int MaxEntries = 32768;
     private const int MaxProcesses = 32;
-    private const int MaxScans = 128;
+    public const int ScanIntervalMilliseconds = 200;
+    public const int MaximumObservationMilliseconds = 120000;
+    public const int MaximumScanBudget = MaximumObservationMilliseconds / ScanIntervalMilliseconds + 1;
+    private const int DefaultScanBudget = 128;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct ProcessEntry
@@ -69,6 +75,7 @@ public sealed class PassiveProcessTracker : IDisposable
     private readonly long rootCreated;
     private readonly string expectedImage;
     private readonly string expectedName;
+    private readonly int scanBudget;
     private readonly Dictionary<uint, Held> held = new();
     private int scans, successfulScans, rejected;
     private bool limit, disposed;
@@ -78,19 +85,32 @@ public sealed class PassiveProcessTracker : IDisposable
     // call Scan concurrently or after disposing that handle. The host may call
     // Finish after root exit, but may not infer that all descendants exited.
     public PassiveProcessTracker(SafeProcessHandle root, uint rootPid,
-        long rootCreated, string expectedImage)
+        long rootCreated, string expectedImage, int maximumScans = DefaultScanBudget)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (maximumScans < 1 || maximumScans > MaximumScanBudget)
+            throw new ArgumentOutOfRangeException(nameof(maximumScans));
         if (root == null || root.IsInvalid || root.IsClosed || rootPid == 0 || rootCreated <= 0 ||
             string.IsNullOrWhiteSpace(expectedImage) || !Path.IsPathFullyQualified(expectedImage))
             throw new ArgumentException("ROOT_IDENTITY_INVALID");
         this.root = root;
         this.rootPid = rootPid;
         this.rootCreated = rootCreated;
+        scanBudget = maximumScans;
         this.expectedImage = Path.GetFullPath(expectedImage);
         expectedName = Path.GetFileName(this.expectedImage);
         if (!Matches(root, rootPid, rootCreated, this.expectedImage))
             throw new ArgumentException("ROOT_IDENTITY_MISMATCH_OR_NOT_LIVE");
+    }
+
+    // One initial scan plus enough 200 ms intervals to cover the validated
+    // process observation deadline. This bounds work; snapshots still cannot
+    // prove complete process accounting or cleanup.
+    public static int ScanBudgetForDeadline(int observationMilliseconds)
+    {
+        if (observationMilliseconds < 1 || observationMilliseconds > MaximumObservationMilliseconds)
+            throw new ArgumentOutOfRangeException(nameof(observationMilliseconds));
+        return (observationMilliseconds + ScanIntervalMilliseconds - 1) / ScanIntervalMilliseconds + 1;
     }
 
     // One point-in-time snapshot; no loop, no network, no process termination.
@@ -99,7 +119,7 @@ public sealed class PassiveProcessTracker : IDisposable
     public bool Scan()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        if (scans >= MaxScans) { limit = true; lastError = "SCAN_LIMIT"; return false; }
+        if (scans >= scanBudget) { limit = true; lastError = "SCAN_LIMIT"; return false; }
         if (!Matches(root, rootPid, rootCreated, expectedImage))
         { lastError = "ROOT_NOT_LIVE_OR_MISMATCH"; return false; }
         scans++;
@@ -174,9 +194,9 @@ public sealed class PassiveProcessTracker : IDisposable
             records.Add(new(process.Pid, process.Created, process.ParentPid, process.Depth, "UNKNOWN", status, code));
         }
         // Even every retained child exiting cannot cover undetected lifetimes.
-        return new(successfulScans > 0 ? "PARTIAL" : "INCONCLUSIVE",
+        return new Report(successfulScans > 0 ? "PARTIAL" : "INCONCLUSIVE",
             successfulScans > 0 ? "PARTIAL" : "INCONCLUSIVE", "INCONCLUSIVE", scans,
-            rejected, limit, lastError, records);
+            rejected, limit, lastError, records) { ScanBudget = scanBudget };
     }
 
     private static bool HasParent(SafeProcessHandle child, uint pid, uint parentPid)

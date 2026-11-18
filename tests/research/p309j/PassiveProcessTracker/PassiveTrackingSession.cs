@@ -30,6 +30,15 @@ public sealed class PassiveTrackingSession
 
     public static PassiveTrackingSession Start(SafeProcessHandle root, uint rootPid,
         long rootCreationFileTimeUtc, string expectedImage)
+        => StartWithBudget(root, rootPid, rootCreationFileTimeUtc, expectedImage, 128);
+
+    public static PassiveTrackingSession Start(SafeProcessHandle root, uint rootPid,
+        long rootCreationFileTimeUtc, string expectedImage, int observationMilliseconds)
+        => StartWithBudget(root, rootPid, rootCreationFileTimeUtc, expectedImage,
+            PassiveProcessTracker.ScanBudgetForDeadline(observationMilliseconds));
+
+    private static PassiveTrackingSession StartWithBudget(SafeProcessHandle root, uint rootPid,
+        long rootCreationFileTimeUtc, string expectedImage, int scanBudget)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         if (root == null || root.IsClosed || root.IsInvalid) throw new ArgumentException("ROOT_HANDLE_INVALID");
@@ -39,7 +48,7 @@ public sealed class PassiveTrackingSession
         try
         {
             return new PassiveTrackingSession(copy, new PassiveProcessTracker(copy, rootPid,
-                rootCreationFileTimeUtc, expectedImage));
+                rootCreationFileTimeUtc, expectedImage, scanBudget));
         }
         catch { copy.Dispose(); throw; }
     }
@@ -53,7 +62,7 @@ public sealed class PassiveTrackingSession
                 bool scanned = tracker.Scan();
                 firstScan.TrySetResult(scanned);
                 if (!scanned) return;
-                await Task.Delay(200, stop.Token).ConfigureAwait(false);
+                await Task.Delay(PassiveProcessTracker.ScanIntervalMilliseconds, stop.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }

@@ -132,3 +132,40 @@ checked against retained OS process handles. A successful pipe connection
 **alone** is not an independently corroborated Chromium renderer role or a
 sandbox enforcement verdict. Evidence must retain the actual run commit and
 original errors. No production release is authorized by this adjustment.
+
+## Brokered observation follow-up
+
+The PR #79 head `e0dd75742c5fa760f889fdafce80a7ff9182c674` was exercised in
+[Windows x64 run 44298542524](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44298542524).
+Its managed browser loaded the controlled HTTPS page, evaluated JavaScript,
+and shut down normally. The browser-owned broker relayed a claimed renderer
+PID; a retained child handle showed a restricted token and Win32k mitigation.
+The final security gate **failed**: the renderer role, exact-object denial and
+complete subprocess cleanup remain inconclusive. The non-CEF reader opened
+the retained sentinel in that run; that does not authenticate the separate
+renderer denial claim.
+
+Two test-harness defects are corrected in this follow-up. Previously a stdout
+claim and the broker competed for one observation slot, so the untrusted
+stdout claim could prevent the broker observation. Each path now gets at most
+one retained candidate; conflicting process identities remain inconclusive,
+and both handles are closed. The passive tracker previously stopped after 128
+snapshots (about 25.6 seconds) even when the supervisor allowed 90 seconds.
+Its scan budget now follows the validated supervisor deadline, capped at 601
+snapshots. Sampling can still miss short-lived processes, and it never proves
+complete descendant accounting or cleanup.
+
+Local Windows ARM64/x64-emulation tests passed 45 synthetic pipe-observer
+checks and 38 passive-process checks. These are not Chromium renderer tests.
+The local sentinel self-test failed with
+`POSITIVE_CONTROL_POSITIVE_TOKEN_NOT_ESTABLISHED`; no result from that run is
+treated as an unrestricted positive control or sandbox evidence. The hosted
+Windows x64 test must be assessed separately.
+
+The pinned CEF internal frame implementation exposes its render-frame host,
+but the public CEF frame API does not expose the corresponding OS process
+handle. Chromium's browser-side tracing emits a frame/process mapping; its
+frame-token mapping, event origin, liveness, race behavior and availability in
+this fixture are unverified. Neither observation is yet an authoritative,
+live renderer-to-handle correlation. Renderer identity, real enforcement,
+full CefSharp compatibility and complete cleanup remain release blockers.

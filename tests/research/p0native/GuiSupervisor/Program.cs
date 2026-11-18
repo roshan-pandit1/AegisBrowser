@@ -73,7 +73,7 @@ internal static class Program
                 (id, handle) => {
                     Console.WriteLine(JsonSerializer.Serialize(new { kind = "PROCESS_IDENTITY", identity = id }));
                     observer?.Start(id, handle);
-                    try { tracking = AegisBrowser.P309J.PassiveTrackingSession.Start(handle, checked((uint)id.Pid), id.CreationFileTimeUtc, id.ImagePath); }
+                    try { tracking = AegisBrowser.P309J.PassiveTrackingSession.Start(handle, checked((uint)id.Pid), id.CreationFileTimeUtc, id.ImagePath, timeout); }
                     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
                     { trackingFailure = "TRACKING_START_FAILED_" + ex.GetType().Name; }
                 }, observer?.FullName, line => observer?.AcceptLine(line));

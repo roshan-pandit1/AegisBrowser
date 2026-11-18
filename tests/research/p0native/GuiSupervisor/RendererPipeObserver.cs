@@ -82,9 +82,12 @@ internal sealed class RendererPipeObserver : IDisposable
     private readonly string expectedUserSid;
     private readonly CancellationTokenSource stop = new();
     private readonly object candidateLock = new();
-    private SafeProcessHandle? acceptedCandidate;
+    // Each observation path gets at most one retained handle. A stdout claim
+    // must not consume the sole slot before the kernel-identified pipe path
+    // runs; neither path upgrades a claimed role to a verified renderer.
+    private SafeProcessHandle? pipeCandidate, claimCandidate;
     private bool disposed;
-    private bool attemptedCandidate, sawClaim, invalidClaim;
+    private bool attemptedPipe, attemptedClaim, sawClaim, invalidClaim;
     private uint claimPid;
     private readonly HashSet<uint> additionalClaims = new();
     private ProcessRunner.Identity? sourceParent;
@@ -303,6 +306,9 @@ internal sealed class RendererPipeObserver : IDisposable
     {
         try
         {
+            bool isClaim = channel == "CLIENT_PID_CLAIM";
+            if (!isClaim && channel is not ("CLIENT_CLAIM_ONLY" or "CEF_BROWSER_BROKER_ROLE_CLAIM"))
+                return Failure("OBSERVATION_CHANNEL_INVALID");
             // Snapshot prefilter avoids opening an arbitrary claimed PID. It is
             // still subject to PID reuse between the snapshot and OpenProcess;
             // even matching held-handle lineage cannot authenticate a role or
@@ -310,8 +316,9 @@ internal sealed class RendererPipeObserver : IDisposable
             if (!SnapshotShowsParent(pid, checked((uint)parent.Pid))) return Failure("PARENT_SNAPSHOT_MISMATCH");
             lock (candidateLock)
             {
-                if (disposed || attemptedCandidate) return Failure("CANDIDATE_ALREADY_ATTEMPTED");
-                attemptedCandidate = true;
+                if (disposed || (isClaim ? attemptedClaim : attemptedPipe)) return Failure("CANDIDATE_ALREADY_ATTEMPTED");
+                if (isClaim) attemptedClaim = true;
+                else attemptedPipe = true;
             }
             var candidate = OpenProcess(QueryInformation | Synchronize, false, pid);
             if (candidate.IsInvalid)
@@ -338,7 +345,8 @@ internal sealed class RendererPipeObserver : IDisposable
                 lock (candidateLock)
                 {
                     if (disposed) return Failure("OBSERVER_DISPOSED");
-                    acceptedCandidate = candidate;
+                    if (isClaim) claimCandidate = candidate;
+                    else pipeCandidate = candidate;
                     retained = true;
                 }
                 return new Evidence("OBSERVED", "LIVE_DIRECT_CHILD_TOKEN_AND_CLAIM", pid, created,
@@ -362,28 +370,37 @@ internal sealed class RendererPipeObserver : IDisposable
             catch (ObjectDisposedException) { /* Dispose already canceled the observer. */ }
         }
         var evidence = await task.ConfigureAwait(false);
+        bool usePipe = evidence.Status == "OBSERVED";
         Task<Evidence>? fallback;
         lock (candidateLock) fallback = claimTask;
         if (fallback != null)
         {
             var claim = await fallback.ConfigureAwait(false);
-            if (evidence.Status != "OBSERVED") evidence = claim;
+            if (usePipe && claim.Status == "OBSERVED" &&
+                (claim.CandidatePid != evidence.CandidatePid ||
+                 claim.CandidateCreationFileTimeUtc != evidence.CandidateCreationFileTimeUtc))
+                evidence = Failure("CONFLICTING_CANDIDATE_IDENTITIES");
+            if (!usePipe) evidence = claim;
         }
         lock (candidateLock)
         {
             if (invalidClaim) evidence = Failure("PID_CLAIM_MALFORMED_OR_DUPLICATE");
             evidence = evidence with { AdditionalUnverifiedClaims = additionalClaims.Count };
-            if (acceptedCandidate == null || acceptedCandidate.IsClosed) return evidence;
             try
             {
-                uint wait = WaitForSingleObject(acceptedCandidate, 0);
+                // An invalid stdout claim invalidates the combined result; do
+                // not attach a candidate exit code to a rejected observation.
+                SafeProcessHandle? selected = evidence.Status == "OBSERVED" ?
+                    (usePipe ? pipeCandidate : claimCandidate) : null;
+                if (selected == null || selected.IsClosed) return evidence;
+                uint wait = WaitForSingleObject(selected, 0);
                 if (wait == 0)
-                    return GetExitCodeProcess(acceptedCandidate, out uint code)
+                    return GetExitCodeProcess(selected, out uint code)
                         ? evidence with { CandidateExit = "EXITED", CandidateExitCode = code }
                         : evidence with { CandidateExit = "EXITED_CODE_UNAVAILABLE" };
                 return evidence with { CandidateExit = wait == 258 ? "STILL_RUNNING" : "UNAVAILABLE" };
             }
-            finally { acceptedCandidate.Dispose(); }
+            finally { pipeCandidate?.Dispose(); claimCandidate?.Dispose(); }
         }
     }
 
@@ -396,7 +413,8 @@ internal sealed class RendererPipeObserver : IDisposable
     internal Task<Evidence> WaitForClaimEvidenceAsync() => testClaimObserved.Task;
 
     internal bool CandidateHandleClosedForTest
-    { get { lock (candidateLock) return acceptedCandidate?.IsClosed == true; } }
+    { get { lock (candidateLock) return (attemptedPipe || attemptedClaim) &&
+        (pipeCandidate == null || pipeCandidate.IsClosed) && (claimCandidate == null || claimCandidate.IsClosed); } }
 
     internal static Evidence Failure(string reason) => new("INCONCLUSIVE", reason, null, null, "NOT_ESTABLISHED", null);
 
@@ -406,7 +424,8 @@ internal sealed class RendererPipeObserver : IDisposable
         {
             if (disposed) return;
             disposed = true;
-            acceptedCandidate?.Dispose();
+            pipeCandidate?.Dispose();
+            claimCandidate?.Dispose();
         }
         stop.Cancel(); pipe.Dispose(); stop.Dispose();
     }

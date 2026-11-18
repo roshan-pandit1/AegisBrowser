@@ -6,6 +6,7 @@ on:
     branches:
       - experiment/p0-managed-sandbox-host
       - experiment/p0-renderer-sandbox-verification
+      - experiment/p0-authoritative-renderer-identity
 
 permissions:
   contents: read
@@ -36,6 +37,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Managed metadata checks failed.' }
           dotnet run --project ./tests/research/p309j/PipeDaclProbe.Tests -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic pipe diagnostics failed.' }
+          dotnet run --project ./tests/research/p309j/PassiveProcessTracker.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Passive process tracking checks failed.' }
           dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Supervisor checks failed.' }
           dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --renderer-self-test
