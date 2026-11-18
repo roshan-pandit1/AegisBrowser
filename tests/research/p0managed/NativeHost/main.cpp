@@ -243,8 +243,76 @@ class App final : public CefApp, public CefBrowserProcessHandler, public CefRend
   ~App() override { if (pipe_handle_ != INVALID_HANDLE_VALUE) CloseHandle(pipe_handle_); }
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
   CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
+  // Native research-only subset of pinned CefSharp renderer IPC.
+  // NOT a replacement for CefAppUnmanagedWrapper's complete behavior.
+  bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
+                                CefProcessId source, CefRefPtr<CefProcessMessage> message) override {
+    if (source != PID_BROWSER || !frame || !frame->IsValid() || !message ||
+        message->GetName() != "EvaluateJavascriptRequest") return false;
+    CefRefPtr<CefListValue> request = message->GetArgumentList();
+    if (!request || request->GetSize() != 4 ||
+        request->GetType(0) != VTYPE_BINARY ||
+        request->GetType(1) != VTYPE_STRING ||
+        request->GetType(2) != VTYPE_STRING ||
+        request->GetType(3) != VTYPE_INT ||
+        request->GetInt(3) < 1) return false;
+    CefRefPtr<CefBinaryValue> callback = request->GetBinary(0);
+    // Pinned CefSharp Primitives.cpp: type tag zero followed by signed int64.
+    unsigned char callback_bytes[9] = {};
+    if (!callback || callback->GetSize() != sizeof(callback_bytes) ||
+        callback->GetData(callback_bytes, sizeof(callback_bytes), 0) != sizeof(callback_bytes) ||
+        callback_bytes[0] != 0) return false;
+    CefRefPtr<CefProcessMessage> response = CefProcessMessage::Create("EvaluateJavascriptDoneResponse");
+    if (!response) return true;
+    CefRefPtr<CefListValue> reply = response->GetArgumentList();
+    if (!reply || !reply->SetBinary(1, callback)) return true;
+    bool success = false;
+    CefString error = "Fixture renderer V8 context unavailable";
+    CefRefPtr<CefV8Context> context = frame->GetV8Context();
+    if (context && context->Enter()) {
+      CefRefPtr<CefV8Value> value;
+      CefRefPtr<CefV8Exception> exception;
+      const bool evaluated = context->Eval(request->GetString(1), request->GetString(2),
+                                           request->GetInt(3), value, exception);
+      if (!evaluated) {
+        error = exception ? exception->GetMessage() : CefString("Fixture evaluation failed");
+      } else if (!value || value->IsNull() || value->IsUndefined()) {
+        success = reply->SetNull(2);
+      } else if (value->IsBool()) {
+        success = reply->SetBool(2, value->GetBoolValue());
+      } else if (value->IsInt()) {
+        const double n = value->GetDoubleValue();
+        success = n < INT_MIN || n > INT_MAX
+            ? reply->SetDouble(2, n) : reply->SetInt(2, value->GetIntValue());
+      } else if (value->IsDouble()) {
+        success = reply->SetDouble(2, value->GetDoubleValue());
+      } else if (value->IsString()) {
+        success = reply->SetString(2, value->GetStringValue());
+      } else {
+        error = "Fixture renderer cannot serialize complex Javascript values";
+      }
+      if (!success && error == "Fixture renderer V8 context unavailable")
+        error = "Fixture renderer result serialization failed";
+      context->Exit();
+    }
+    reply->SetBool(0, success);
+    if (!success) reply->SetString(2, error);
+    frame->SendProcessMessage(PID_BROWSER, response);
+    return true;
+  }
+  void OnContextReleased(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
+                         CefRefPtr<CefV8Context>) override {
+    if (!frame || !frame->IsValid()) return;
+    CefRefPtr<CefProcessMessage> notification = CefProcessMessage::Create("OnContextReleased");
+    if (notification) frame->SendProcessMessage(PID_BROWSER, notification);
+  }
   void OnContextCreated(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
                         CefRefPtr<CefV8Context>) override {
+    // CefSharp's browser adapter requires a frame-scoped context notification.
+    if (frame && frame->IsValid()) {
+      CefRefPtr<CefProcessMessage> notification = CefProcessMessage::Create("OnContextCreated");
+      if (notification) frame->SendProcessMessage(PID_BROWSER, notification);
+    }
     // CEF documents this callback on the renderer main thread after V8
     // context creation. It does not prove that sandbox lockdown is complete.
     if (!frame || !frame->IsMain() || attempted_) return;
