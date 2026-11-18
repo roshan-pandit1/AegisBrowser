@@ -48,6 +48,18 @@ helper now waits for a named event released by the identity callback. The
 supervisor still requires a retained identity and retains its original timeout;
 this change does not affect Chromium process classification.
 
+In the [next native Windows x64 run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44289775737),
+the managed browser and primitive IPC controls passed. The separate non-CEF
+reader opened the same retained sentinel file identity. Two renderer-side
+messages each claimed error 5 for the sentinel open and for the observation
+pipe open. These claims were not authenticated against the pipe or exact
+sentinel identity, so they do not establish renderer sandbox enforcement.
+The observer discarded its candidate when two distinct PID claims arrived
+during navigation. It now counts a bounded number of additional distinct
+claims without treating them as verified; duplicate or malformed claims still
+invalidate the observation. The strict security gate remained failed and the
+test root was independently removed.
+
 No runtime migration, browser-engine upgrade, signing, packaging or production
 integration is authorized by this experiment's success alone. Those release
 requirements remain unverified and require separate evidence.

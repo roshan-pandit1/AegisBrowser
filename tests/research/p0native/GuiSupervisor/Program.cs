@@ -213,6 +213,7 @@ internal static class Program
                 return 0;
             case "renderer-claim-parent":
             case "renderer-claim-duplicate":
+            case "renderer-claim-distinct":
             case "renderer-claim-oversized":
                 if (!OperatingSystem.IsWindows() || args.Length != 1 ||
                     !args[0].StartsWith(@"Local\aegis-p309j-claim-", StringComparison.Ordinal) || args[0].Length > 120) return 9;
@@ -226,6 +227,8 @@ internal static class Program
                     Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
                     if (mode == "renderer-claim-duplicate")
                         Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
+                    if (mode == "renderer-claim-distinct")
+                        Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + ((uint)child.Id + 1u));
                     if (mode == "renderer-claim-oversized")
                         Console.WriteLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + new string('9', 300));
                     bool released = await Task.Run(() => release.WaitOne(TimeSpan.FromSeconds(15)));

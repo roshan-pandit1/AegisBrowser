@@ -20,7 +20,8 @@ internal sealed class RendererPipeObserver : IDisposable
         string RendererIdentity = "INCONCLUSIVE", string SandboxEnforcement = "INCONCLUSIVE",
         string SubprocessAccounting = "INCONCLUSIVE", string SubprocessCleanup = "INCONCLUSIVE",
         string CandidateExit = "NOT_OBSERVED", uint? CandidateExitCode = null,
-        P309j.PipeDaclProbe.Result? PipeDaclDiagnostic = null);
+        P309j.PipeDaclProbe.Result? PipeDaclDiagnostic = null,
+        int AdditionalUnverifiedClaims = 0);
 
     private const string Prefix = @"\\.\pipe\aegis-p309i-";
     private const string PidPrefix = "NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=";
@@ -75,6 +76,7 @@ internal sealed class RendererPipeObserver : IDisposable
     private bool disposed;
     private bool attemptedCandidate, sawClaim, invalidClaim;
     private uint claimPid;
+    private readonly HashSet<uint> additionalClaims = new();
     private ProcessRunner.Identity? sourceParent;
     private SafeProcessHandle? sourceParentHandle;
     private Task<Evidence>? claimTask;
@@ -124,8 +126,9 @@ internal sealed class RendererPipeObserver : IDisposable
     }
 
     // This is a lossy, spoofable producer claim on inherited stdout, not an
-    // authenticated renderer message. Only one strictly formed claim is
-    // considered; duplicates or malformed claims invalidate the observation.
+    // authenticated renderer message. Only the first strictly formed claim is
+    // inspected. Additional distinct claims are counted, never authenticated;
+    // duplicates, malformed claims, or exceeding the bound invalidate it.
     internal void AcceptLine(string line)
     {
         if (!line.StartsWith(PidPrefix, StringComparison.Ordinal)) return;
@@ -135,9 +138,15 @@ internal sealed class RendererPipeObserver : IDisposable
         lock (candidateLock)
         {
             if (disposed) return;
-            if (sawClaim || !valid) { invalidClaim = true; sawClaim = true; return; }
+            if (!valid) { invalidClaim = true; sawClaim = true; return; }
+            uint pid = uint.Parse(number, CultureInfo.InvariantCulture);
+            if (sawClaim)
+            {
+                if (pid == claimPid || additionalClaims.Count >= 8 || !additionalClaims.Add(pid)) invalidClaim = true;
+                return;
+            }
             sawClaim = true;
-            claimPid = uint.Parse(number, CultureInfo.InvariantCulture);
+            claimPid = pid;
             StartClaimLocked();
         }
     }
@@ -282,6 +291,7 @@ internal sealed class RendererPipeObserver : IDisposable
         lock (candidateLock)
         {
             if (invalidClaim) evidence = Failure("PID_CLAIM_MALFORMED_OR_DUPLICATE");
+            evidence = evidence with { AdditionalUnverifiedClaims = additionalClaims.Count };
             if (acceptedCandidate == null || acceptedCandidate.IsClosed) return evidence;
             try
             {

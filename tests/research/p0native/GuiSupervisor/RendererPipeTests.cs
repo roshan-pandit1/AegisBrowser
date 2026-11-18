@@ -111,7 +111,7 @@ internal static class RendererPipeTests
                 Check(evidence.Status == "INCONCLUSIVE" && evidence.Token == null,
                     "missing connection remains inconclusive");
             }
-            foreach (string mode in new[] { "renderer-claim-parent", "renderer-claim-duplicate", "renderer-claim-oversized" })
+            foreach (string mode in new[] { "renderer-claim-parent", "renderer-claim-distinct", "renderer-claim-duplicate", "renderer-claim-oversized" })
             {
                 using var observer = RendererPipeObserver.Create();
                 string releaseName = @"Local\aegis-p309j-claim-" + Guid.NewGuid().ToString("N");
@@ -127,10 +127,14 @@ internal static class RendererPipeTests
                 var run = await runTask;
                 var claim = await observer.FinishAsync();
                 Check(run.ProcessExit == "NORMAL" && run.OutputComplete, mode + " helper completed with bounded output");
-                if (mode == "renderer-claim-parent")
+                if (mode is "renderer-claim-parent" or "renderer-claim-distinct")
+                {
                     Check(claim.Status == "OBSERVED" && claim.RoleEvidence == "CLIENT_PID_CLAIM" &&
                         claim.RendererIdentity == "INCONCLUSIVE" && claim.SandboxEnforcement == "INCONCLUSIVE",
                         "live claimed direct-child token remains unverified renderer evidence");
+                    Check(claim.AdditionalUnverifiedClaims == (mode == "renderer-claim-distinct" ? 1 : 0),
+                        "additional distinct claims remain counted and unverified");
+                }
                 else
                     Check(claim.Status == "INCONCLUSIVE" && claim.Token == null &&
                         claim.Reason == "PID_CLAIM_MALFORMED_OR_DUPLICATE",
