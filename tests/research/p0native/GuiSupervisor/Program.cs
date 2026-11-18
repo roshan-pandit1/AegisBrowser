@@ -14,6 +14,7 @@ internal static class Program
         if (args.Length >= 2 && args[0] == "--fixture-helper") return await Helper(args[1], args.Skip(2).ToArray());
         if (args.Length == 1 && args[0] == "--self-test") return await SelfTest.Run();
         if (args.Length == 1 && args[0] == "--renderer-self-test") return await RendererPipeTests.Run();
+        if (args.Length == 1 && args[0] == "--sentinel-self-test") return await SentinelSelfTest();
         if (args.Length == 1 && args[0] == "--fixture-wire-selftest") return await SelfTest.WireFixture();
         if (args.Length != 5 || args[0] != "supervise" || !int.TryParse(args[4], out int timeout))
         {
@@ -42,6 +43,28 @@ internal static class Program
                 PlatformNotSupportedException or System.ComponentModel.Win32Exception or System.Security.SecurityException)
             { observerFailure = "OBSERVER_CREATE_FAILED_" + e.GetType().Name; }
             using var observerLifetime = observer;
+            RendererSentinel? sentinel = null;
+            string sentinelFailure = "OBSERVER_UNAVAILABLE";
+            bool sentinelEnabled = string.Equals(Environment.GetEnvironmentVariable("AEGIS_P0_SENTINEL_TEST"), "YES", StringComparison.Ordinal);
+            if (sentinelEnabled && observer != null)
+            {
+                try { sentinel = RendererSentinel.Create(observer.FullName); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or
+                    System.ComponentModel.Win32Exception or System.Security.SecurityException)
+                { sentinelFailure = "SENTINEL_CREATE_FAILED_" + e.GetType().Name; }
+            }
+            using var sentinelLifetime = sentinel;
+            if (sentinelEnabled)
+            {
+                var sentinelControl = sentinel == null ? new SentinelControlResult("INCONCLUSIVE", sentinelFailure, false, null) :
+                    await RunSentinelControl(sentinel, observer!.FullName);
+                var positiveToken = sentinelControl.PositiveProcessToken;
+                Console.WriteLine(JsonSerializer.Serialize(new { kind = "SENTINEL_CONTROL",
+                    status = sentinelControl.Status, reason = sentinelControl.Reason, same_object = sentinelControl.SameObject,
+                    positive_process_token = positiveToken == null ? null : new { positiveToken.Status, positiveToken.IntegrityRid,
+                        positiveToken.IsAppContainer, positiveToken.HasRestrictingSids, positiveToken.InAnyJob },
+                    renderer_result = "NOT_CORRELATED", SandboxEnforcement = "INCONCLUSIVE" }));
+            }
             AegisBrowser.P309J.PassiveTrackingSession? tracking = null;
             string trackingFailure = "TRACKING_NOT_STARTED";
             var bootstrapArgs = string.Equals(executableName, "bootstrap.exe", StringComparison.OrdinalIgnoreCase)
@@ -79,6 +102,63 @@ internal static class Program
         }
     }
 
+    private sealed record SentinelControlResult(string Status, string Reason, bool SameObject,
+        AegisBrowser.P309G.TokenObservation? PositiveProcessToken);
+
+    private static async Task<int> SentinelSelfTest()
+    {
+        if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("SENTINEL_SELF_TEST: WINDOWS_REQUIRED"); return 2; }
+        try
+        {
+            string nonce = Guid.NewGuid().ToString("N");
+            string pipe = @"\\.\pipe\aegis-p309i-" + nonce;
+            string path;
+            using (var sentinel = RendererSentinel.Create(pipe))
+            {
+                path = sentinel.Pathname;
+                var positive = await RunSentinelControl(sentinel, pipe);
+                if (positive.Status != "PASS" || !positive.SameObject)
+                    throw new InvalidOperationException("POSITIVE_CONTROL_" + positive.Reason);
+                Console.WriteLine("PASS: separate non-CEF positive reader opened the exact retained file identity");
+                bool badPipe = false, badPath = false;
+                try { RendererSentinel.NameForPipe(pipe + "x"); } catch (InvalidDataException) { badPipe = true; }
+                try { RendererSentinel.ValidatePath(Path.Combine(Path.GetTempPath(), "not-an-aegis-sentinel.dat")); } catch (InvalidDataException) { badPath = true; }
+                if (!badPipe || !badPath) throw new InvalidOperationException("INVALID_SENTINEL_INPUT_ACCEPTED");
+                Console.WriteLine("PASS: invalid pipe and file names rejected");
+            }
+            if (File.Exists(path)) throw new InvalidOperationException("SENTINEL_CLEANUP_FAILED");
+            Console.WriteLine("PASS: test-owned sentinel removed; renderer identity and enforcement INCONCLUSIVE");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("SENTINEL_SELF_TEST_FAILED: " + ex.GetType().Name + ": " + ex.Message);
+            return 1;
+        }
+    }
+
+    private static async Task<SentinelControlResult> RunSentinelControl(RendererSentinel sentinel, string pipeName)
+    {
+        string suffix = pipeName.Substring(pipeName.Length - 32);
+        string eventName = @"Local\aegis-p0-sentinel-" + suffix;
+        using var release = new EventWaitHandle(false, EventResetMode.AutoReset, eventName, out bool created);
+        if (!created) return new("INCONCLUSIVE", "SENTINEL_EVENT_ALREADY_EXISTS", false, null);
+        var helper = SelfTest.HelperStartInfo("sentinel-positive", sentinel.Pathname, eventName);
+        string hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(helper.FileName)));
+        AegisBrowser.P309G.TokenObservation? token = null;
+        var result = await ProcessRunner.RunAsync(helper.FileName, hash, helper.ArgumentList.ToArray(),
+            AppContext.BaseDirectory, 10000, true, (id, handle) => {
+                try { token = AegisBrowser.P309G.TokenObserver.Observe(handle, checked((uint)id.Pid), id.CreationFileTimeUtc, id.ImagePath); }
+                finally { release.Set(); }
+            });
+        bool sameObject = result.ProcessExit == "NORMAL" && result.NativeExitCode == 0 && result.OutputComplete &&
+            string.Equals(result.Stdout.Text, sentinel.Identity, StringComparison.Ordinal);
+        bool ordinaryToken = token is { Status: "OBSERVED", IsAppContainer: false, HasRestrictingSids: false, IntegrityRid: >= 0x2000 };
+        return new(sameObject && ordinaryToken ? "PASS" : "INCONCLUSIVE",
+            !sameObject ? "POSITIVE_READ_OR_FILE_ID_MISMATCH" : !ordinaryToken ? "POSITIVE_TOKEN_NOT_ESTABLISHED" : "TEST_OWNED_NON_CEF_READER_MATCHED_FILE_ID",
+            sameObject, token);
+    }
+
     // Helpers are synthetic short-lived child processes; they never start CEF.
     private static async Task<int> Helper(string mode, string[] args)
     {
@@ -94,6 +174,17 @@ internal static class Program
                 await Task.WhenAll(a, b); return 0;
             case "echo": Console.Write(args.Length == 1 ? args[0] : "wrong"); return 0;
             case "bad-utf8": await Console.OpenStandardOutput().WriteAsync(new byte[] { 0xff, 0xfe }); return 0;
+            case "sentinel-positive":
+                if (!OperatingSystem.IsWindows() || args.Length != 2) return 9;
+                string sentinelPath = RendererSentinel.ValidatePath(args[0]);
+                string nonce = Path.GetFileNameWithoutExtension(sentinelPath).Substring("aegis-p0-sentinel-".Length);
+                if (args[1] != @"Local\aegis-p0-sentinel-" + nonce) return 9;
+                using (var ready = EventWaitHandle.OpenExisting(args[1]))
+                {
+                    if (!await Task.Run(() => ready.WaitOne(TimeSpan.FromSeconds(10)))) return 20;
+                    Console.Write(RendererSentinel.OpenIdentity(sentinelPath));
+                    return 0;
+                }
             case "wire":
                 // Explicitly synthetic: lets the offline classifier consume
                 // the real supervisor wire format without launching CEF.

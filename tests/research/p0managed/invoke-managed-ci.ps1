@@ -168,6 +168,7 @@ try {
     $env:AEGIS_P0_HTTPS_URL = (Get-Content -LiteralPath $ready -Raw).Trim()
     if ($env:AEGIS_P0_HTTPS_URL -notmatch '^https://127\.0\.0\.1:[0-9]{1,5}/$') { throw 'Invalid fixture URL.' }
     $env:AEGIS_P0_MANAGED_EXECUTE = 'YES'
+    $env:AEGIS_P0_SENTINEL_TEST = 'YES'
     $env:AEGIS_P0_MANAGED_DOTNET_ROOT = [IO.Path]::GetFullPath($DotnetRoot)
     $ErrorActionPreference = 'Continue'
     $output = @(& $supervisor 'supervise' (Join-Path $bundle 'p309f_client.exe') $manifest $manifestHash '90000' 2>&1)
@@ -191,12 +192,17 @@ $decoded = @($output | ForEach-Object {
     try { $_.ToString() | ConvertFrom-Json -ErrorAction Stop }
     catch { throw 'Supervisor returned malformed or unexpected output.' }
 })
-if (@($decoded | Where-Object { $_.kind -notin @('PROCESS_IDENTITY','PROCESS_RESULT','RENDERER_OBSERVATION','PROCESS_DISCOVERY') }).Count -ne 0) { throw 'Supervisor returned an unknown record kind.' }
+if (@($decoded | Where-Object { $_.kind -notin @('PROCESS_IDENTITY','PROCESS_RESULT','RENDERER_OBSERVATION','PROCESS_DISCOVERY','SENTINEL_CONTROL') }).Count -ne 0) { throw 'Supervisor returned an unknown record kind.' }
 $records = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_RESULT' })
 $identities = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_IDENTITY' })
 $renderers = @($decoded | Where-Object { $_.kind -ceq 'RENDERER_OBSERVATION' })
 $discovery = @($decoded | Where-Object { $_.kind -ceq 'PROCESS_DISCOVERY' })
-if ($records.Count -ne 1 -or $identities.Count -gt 1 -or $renderers.Count -ne 1 -or $discovery.Count -ne 1 -or $supervisorExit -notin @(0,1)) { throw 'Supervisor did not produce an unambiguous diagnostic result.' }
+$sentinels = @($decoded | Where-Object { $_.kind -ceq 'SENTINEL_CONTROL' })
+if ($records.Count -ne 1 -or $identities.Count -gt 1 -or $renderers.Count -ne 1 -or $discovery.Count -ne 1 -or $sentinels.Count -ne 1 -or $supervisorExit -notin @(0,1)) { throw 'Supervisor did not produce an unambiguous diagnostic result.' }
+$sentinel = $sentinels[0]
+if ($sentinel.status -notin @('PASS','INCONCLUSIVE') -or $sentinel.renderer_result -cne 'NOT_CORRELATED' -or
+    $sentinel.SandboxEnforcement -cne 'INCONCLUSIVE') { throw 'Unexpected sentinel-control classification.' }
+Write-Output ('SENTINEL_CONTROL_JSON: ' + ($sentinel | ConvertTo-Json -Depth 6 -Compress))
 $observedTree = $discovery[0]
 if ($observedTree.SubprocessCleanup -cne 'INCONCLUSIVE' -or ($null -ne $observedTree.report -and
     ($observedTree.report.Discovery -notin @('PARTIAL','INCONCLUSIVE') -or $observedTree.report.Accounting -notin @('PARTIAL','INCONCLUSIVE') -or
@@ -251,6 +257,7 @@ $markers = @('NATIVE_ENTRY: RunWinMain role=browser sandbox_info=present',
     'MANAGED_HOST: RUNTIME_CONFIG_ACCEPTED role=browser', 'MANAGED_HOST: CLR_ENTRY_REQUESTED role=browser sandbox_info=present',
     'MANAGED_EVENT: CEF_INITIALIZED_SANDBOX_CONTEXT_PRESENT', 'MANAGED_EVENT: WINDOW_SHOWN',
     'MANAGED_EVENT: LOCAL_PAGE_LOADED', 'MANAGED_EVENT: HTTPS_NAVIGATION_COMPLETED', 'MANAGED_EVENT: JAVASCRIPT_RESULT_VERIFIED',
+    'MANAGED_EVENT: PRIMITIVE_RENDERER_IPC_VERIFIED', 'MANAGED_EVENT: COMPLEX_RENDERER_IPC_UNSUPPORTED',
     'MANAGED_EVENT: HTTPS_PAGE_VERIFIED', 'MANAGED_EVENT: BROWSER_BEFORE_CLOSE',
     'MANAGED_EVENT: WINFORMS_LOOP_RETURNED', 'MANAGED_EVENT: CEF_SHUTDOWN_RETURNED',
     'MANAGED_HOST: CLR_ENTRY_RETURNED code=0')
@@ -259,11 +266,12 @@ $evidence = [ordered]@{ source_sha = $env:GITHUB_SHA; process_exit = $record.res
     native_exit_code = $record.result.NativeExitCode; output_complete = $record.result.OutputComplete;
     missing_markers = $missing; renderer_identity = 'INCONCLUSIVE'; sandbox_enforcement = 'INCONCLUSIVE';
     subprocess_cleanup = 'INCONCLUSIVE'; https_fixture_exit = $fixtureExit;
+    positive_control = $sentinel.status; positive_control_same_object = $sentinel.same_object;
     https_navigation_observed = ($fixtureExit -eq 0 -and $fixtureLog.Contains('P0_HTTPS_RESPONSE_SERVED') -and
         $record.result.Stdout.Text.Contains('MANAGED_EVENT: HTTPS_NAVIGATION_COMPLETED')) }
 [IO.File]::WriteAllText($evidencePath, ($evidence | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 Write-Output ('MANAGED_EVIDENCE_JSON: ' + ($evidence | ConvertTo-Json -Depth 5 -Compress))
-if ($fixtureExit -ne 0 -or $supervisorExit -ne 0 -or $record.result.NativeExitCode -ne 0 -or
+if ($fixtureExit -ne 0 -or $sentinel.status -cne 'PASS' -or -not $sentinel.same_object -or $supervisorExit -ne 0 -or $record.result.NativeExitCode -ne 0 -or
     $record.result.ProcessExit -cne 'NORMAL' -or -not $record.result.OutputComplete -or
     -not $evidence.https_navigation_observed -or $null -eq $identity -or $identity.ImageSha256 -cne $expectedBootstrap -or $missing.Count -ne 0) {
     throw ("Managed browser lifecycle did not satisfy its gates. Missing markers: " + ($missing -join ', '))

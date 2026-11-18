@@ -5,6 +5,7 @@ import unittest
 
 PATCH = (Path(__file__).parent / "0001-experimental-sandbox-info.patch").read_text(encoding="utf-8")
 CHILD_PATCH = (Path(__file__).parent / "0002-experimental-child-opt-in.patch").read_text(encoding="utf-8")
+DIAGNOSTIC_PATCH = (Path(__file__).parent / "0003-experimental-renderer-diagnostics.patch").read_text(encoding="utf-8")
 ADDED = "\n".join(line[1:] for line in PATCH.splitlines() if line.startswith("+") and not line.startswith("+++"))
 
 
@@ -31,6 +32,17 @@ class PrototypeContract(unittest.TestCase):
         self.assertEqual(sum("AppendSwitch(" in line for line in added), 1)
         self.assertIn('commandLine->AppendSwitch("aegis-p309f-child-opt-in");', "\n".join(added))
         self.assertNotIn('AppendSwitch("no-sandbox")', "\n".join(added))
+
+    def test_diagnostic_patch_is_opt_in_bounded_and_marks_claims(self):
+        added = "\n".join(line[1:] for line in DIAGNOSTIC_PATCH.splitlines()
+                          if line.startswith("+") and not line.startswith("+++"))
+        for required in ('AEGIS_P0_MANAGED_EXECUTE', 'source_process == PID_RENDERER',
+                         'frame->IsMain()', 'argList->GetSize() == 1',
+                         'argList->GetType(0) == VTYPE_INT', 'InterlockedIncrement',
+                         '<= 32', 'P309I_SENTINEL_OPEN_RESULT',
+                         'not evidence of process identity or sandbox enforcement'):
+            self.assertIn(required, added)
+        self.assertNotIn('AppendSwitch("no-sandbox")', added)
 
 
 if __name__ == "__main__":

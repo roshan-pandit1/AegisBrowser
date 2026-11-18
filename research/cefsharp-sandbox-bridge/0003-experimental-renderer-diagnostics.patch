@@ -1,0 +1,50 @@
+--- a/CefSharp.Core.Runtime/Internals/ClientAdapter.cpp
++++ b/CefSharp.Core.Runtime/Internals/ClientAdapter.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "Stdafx.h"
+ #include "ClientAdapter.h"
++
++#include <cstdio>
+ 
+ #include "include\cef_client.h"
+ #include "include\wrapper\cef_stream_resource_handler.h"
+@@ -1283,6 +1285,38 @@
+             auto name = message->GetName();
+             auto argList = message->GetArgumentList();
+ 
++            // Research-only renderer diagnostics. These are untrusted claims,
++            // not evidence of process identity or sandbox enforcement.
++            char diagnosticOptIn[4] = {};
++            if (::GetEnvironmentVariableA("AEGIS_P0_MANAGED_EXECUTE", diagnosticOptIn, sizeof(diagnosticOptIn)) == 3 &&
++                diagnosticOptIn[0] == 'Y' && diagnosticOptIn[1] == 'E' && diagnosticOptIn[2] == 'S' &&
++                source_process == PID_RENDERER && frame && frame->IsMain() && argList &&
++                argList->GetSize() == 1 && argList->GetType(0) == VTYPE_INT)
++            {
++                const char* stage = name == "P309I_PID" ? "PID" :
++                    name == "P309I_CONTEXT" ? "CONTEXT" :
++                    name == "P309I_PIPE_MISSING" ? "PIPE_MISSING" :
++                    name == "P309I_PIPE_OPEN_FAILED" ? "PIPE_OPEN_FAILED" :
++                    name == "P309I_PIPE_MODE_FAILED" ? "PIPE_MODE_FAILED" :
++                    name == "P309I_PIPE_WRITE_FAILED" ? "PIPE_WRITE_FAILED" :
++                    name == "P309I_SENTINEL_OPEN_RESULT" ? "SENTINEL_OPEN_RESULT" :
++                    name == "P309I_PIPE_SENT" ? "PIPE_SENT" : nullptr;
++                const int value = argList->GetInt(0);
++                if (stage && value >= 0 && (name != "P309I_PID" || value > 0))
++                {
++                    static volatile LONG diagnosticCount = 0;
++                    if (::InterlockedIncrement(&diagnosticCount) <= 32)
++                    {
++                        if (name == "P309I_PID")
++                            std::printf("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=%d\n", value);
++                        else
++                            std::printf("NATIVE_DIAGNOSTIC: RENDERER_IPC stage=%s code=%d\n", stage, value);
++                        std::fflush(stdout);
++                    }
++                    return true;
++                }
++            }
++
+             //TODO: JSB Rename messages (remove Root from name)
+             if (name == kJavascriptRootObjectRequest)
+             {

@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 #include "FixtureGate.h"
+#include "RendererSentinelProbe.h"
 #include "ManagedBootstrap.h"
 
 #include "include/cef_app.h"
@@ -281,9 +282,11 @@ class App final : public CefApp, public CefBrowserProcessHandler, public CefRend
       } else if (value->IsBool()) {
         success = reply->SetBool(2, value->GetBoolValue());
       } else if (value->IsInt()) {
-        const double n = value->GetDoubleValue();
-        success = n < INT_MIN || n > INT_MAX
-            ? reply->SetDouble(2, n) : reply->SetInt(2, value->GetIntValue());
+        success = reply->SetInt(2, value->GetIntValue());
+      } else if (value->IsUInt()) {
+        // CEF's list integer is signed. Preserve the value rather than
+        // wrapping a valid uint32 through SetInt.
+        success = reply->SetDouble(2, static_cast<double>(value->GetUIntValue()));
       } else if (value->IsDouble()) {
         success = reply->SetDouble(2, value->GetDoubleValue());
       } else if (value->IsString()) {
@@ -328,6 +331,9 @@ class App final : public CefApp, public CefBrowserProcessHandler, public CefRend
     const DWORD pid = GetCurrentProcessId();
     if (pid > 0 && pid <= INT_MAX) diagnostic("P309I_PID", pid);
     if (!p309g::IsObservationPipe(pipe_)) { diagnostic("P309I_PIPE_MISSING", 0); return; }
+    // A result here remains a renderer claim, including access denied. The
+    // supervisor's independent positive control must match the held file ID.
+    diagnostic("P309I_SENTINEL_OPEN_RESULT", p0sentinel::ReadOpenClaim(pipe_));
     HANDLE pipe = CreateFileA(pipe_.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL, nullptr);
     if (pipe == INVALID_HANDLE_VALUE) { diagnostic("P309I_PIPE_OPEN_FAILED", GetLastError()); return; }

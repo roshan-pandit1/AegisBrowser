@@ -21,11 +21,14 @@ if (-not [Environment]::Is64BitProcess) { throw 'The baseline requires an x64 pr
 $sourceRevision = 'ec1027aa21e1af1217681a349104c15d29bbc21a'
 $patchFile = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../research/cefsharp-sandbox-bridge/0001-experimental-sandbox-info.patch'))
 $childPatchFile = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../research/cefsharp-sandbox-bridge/0002-experimental-child-opt-in.patch'))
+$diagnosticPatchFile = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../research/cefsharp-sandbox-bridge/0003-experimental-renderer-diagnostics.patch'))
 if (-not (Test-Path -LiteralPath $patchFile -PathType Leaf)) { throw 'Experimental binding patch missing.' }
 if (-not (Test-Path -LiteralPath $childPatchFile -PathType Leaf)) { throw 'Experimental child marker patch missing.' }
+if (-not (Test-Path -LiteralPath $diagnosticPatchFile -PathType Leaf)) { throw 'Experimental renderer diagnostic patch missing.' }
 $patchHash = (Get-FileHash -LiteralPath $patchFile -Algorithm SHA256).Hash
 Write-Host "EXPERIMENTAL_PATCH_SHA256=$patchHash"
 Write-Host "EXPERIMENTAL_CHILD_PATCH_SHA256=$((Get-FileHash -LiteralPath $childPatchFile -Algorithm SHA256).Hash)"
+Write-Host "EXPERIMENTAL_DIAGNOSTIC_PATCH_SHA256=$((Get-FileHash -LiteralPath $diagnosticPatchFile -Algorithm SHA256).Hash)"
 $sdkVersion = '154.0.34'
 $sdkSha512 = '92616C6776D5A4E445CCD8C4147C4F60B05BDD7802D8495CED42C700CD1D4C3A18C8B13CF9A5B2C48D92A2B753626B03DFEEB822C53E1550A92488156CE6266B'
 $root = Join-Path $env:RUNNER_TEMP ('aegis-p309e-' + [Guid]::NewGuid().ToString('N'))
@@ -84,12 +87,15 @@ Invoke-Checked $git @('-C', $source, 'apply', '--check', $patchFile)
 Invoke-Checked $git @('-C', $source, 'apply', '--whitespace=error', $patchFile)
 Invoke-Checked $git @('-C', $source, 'apply', '--check', $childPatchFile)
 Invoke-Checked $git @('-C', $source, 'apply', '--whitespace=error', $childPatchFile)
+Invoke-Checked $git @('-C', $source, 'apply', '--check', $diagnosticPatchFile)
+Invoke-Checked $git @('-C', $source, 'apply', '--whitespace=error', $diagnosticPatchFile)
 Invoke-Checked $git @('-C', $source, 'diff', '--check')
 $modified = @(& $git -C $source diff --name-only)
-if ($LASTEXITCODE -ne 0 -or $modified.Count -ne 3 -or
+if ($LASTEXITCODE -ne 0 -or $modified.Count -ne 4 -or
     $modified -cnotcontains 'CefSharp.Core.Runtime/Cef.h' -or
     $modified -cnotcontains 'CefSharp.BrowserSubprocess.Core/SubProcess.h' -or
-    $modified -cnotcontains 'CefSharp.Core.Runtime/Internals/CefSharpApp.h') {
+    $modified -cnotcontains 'CefSharp.Core.Runtime/Internals/CefSharpApp.h' -or
+    $modified -cnotcontains 'CefSharp.Core.Runtime/Internals/ClientAdapter.cpp') {
     throw 'Unexpected experimental patch scope.'
 }
 
@@ -158,7 +164,8 @@ Write-Host ("EXPERIMENTAL_SUBPROCESS_SHA256={0}" -f (Get-FileHash -LiteralPath $
 if ($env:GITHUB_OUTPUT) {
     # The workflow may perform metadata-only checks on the isolated output.
     # This is an ephemeral runner path, not a published binary artifact.
-    [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "runtime_path=$runtime`nsubprocess_path=$subprocessOutput`nsdk_path=$sdkDir`npatch_sha256=$patchHash`n", [Text.UTF8Encoding]::new($false))
+    $diagnosticHash = (Get-FileHash -LiteralPath $diagnosticPatchFile -Algorithm SHA256).Hash
+    [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "runtime_path=$runtime`nsubprocess_path=$subprocessOutput`nsdk_path=$sdkDir`npatch_sha256=$patchHash`ndiagnostic_patch_sha256=$diagnosticHash`n", [Text.UTF8Encoding]::new($false))
 }
 Write-Host 'EXPERIMENTAL_PATCHED_BINDINGS_BUILD: PASS (compile/link only; native load, managed host, CEF startup, callback safety and ABI are not established)'
 Write-Host 'OWNER_RELEASE_CONTRACT: UNSATISFIED'
