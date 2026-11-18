@@ -1,0 +1,81 @@
+--- a/CefSharp.Core.Runtime/Internals/ClientAdapter.cpp
++++ b/CefSharp.Core.Runtime/Internals/ClientAdapter.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "Stdafx.h"
+ #include "ClientAdapter.h"
++
++#include <cstdio>
+ 
+ #include "include\cef_client.h"
+ #include "include\wrapper\cef_stream_resource_handler.h"
+@@ -1283,6 +1285,69 @@
+             auto name = message->GetName();
+             auto argList = message->GetArgumentList();
+ 
++            // Research-only renderer diagnostics. These are untrusted claims,
++            // not evidence of process identity or sandbox enforcement.
++            char diagnosticOptIn[4] = {};
++            if (::GetEnvironmentVariableA("AEGIS_P0_MANAGED_EXECUTE", diagnosticOptIn, sizeof(diagnosticOptIn)) == 3 &&
++                diagnosticOptIn[0] == 'Y' && diagnosticOptIn[1] == 'E' && diagnosticOptIn[2] == 'S' &&
++                source_process == PID_RENDERER && frame && frame->IsMain() && argList &&
++                argList->GetSize() == 1 && argList->GetType(0) == VTYPE_INT)
++            {
++                const char* stage = name == "P309I_PID" ? "PID" :
++                    name == "P309I_CONTEXT" ? "CONTEXT" :
++                    name == "P309I_PIPE_MISSING" ? "PIPE_MISSING" :
++                    name == "P309I_PIPE_OPEN_FAILED" ? "PIPE_OPEN_FAILED" :
++                    name == "P309I_PIPE_MODE_FAILED" ? "PIPE_MODE_FAILED" :
++                    name == "P309I_PIPE_WRITE_FAILED" ? "PIPE_WRITE_FAILED" :
++                    name == "P309I_SENTINEL_OPEN_RESULT" ? "SENTINEL_OPEN_RESULT" :
++                    name == "P309I_PIPE_SENT" ? "PIPE_SENT" : nullptr;
++                const int value = argList->GetInt(0);
++                if (stage && value >= 0 && (name != "P309I_PID" || value > 0))
++                {
++                    static volatile LONG diagnosticCount = 0;
++                    if (::InterlockedIncrement(&diagnosticCount) <= 32)
++                    {
++                        if (name == "P309I_PID")
++                        {
++                            std::printf("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=%d\n", value);
++                            // Browser-process-only relay. CEF authenticated the source
++                            // as PID_RENDERER above. The OS pipe client must be the
++                            // retained browser parent, not an untrusted renderer.
++                            char pipeName[96] = {};
++                            const DWORD pipeLen = ::GetEnvironmentVariableA("AEGIS_P309I_PIPE", pipeName, sizeof(pipeName));
++                            constexpr char prefix[] = "\\\\.\\pipe\\aegis-p309i-";
++                            bool valid = pipeLen == sizeof(prefix) - 1 + 32;
++                            for (DWORD i = 0; valid && i < sizeof(prefix) - 1; ++i)
++                                valid = pipeName[i] == prefix[i];
++                            for (DWORD i = sizeof(prefix) - 1; valid && i < pipeLen; ++i)
++                                valid = (pipeName[i] >= '0' && pipeName[i] <= '9') ||
++                                        (pipeName[i] >= 'a' && pipeName[i] <= 'f');
++                            if (valid)
++                            {
++                                HANDLE h = ::CreateFileA(pipeName, GENERIC_WRITE, 0, nullptr,
++                                                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
++                                if (h != INVALID_HANDLE_VALUE)
++                                {
++                                    constexpr char marker[] = "P309I_BROKER___V1\n";
++                                    const DWORD claimedPid = static_cast<DWORD>(value);
++                                    DWORD written = 0;
++                                    const bool first = ::WriteFile(h, marker, sizeof(marker) - 1, &written, nullptr) &&
++                                        written == sizeof(marker) - 1;
++                                    const bool second = first && ::WriteFile(h, &claimedPid, sizeof(claimedPid), &written, nullptr) &&
++                                        written == sizeof(claimedPid);
++                                    ::CloseHandle(h);
++                                    if (second) std::puts("NATIVE_DIAGNOSTIC: BROWSER_BROKER_RELAY_SENT");
++                                }
++                            }
++                        }
++                        else
++                            std::printf("NATIVE_DIAGNOSTIC: RENDERER_IPC stage=%s code=%d\n", stage, value);
++                        std::fflush(stdout);
++                    }
++                    return true;
++                }
++            }
++
+             //TODO: JSB Rename messages (remove Root from name)
+             if (name == kJavascriptRootObjectRequest)
+             {

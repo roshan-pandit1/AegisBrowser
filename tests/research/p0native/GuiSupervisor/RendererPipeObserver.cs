@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO.Pipes;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -20,11 +21,13 @@ internal sealed class RendererPipeObserver : IDisposable
         string RendererIdentity = "INCONCLUSIVE", string SandboxEnforcement = "INCONCLUSIVE",
         string SubprocessAccounting = "INCONCLUSIVE", string SubprocessCleanup = "INCONCLUSIVE",
         string CandidateExit = "NOT_OBSERVED", uint? CandidateExitCode = null,
-        P309j.PipeDaclProbe.Result? PipeDaclDiagnostic = null);
+        P309j.PipeDaclProbe.Result? PipeDaclDiagnostic = null,
+        int AdditionalUnverifiedClaims = 0);
 
     private const string Prefix = @"\\.\pipe\aegis-p309i-";
     private const string PidPrefix = "NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=";
     private static readonly byte[] Frame = Encoding.ASCII.GetBytes("P309I_RENDERER_V1\n");
+    private static readonly byte[] BrokerFrame = Encoding.ASCII.GetBytes("P309I_BROKER___V1\n");
     private const uint PipeAccessDuplex = 0x00000003, FileFlagOverlapped = 0x40000000,
         FirstPipeInstance = 0x00080000, RejectRemoteClients = 0x00000008;
     private const uint QueryInformation = 0x0400, QueryLimitedInformation = 0x1000, Synchronize = 0x100000;
@@ -36,6 +39,14 @@ internal sealed class RendererPipeObserver : IDisposable
         out IntPtr descriptor, out uint size);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(SafeAccessTokenHandle token, int infoClass,
+        IntPtr buffer, int length, out int bytesNeeded);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool IsValidSid(IntPtr sid);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern uint GetLengthSid(IntPtr sid);
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafePipeHandle CreateNamedPipeW(string name, uint openMode, uint pipeMode,
         uint maxInstances, uint outBuffer, uint inBuffer, uint defaultTimeout, ref SecurityAttributes security);
@@ -75,6 +86,7 @@ internal sealed class RendererPipeObserver : IDisposable
     private bool disposed;
     private bool attemptedCandidate, sawClaim, invalidClaim;
     private uint claimPid;
+    private readonly HashSet<uint> additionalClaims = new();
     private ProcessRunner.Identity? sourceParent;
     private SafeProcessHandle? sourceParentHandle;
     private Task<Evidence>? claimTask;
@@ -85,18 +97,67 @@ internal sealed class RendererPipeObserver : IDisposable
     private RendererPipeObserver(string fullName, NamedPipeServerStream pipe, string expectedUserSid)
     { FullName = fullName; this.pipe = pipe; this.expectedUserSid = expectedUserSid; }
 
+    // USER_LOCKDOWN leaves the logon SID enabled while marking the user SID
+    // and ordinary group SIDs deny-only. Find this exact current logon group
+    // from the OS token; never grant the pipe to Everyone or guess a SID.
+    private static string CurrentLogonSid(WindowsIdentity identity)
+    {
+        const int tokenGroups = 2, insufficientBuffer = 122;
+        const uint logonIdAttributes = 0xC0000000;
+        var token = identity.AccessToken;
+        _ = GetTokenInformation(token, tokenGroups, IntPtr.Zero, 0, out int bytes);
+        if (Marshal.GetLastWin32Error() != insufficientBuffer || bytes < 8 || bytes > 65536)
+            throw new InvalidOperationException("LOGON_GROUP_QUERY_UNAVAILABLE");
+        IntPtr buffer = Marshal.AllocHGlobal(bytes);
+        try
+        {
+            if (!GetTokenInformation(token, tokenGroups, buffer, bytes, out int returned) ||
+                returned < 8 || returned > bytes)
+                throw new InvalidOperationException("LOGON_GROUP_READ_UNAVAILABLE");
+            uint count = unchecked((uint)Marshal.ReadInt32(buffer));
+            int first = IntPtr.Size == 8 ? 8 : 4;
+            int stride = IntPtr.Size == 8 ? 16 : 8;
+            if (count == 0 || count > 256 || first + (long)count * stride > returned)
+                throw new InvalidOperationException("LOGON_GROUP_BUFFER_INVALID");
+            string? found = null;
+            for (int i = 0; i < count; i++)
+            {
+                int offset = first + i * stride;
+                uint attributes = unchecked((uint)Marshal.ReadInt32(buffer, offset + IntPtr.Size));
+                if ((attributes & logonIdAttributes) != logonIdAttributes) continue;
+                IntPtr sidPointer = Marshal.ReadIntPtr(buffer, offset);
+                long ptr = sidPointer.ToInt64(), begin = buffer.ToInt64(), end = begin + returned;
+                if (ptr < begin || ptr > end - 8 || !IsValidSid(sidPointer) ||
+                    GetLengthSid(sidPointer) > end - ptr)
+                    throw new InvalidOperationException("LOGON_GROUP_SID_INVALID");
+                string value = new SecurityIdentifier(sidPointer).Value;
+                if (!value.StartsWith("S-1-5-5-", StringComparison.Ordinal) || found != null)
+                    throw new InvalidOperationException("LOGON_GROUP_NOT_UNIQUE");
+                found = value;
+            }
+            return found ?? throw new InvalidOperationException("LOGON_GROUP_NOT_PRESENT");
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
     internal static RendererPipeObserver Create()
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-        string? sid = WindowsIdentity.GetCurrent().User?.Value;
+        using var identity = WindowsIdentity.GetCurrent();
+        string? sid = identity.User?.Value;
         if (string.IsNullOrWhiteSpace(sid)) throw new InvalidOperationException("CURRENT_USER_SID_UNAVAILABLE");
+        string logonSid = CurrentLogonSid(identity);
         string name = Prefix + Guid.NewGuid().ToString("N");
-        // Restricted and AppContainer tokens require their own access-check
-        // ACEs; an untrusted mandatory label permits a sandboxed client to
-        // write. Same-user identity is rechecked by pipe impersonation before
-        // any process is opened. The random name is not an authorization credential. Hostile
-        // same-user or privileged local code is outside this test trust model.
-        string sddl = "D:P(A;;GA;;;" + sid + ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)S:(ML;;NW;;;S-1-16-0)";
+        // Only this disposable research pipe receives logon-session and NULL
+        // restricting SID read/write ACEs. The Chromium USER_LOCKDOWN token
+        // denies user/group SIDs for allow decisions but preserves its logon
+        // group: a normal-pass logon ACE AND restricting-pass NULL ACE are
+        // both necessary. No Everyone ACE, sandbox bypass or production ACL
+        // change is introduced. The random endpoint is never authentication;
+        // independently validate the kernel client PID and held process token.
+        // An untrusted mandatory label permits lower-integrity writes.
+        string sddl = "D:P(A;;GA;;;" + sid + ")(A;;GRGW;;;" + logonSid +
+            ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)(A;;GRGW;;;S-1-0-0)S:(ML;;NW;;;S-1-16-0)";
         if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out var descriptor, out _))
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         try
@@ -124,8 +185,9 @@ internal sealed class RendererPipeObserver : IDisposable
     }
 
     // This is a lossy, spoofable producer claim on inherited stdout, not an
-    // authenticated renderer message. Only one strictly formed claim is
-    // considered; duplicates or malformed claims invalidate the observation.
+    // authenticated renderer message. Only the first strictly formed claim is
+    // inspected. Additional distinct claims are counted, never authenticated;
+    // duplicates, malformed claims, or exceeding the bound invalidate it.
     internal void AcceptLine(string line)
     {
         if (!line.StartsWith(PidPrefix, StringComparison.Ordinal)) return;
@@ -135,9 +197,15 @@ internal sealed class RendererPipeObserver : IDisposable
         lock (candidateLock)
         {
             if (disposed) return;
-            if (sawClaim || !valid) { invalidClaim = true; sawClaim = true; return; }
+            if (!valid) { invalidClaim = true; sawClaim = true; return; }
+            uint pid = uint.Parse(number, CultureInfo.InvariantCulture);
+            if (sawClaim)
+            {
+                if (pid == claimPid || additionalClaims.Count >= 8 || !additionalClaims.Add(pid)) invalidClaim = true;
+                return;
+            }
             sawClaim = true;
-            claimPid = uint.Parse(number, CultureInfo.InvariantCulture);
+            claimPid = pid;
             StartClaimLocked();
         }
     }
@@ -190,7 +258,9 @@ internal sealed class RendererPipeObserver : IDisposable
                 if (count == 0) return Failure("CLIENT_FRAME_TRUNCATED");
                 read += count;
             }
-            if (!bytes.AsSpan().SequenceEqual(Frame)) return Failure("CLIENT_FRAME_INVALID");
+            bool brokered = bytes.AsSpan().SequenceEqual(BrokerFrame);
+            if (!brokered && !bytes.AsSpan().SequenceEqual(Frame))
+                return Failure("CLIENT_FRAME_INVALID");
             string? clientUserSid = null;
             pipe.RunAsClient(() => {
                 if (!OperatingSystem.IsWindows()) return;
@@ -199,9 +269,29 @@ internal sealed class RendererPipeObserver : IDisposable
             });
             if (!string.Equals(clientUserSid, expectedUserSid, StringComparison.Ordinal))
                 return Failure("CLIENT_USER_MISMATCH");
-            if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out uint pid) || pid == 0)
+            if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out uint clientPid) || clientPid == 0)
                 return Failure("CLIENT_PID_UNAVAILABLE");
-            return ObservePid(pid, parent, parentHandle, "CLIENT_CLAIM_ONLY");
+            if (!brokered) return ObservePid(clientPid, parent, parentHandle, "CLIENT_CLAIM_ONLY");
+            // The CEF browser process forwards a PID_RENDERER-sourced frame
+            // event. Require kernel-supplied pipe PID == retained browser PID.
+            // A renderer cannot authenticate itself with this wire message.
+            if (clientPid != checked((uint)parent.Pid))
+                return Failure("BROKER_CLIENT_NOT_BROWSER_PARENT");
+            byte[] target = new byte[sizeof(uint)];
+            int got = 0;
+            while (got < target.Length)
+            {
+                int count = await pipe.ReadAsync(target.AsMemory(got), deadline.Token).ConfigureAwait(false);
+                if (count == 0) return Failure("BROKER_PID_TRUNCATED");
+                got += count;
+            }
+            uint childPid = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(target);
+            if (childPid == 0 || childPid > int.MaxValue || childPid == clientPid)
+                return Failure("BROKER_CHILD_PID_INVALID");
+            // Corroborated native CEF source role + OS-verified browser relay.
+            // The child role and exact file denial remain independently
+            // INCONCLUSIVE until additional role/object binding evidence.
+            return ObservePid(childPid, parent, parentHandle, "CEF_BROWSER_BROKER_ROLE_CLAIM");
         }
         catch (OperationCanceledException) { return Failure("OBSERVATION_TIMEOUT_OR_PARENT_EXIT"); }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or
@@ -282,6 +372,7 @@ internal sealed class RendererPipeObserver : IDisposable
         lock (candidateLock)
         {
             if (invalidClaim) evidence = Failure("PID_CLAIM_MALFORMED_OR_DUPLICATE");
+            evidence = evidence with { AdditionalUnverifiedClaims = additionalClaims.Count };
             if (acceptedCandidate == null || acceptedCandidate.IsClosed) return evidence;
             try
             {

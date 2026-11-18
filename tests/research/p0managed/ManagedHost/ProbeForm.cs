@@ -65,6 +65,7 @@ internal sealed class ProbeForm : Form
             if (!script.Success || Convert.ToInt32(script.Result) != 42)
                 throw new InvalidOperationException("JAVASCRIPT_RESULT_MISMATCH");
             Console.WriteLine("MANAGED_EVENT: JAVASCRIPT_RESULT_VERIFIED");
+            await VerifyRendererIpc(frame);
             var body = await frame.EvaluateScriptAsync("document.body.textContent.trim()", frame.Url, 1, TimeSpan.FromSeconds(10), false)
                 .WaitAsync(TimeSpan.FromSeconds(12));
             if (!body.Success || !string.Equals(body.Result as string, "AEGIS_P0_HTTPS_OK", StringComparison.Ordinal))
@@ -81,6 +82,46 @@ internal sealed class ProbeForm : Form
         {
             await CloseBrowserSafely();
         }
+    }
+
+    private static async Task VerifyRendererIpc(IFrame frame)
+    {
+        async Task<JavascriptResponse> Evaluate(string expression) =>
+            await frame.EvaluateScriptAsync(expression, frame.Url, 1, TimeSpan.FromSeconds(10), false)
+                .WaitAsync(TimeSpan.FromSeconds(12));
+
+        var truth = await Evaluate("true");
+        if (!truth.Success || truth.Result is not true) throw new InvalidOperationException("IPC_BOOLEAN_MISMATCH");
+        var negative = await Evaluate("-2147483648");
+        if (!negative.Success || negative.Result is null || Convert.ToDouble(negative.Result) != -2147483648d)
+            throw new InvalidOperationException("IPC_SIGNED_INTEGER_MISMATCH");
+        var unsigned = await Evaluate("4294967295");
+        if (!unsigned.Success || unsigned.Result is null || Convert.ToDouble(unsigned.Result) != 4294967295d)
+            throw new InvalidOperationException("IPC_UNSIGNED_INTEGER_MISMATCH");
+        var fraction = await Evaluate("-1.25");
+        if (!fraction.Success || fraction.Result is null || Convert.ToDouble(fraction.Result) != -1.25d)
+            throw new InvalidOperationException("IPC_DOUBLE_MISMATCH");
+        var text = await Evaluate("'Aegis\\u2713'");
+        if (!text.Success || !string.Equals(text.Result as string, "Aegis\u2713", StringComparison.Ordinal))
+            throw new InvalidOperationException("IPC_STRING_MISMATCH");
+        var nil = await Evaluate("null");
+        if (!nil.Success || nil.Result is not null) throw new InvalidOperationException("IPC_NULL_MISMATCH");
+        var missing = await Evaluate("void 0");
+        if (!missing.Success || missing.Result is not null) throw new InvalidOperationException("IPC_UNDEFINED_MISMATCH");
+        var thrown = await Evaluate("(()=>{throw new Error('AegisSyntheticError')})()");
+        if (thrown.Success || !thrown.Message.Contains("AegisSyntheticError", StringComparison.Ordinal))
+            throw new InvalidOperationException("IPC_EXCEPTION_NOT_REPORTED");
+        Console.WriteLine("MANAGED_EVENT: PRIMITIVE_RENDERER_IPC_VERIFIED");
+
+        // The research bridge cannot yet serialize objects or await promises.
+        // These checks require an explicit failure, not a fabricated result.
+        foreach (var expression in new[] { "({answer:42})", "Promise.resolve(42)" })
+        {
+            var unsupported = await Evaluate(expression);
+            if (unsupported.Success || !unsupported.Message.Contains("cannot serialize complex", StringComparison.Ordinal))
+                throw new InvalidOperationException("IPC_COMPLEX_RESULT_NOT_EXPLICITLY_REJECTED");
+        }
+        Console.WriteLine("MANAGED_EVENT: COMPLEX_RENDERER_IPC_UNSUPPORTED");
     }
 
     private async Task CloseBrowserSafely()

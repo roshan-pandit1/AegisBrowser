@@ -30,6 +30,20 @@ internal static class RendererPipeTests
         child.StandardInput.WriteLine("RELEASE");
         child.StandardInput.Close();
     }
+    private static async Task SendSyntheticBrokerRelay(string fullName, uint targetPid)
+    {
+        const string prefix = @"\\.\pipe\";
+        if (!fullName.StartsWith(prefix, StringComparison.Ordinal))
+            throw new InvalidOperationException("SYNTHETIC_PIPE_PREFIX_INVALID");
+        using var client = new System.IO.Pipes.NamedPipeClientStream(".",
+            fullName.Substring(prefix.Length),
+            System.IO.Pipes.PipeDirection.Out, System.IO.Pipes.PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000);
+        await client.WriteAsync(System.Text.Encoding.ASCII.GetBytes("P309I_BROKER___V1\n"));
+        await client.WriteAsync(BitConverter.GetBytes(targetPid));
+        await client.FlushAsync();
+    }
+
     internal static async Task<int> Run()
     {
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("NOT_RUN: Windows required"); return 2; }
@@ -60,6 +74,39 @@ internal static class RendererPipeTests
                 Release(child);
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Check(child.ExitCode == 0, "owned helper exited normally");
+            }
+            using (var observer = RendererPipeObserver.Create())
+            {
+                observer.Start(identity, self.SafeHandle);
+                using var child = StartControlled("renderer-hold");
+                await SendSyntheticBrokerRelay(observer.FullName, checked((uint)child.Id));
+                var evidence = await observer.WaitForEvidenceAsync();
+                Check(evidence.Status == "OBSERVED" && evidence.CandidatePid == child.Id,
+                    "browser-owned test broker correlates child with kernel process handle");
+                Check(evidence.RoleEvidence == "CEF_BROWSER_BROKER_ROLE_CLAIM" &&
+                      evidence.RendererIdentity == "INCONCLUSIVE" &&
+                      evidence.SandboxEnforcement == "INCONCLUSIVE",
+                    "synthetic broker relay does not establish Chromium renderer role or sandbox policy");
+                await observer.FinishAsync();
+                Release(child);
+                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                Check(child.ExitCode == 0, "synthetic broker target exits cleanly");
+            }
+            // A non-parent client cannot impersonate the browser-process broker.
+            using (var observer = RendererPipeObserver.Create())
+            using (var otherParent = StartControlled("renderer-hold"))
+            {
+                if (!GetProcessTimes(otherParent.SafeHandle, out long otherCreated, out _, out _, out _))
+                    throw new InvalidOperationException("SYNTHETIC_BROKER_PARENT_TIME_MISSING");
+                var otherIdentity = new ProcessRunner.Identity(otherParent.Id, otherCreated, image, "SYNTHETIC");
+                observer.Start(otherIdentity, otherParent.SafeHandle);
+                await SendSyntheticBrokerRelay(observer.FullName, checked((uint)otherParent.Id));
+                var evidence = await observer.WaitForEvidenceAsync();
+                Check(evidence.Status == "INCONCLUSIVE" && evidence.Reason == "BROKER_CLIENT_NOT_BROWSER_PARENT" &&
+                      evidence.Token == null,
+                    "brokered role event from non-parent process is rejected");
+                Release(otherParent);
+                await otherParent.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
             }
             using (var observer = RendererPipeObserver.Create())
             {
@@ -111,7 +158,7 @@ internal static class RendererPipeTests
                 Check(evidence.Status == "INCONCLUSIVE" && evidence.Token == null,
                     "missing connection remains inconclusive");
             }
-            foreach (string mode in new[] { "renderer-claim-parent", "renderer-claim-duplicate", "renderer-claim-oversized" })
+            foreach (string mode in new[] { "renderer-claim-parent", "renderer-claim-distinct", "renderer-claim-duplicate", "renderer-claim-oversized" })
             {
                 using var observer = RendererPipeObserver.Create();
                 string releaseName = @"Local\aegis-p309j-claim-" + Guid.NewGuid().ToString("N");
@@ -127,10 +174,14 @@ internal static class RendererPipeTests
                 var run = await runTask;
                 var claim = await observer.FinishAsync();
                 Check(run.ProcessExit == "NORMAL" && run.OutputComplete, mode + " helper completed with bounded output");
-                if (mode == "renderer-claim-parent")
+                if (mode is "renderer-claim-parent" or "renderer-claim-distinct")
+                {
                     Check(claim.Status == "OBSERVED" && claim.RoleEvidence == "CLIENT_PID_CLAIM" &&
                         claim.RendererIdentity == "INCONCLUSIVE" && claim.SandboxEnforcement == "INCONCLUSIVE",
                         "live claimed direct-child token remains unverified renderer evidence");
+                    Check(claim.AdditionalUnverifiedClaims == (mode == "renderer-claim-distinct" ? 1 : 0),
+                        "additional distinct claims remain counted and unverified");
+                }
                 else
                     Check(claim.Status == "INCONCLUSIVE" && claim.Token == null &&
                         claim.Reason == "PID_CLAIM_MALFORMED_OR_DUPLICATE",

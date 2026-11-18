@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - experiment/p0-managed-sandbox-host
+      - experiment/p0-renderer-sandbox-verification
 
 permissions:
   contents: read
@@ -37,6 +38,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic pipe diagnostics failed.' }
           dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Supervisor checks failed.' }
+          dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --renderer-self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Renderer observation controls failed.' }
+          dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --sentinel-self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic sentinel controls failed.' }
           python -B -m unittest discover -s research/cefsharp-sandbox-bridge -p 'test_patch_contract.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'Experimental binding patch checks failed.' }
       - name: Build patched pinned CefSharp bindings
@@ -102,6 +107,17 @@ jobs:
           P0_TRUST: ${{ steps.trust.outputs.directory }}
         run: |
           ./tests/research/p0managed/invoke-managed-ci.ps1 -ClientPath $env:P0_CLIENT -PreparedRoot $env:P0_ROOT -ManagedOutput ./tests/research/p0managed/ManagedHost/bin/Release/net8.0-windows/win-x64 -PatchedRuntime $env:P0_PATCHED -NethostPath $env:P0_NETHOST -DotnetRoot $env:P0_DOTNET -FixtureDll ./tests/research/p0managed/HttpsFixture/bin/Release/net8.0/HttpsFixture.dll -TrustDirectory $env:P0_TRUST
+      - name: Require independent sandbox evidence
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP 'aegis-p0-managed-evidence.json'
+          if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Sandbox evidence is missing.' }
+          $evidence = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+          if ($evidence.source_sha -cne $env:GITHUB_SHA -or
+              $evidence.renderer_identity -cne 'VERIFIED' -or
+              $evidence.sandbox_enforcement -cne 'VERIFIED' -or
+              $evidence.subprocess_cleanup -cne 'VERIFIED') {
+            throw 'Independent renderer identity, sandbox enforcement, or complete subprocess cleanup is not verified.'
+          }
       - name: Remove disposable HTTPS root
         if: always() && steps.trust.outputs.directory != ''
         env:
