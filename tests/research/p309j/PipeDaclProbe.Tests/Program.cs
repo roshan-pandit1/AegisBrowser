@@ -60,10 +60,12 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
-    private static void RunRestrictedFixture(string currentSid, string restrictionSid, bool allowedExpected, string expectedClass)
+    private static void RunRestrictedFixture(string currentSid, string restrictionSid, bool allowedExpected, string expectedClass, bool allowNullRestrictingSid = false)
     {
         string name = @"\\.\pipe\aegis-p309j-probe-" + Guid.NewGuid().ToString("N");
-        string sddl = "D:P(A;;GA;;;" + currentSid + ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)S:(ML;;NW;;;S-1-16-0)";
+        string sddl = "D:P(A;;GA;;;" + currentSid + ")(A;;GRGW;;;RC)(A;;GRGW;;;AC)" +
+            (allowNullRestrictingSid ? "(A;;GRGW;;;S-1-0-0)" : "") +
+            "S:(ML;;NW;;;S-1-16-0)";
         if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out var descriptor, out _))
             throw new InvalidOperationException("SDDL_FAILED: " + Marshal.GetLastWin32Error());
         if (!ConvertStringSidToSidW(restrictionSid, out var sid))
@@ -122,6 +124,11 @@ internal static class Program
             RunFixture("D:P", "DACL_DENIED", false);
             RunRestrictedFixture(sid, "S-1-1-0", false, "WORLD_ONLY");
             RunRestrictedFixture(sid, "S-1-0-0", false, "NULL_ONLY");
+            // This is the only additional restricted SID permitted by the research pipe.
+            // Keep the old-denial control, verify the explicit NULL_SID ACE allows
+            // a matching restricted-token writer, and ensure WORLD_ONLY stays denied.
+            RunRestrictedFixture(sid, "S-1-0-0", true, "NULL_ONLY", allowNullRestrictingSid: true);
+            RunRestrictedFixture(sid, "S-1-1-0", false, "WORLD_ONLY", allowNullRestrictingSid: true);
             using var process = Process.GetCurrentProcess();
             var invalid = PipeDaclProbe.Check(null, process.SafeHandle);
             Check(invalid.Status == "UNAVAILABLE" && invalid.Stage == "HANDLE_INVALID", "missing server handle remains unavailable");
