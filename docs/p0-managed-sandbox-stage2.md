@@ -74,6 +74,27 @@ why the signal was absent. The next bounded check uses CefSharp's documented
 frame-level evaluation API and measures HTTPS navigation independently; it
 still requires a real renderer response and cannot turn a failure into a pass.
 
+On source commit `0c312ba7171c5efd6fdeca0abf7404f8e222a36b`, the
+[frame-level comparison](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44230746664)
+reported a visible WinForms `Shown` callback, local-page load, and a controlled
+HTTPS main-frame HTTP 200 navigation. The loopback TLS server independently
+reported serving the synthetic response using a temporary trusted test CA. The
+frame-level JavaScript request was canceled after its bounded deadline; the
+expected JavaScript result and HTTPS page-content assertion were not obtained.
+The browser `OnBeforeClose` and CEF shutdown calls returned, but the parent
+exited 1 and subprocess discovery remained partial. The test root was removed
+and independent cleanup passed. [Machine-readable evidence](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44230746664/artifacts/14394753859)
+is tied to that source SHA. The later observation does not prove visual
+rendering, renderer identity, all-child termination, or sandbox enforcement.
+
+The production CefSharp renderer uses `CefAppUnmanagedWrapper`, derived from
+`SubProcessApp`, to send context-created notifications and handle evaluation
+messages. It holds managed objects and callbacks; the native-child sample does
+not instantiate it. Supplying that wrapper requires a separately validated
+native/managed subprocess lifecycle or a maintained native equivalent. CLR
+startup in a sandboxed child before `CefExecuteProcess` has not been shown safe,
+and the experiment does not select or ship either solution.
+
 Run `.github/workflows/p0-managed-sandbox.yml` on the experiment branch. The
 workflow calls `tests/research/p0native/build-patched-binding.ps1`, builds the
 native and managed projects in `tests/research/p0managed/`, prepares the
@@ -98,3 +119,21 @@ self-reported process IDs are not enforcement evidence. Actual renderer native
 access denial, an unsandboxed control, full descendant accounting, Aegis
 profile and HTTPS/TLS regressions, and forced-termination behavior remain
 separate mandatory gates.
+
+## Gate status for the tested source commit
+
+| Gate | Result | Scope |
+| --- | --- | --- |
+| Native bootstrap | PASS | Browser-process entry and context forwarding observed; child policy not proven. |
+| Managed CLR hosting | PASS | Browser-only hostfxr and managed CEF initializer executed. |
+| CefSharp subprocess compatibility | FAIL | Browser-level and frame-level JavaScript evaluation did not complete. |
+| Managed WinForms rendering | INCONCLUSIVE | Window and page-load callbacks occurred; visual content was not independently verified. |
+| Controlled HTTPS navigation | PASS | Loopback server response and main-frame HTTP 200 observed with temporary test-root cleanup. |
+| Independent renderer identification | INCONCLUSIVE | Process roles were not independently established. |
+| Sandbox policy observation | INCONCLUSIVE | No verified renderer policy was observed. |
+| Renderer native access denial | BLOCKED | No identified renderer executed the controlled access probe. |
+| Unsandboxed positive control | BLOCKED | Synthetic restricted-token controls are not a paired renderer experiment. |
+| Complete subprocess lifecycle | INCONCLUSIVE | Some retained candidates exited; enumeration and cleanup were partial. |
+| Disposable Aegis compatibility | BLOCKED | The production Aegis app did not run through this host. |
+
+The full milestone and production readiness remain **NO_GO**.
