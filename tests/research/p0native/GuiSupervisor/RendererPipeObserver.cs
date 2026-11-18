@@ -27,6 +27,7 @@ internal sealed class RendererPipeObserver : IDisposable
     private const string Prefix = @"\\.\pipe\aegis-p309i-";
     private const string PidPrefix = "NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=";
     private static readonly byte[] Frame = Encoding.ASCII.GetBytes("P309I_RENDERER_V1\n");
+    private static readonly byte[] BrokerFrame = Encoding.ASCII.GetBytes("P309I_BROKER___V1\n");
     private const uint PipeAccessDuplex = 0x00000003, FileFlagOverlapped = 0x40000000,
         FirstPipeInstance = 0x00080000, RejectRemoteClients = 0x00000008;
     private const uint QueryInformation = 0x0400, QueryLimitedInformation = 0x1000, Synchronize = 0x100000;
@@ -257,7 +258,9 @@ internal sealed class RendererPipeObserver : IDisposable
                 if (count == 0) return Failure("CLIENT_FRAME_TRUNCATED");
                 read += count;
             }
-            if (!bytes.AsSpan().SequenceEqual(Frame)) return Failure("CLIENT_FRAME_INVALID");
+            bool brokered = bytes.AsSpan().SequenceEqual(BrokerFrame);
+            if (!brokered && !bytes.AsSpan().SequenceEqual(Frame))
+                return Failure("CLIENT_FRAME_INVALID");
             string? clientUserSid = null;
             pipe.RunAsClient(() => {
                 if (!OperatingSystem.IsWindows()) return;
@@ -266,9 +269,29 @@ internal sealed class RendererPipeObserver : IDisposable
             });
             if (!string.Equals(clientUserSid, expectedUserSid, StringComparison.Ordinal))
                 return Failure("CLIENT_USER_MISMATCH");
-            if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out uint pid) || pid == 0)
+            if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out uint clientPid) || clientPid == 0)
                 return Failure("CLIENT_PID_UNAVAILABLE");
-            return ObservePid(pid, parent, parentHandle, "CLIENT_CLAIM_ONLY");
+            if (!brokered) return ObservePid(clientPid, parent, parentHandle, "CLIENT_CLAIM_ONLY");
+            // The CEF browser process forwards a PID_RENDERER-sourced frame
+            // event. Require kernel-supplied pipe PID == retained browser PID.
+            // A renderer cannot authenticate itself with this wire message.
+            if (clientPid != checked((uint)parent.Pid))
+                return Failure("BROKER_CLIENT_NOT_BROWSER_PARENT");
+            byte[] target = new byte[sizeof(uint)];
+            int got = 0;
+            while (got < target.Length)
+            {
+                int count = await pipe.ReadAsync(target.AsMemory(got), deadline.Token).ConfigureAwait(false);
+                if (count == 0) return Failure("BROKER_PID_TRUNCATED");
+                got += count;
+            }
+            uint childPid = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(target);
+            if (childPid == 0 || childPid > int.MaxValue || childPid == clientPid)
+                return Failure("BROKER_CHILD_PID_INVALID");
+            // Corroborated native CEF source role + OS-verified browser relay.
+            // The child role and exact file denial remain independently
+            // INCONCLUSIVE until additional role/object binding evidence.
+            return ObservePid(childPid, parent, parentHandle, "CEF_BROWSER_BROKER_ROLE_CLAIM");
         }
         catch (OperationCanceledException) { return Failure("OBSERVATION_TIMEOUT_OR_PARENT_EXIT"); }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or
