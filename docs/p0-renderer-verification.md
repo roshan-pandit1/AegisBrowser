@@ -41,6 +41,36 @@ complete subprocess cleanup; a successful managed browser lifecycle alone
 cannot satisfy it. Synthetic positive and negative controls are identified as
 such and are not renderer enforcement evidence.
 
+On commit `91d85ada66aafae5f954f3d1802e955eb9a9989d`, the
+[native Windows x64 run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44291879882)
+completed the managed browser lifecycle, primitive IPC checks and HTTPS
+fixture, with parent exit 0 and independent removal of the test root. The
+non-CEF positive reader opened the exact retained sentinel file. Renderer-side
+messages claimed `ERROR_ACCESS_DENIED` for the sentinel and pipe opens. The
+observer retained a live child handle associated with a PID claim and observed
+a null-only restricting SID, integrity RID 0, job membership, and disabled
+Win32k system calls. A later `AccessCheck` of that candidate's primary token
+against the pipe DACL returned denied. The role, original thread token,
+mandatory integrity check, exact sentinel object, and actual cause of the
+earlier open failure were not independently established. The result is not
+renderer identity or enforcement proof. The strict security gate failed, as
+required, and [machine-readable evidence](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44291879882/artifacts/14420844912)
+was retained.
+
+The pinned Chromium `USER_LOCKDOWN` token construction uses a null restricting
+SID and makes the user SID deny-only; this source path is consistent with a
+restrictive access model but does not establish that the claimed candidate used
+that exact policy. The pinned CEF DevTools controller attaches to the inspected
+`WebContents`, while Chromium's `SystemInfo.getProcessInfo` requires a browser
+session. The pinned [CEF controller](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/libcef/browser/devtools/devtools_controller.cc)
+attaches to a `WebContents` target; Chromium's [frame agent](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/content/browser/devtools/render_frame_devtools_agent_host.cc),
+[target handler](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/content/browser/devtools/protocol/target_handler.cc)
+and [system-info handler](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/content/browser/devtools/protocol/system_info_handler.cc)
+do not give that page-scoped session browser-target process enumeration. A
+supported, test-only brokered or inherited
+channel with kernel-bound client identity and independent Chromium role
+corroboration remains necessary.
+
 The [first verification-branch run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44288296225)
 failed before CEF started: the test-owned zero-exit helper completed with exit
 code zero before the supervisor retained a process identity. The synthetic
@@ -63,3 +93,16 @@ test root was independently removed.
 No runtime migration, browser-engine upgrade, signing, packaging or production
 integration is authorized by this experiment's success alone. Those release
 requirements remain unverified and require separate evidence.
+
+| Production acceptance area | Result |
+| --- | --- |
+| Independent renderer identification and sandbox policy | INCONCLUSIVE |
+| Renderer native access denial | INCONCLUSIVE: uncorrelated claim |
+| Test-owned non-CEF positive read | PASS: exact retained file identity |
+| Primitive JavaScript, trusted loopback HTTPS, browser close | PASS within the experimental fixture |
+| Full CefSharp IPC, Aegis profiles, tabs, popups and privacy | BLOCKED |
+| Required-proxy refusal under the new host | BLOCKED |
+| Renderer crash recovery and complete subprocess cleanup | INCONCLUSIVE |
+| Supported runtime and patched engine migration | BLOCKED pending sandbox architecture |
+| Signing, notices, SBOM, package, upgrade and rollback | BLOCKED |
+| Production release | NO_GO |
