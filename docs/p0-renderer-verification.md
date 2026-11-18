@@ -106,3 +106,29 @@ requirements remain unverified and require separate evidence.
 | Supported runtime and patched engine migration | BLOCKED pending sandbox architecture |
 | Signing, notices, SBOM, package, upgrade and rollback | BLOCKED |
 | Production release | NO_GO |
+
+## Scoped observation-pipe ACL investigation (November 18, 2026)
+
+The final-head 2146e7a Windows evidence includes a live child **primary token**
+with exactly one NULL restricting SID (`S-1-0-0`) and a later
+`PipeDaclProbe` result of `DACL_DENIED`. The observer's pipe DACL allowed
+current-user, RC and AC access, but not the NULL restricting SID. For a
+restricted token, Windows DACL access checks include the restricting SID pass;
+this offers a specific, testable explanation for the reported pipe
+`ERROR_ACCESS_DENIED`. It does not prove the claimed process was a renderer,
+that its effective thread token matched the primary token, or the original
+failure's cause.
+
+The isolated observation pipe now adds a **read/write ACE for the NULL SID** in
+addition to the current-user ACE and untrusted mandatory label. This does not
+change Chromium sandbox configuration, production pipe/file ACLs, test-sentinel
+ACL, or browser process privileges. A research-only synthetic access-check and
+impersonated `CreateFile` test covers the NULL-restricted positive and a
+WORLD-only restricted negative. All independent identity, enforcement,
+paired-object and descendant-cleanup release gates remain unchanged.
+
+If the observer can connect, the kernel-provided named-pipe client PID can be
+checked against retained OS process handles. A successful pipe connection
+**alone** is not an independently corroborated Chromium renderer role or a
+sandbox enforcement verdict. Evidence must retain the actual run commit and
+original errors. No production release is authorized by this adjustment.
