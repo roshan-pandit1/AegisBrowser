@@ -162,6 +162,7 @@ internal static partial class Program
                     byte[] body = Encoding.UTF8.GetBytes("<!doctype html><body>AEGIS_P0_HTTPS_OK</body>");
                     byte[] header = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
                     tls.Write(header); tls.Write(body); tls.Flush();
+                    Console.WriteLine("P0_HTTPS_RESPONSE_SERVED");
                 }
                 catch (Exception ex) when (ex is IOException or AuthenticationException) { Console.WriteLine("P0_HTTPS_CONNECTION_FAILED: " + ex.GetType().Name); }
             }

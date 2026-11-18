@@ -61,6 +61,19 @@ CefSharp source patch now appends the existing fixed child-intent marker from
 its browser-process launch callback. Child sandbox-context and forbidden-switch
 checks are unchanged. The marker is not identity or sandbox evidence.
 
+The [child-marker run](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44229769353)
+reached the WinForms `Shown` callback and reported local-page load. CefSharp's
+browser-level JavaScript evaluation then rejected the request because its
+renderer-context signal was absent; the process returned 1 after the browser
+close and CEF shutdown callbacks. The pinned CefSharp
+[`CefAppUnmanagedWrapper`](https://github.com/cefsharp/CefSharp/blob/ec1027aa21e1af1217681a349104c15d29bbc21a/CefSharp.BrowserSubprocess.Core/CefAppUnmanagedWrapper.cpp)
+provides the renderer context notification and handles evaluation messages; the
+experiment's native renderer app is not that wrapper. This source difference
+is a concrete compatibility blocker, although the run did not by itself prove
+why the signal was absent. The next bounded check uses CefSharp's documented
+frame-level evaluation API and measures HTTPS navigation independently; it
+still requires a real renderer response and cannot turn a failure into a pass.
+
 Run `.github/workflows/p0-managed-sandbox.yml` on the experiment branch. The
 workflow calls `tests/research/p0native/build-patched-binding.ps1`, builds the
 native and managed projects in `tests/research/p0managed/`, prepares the

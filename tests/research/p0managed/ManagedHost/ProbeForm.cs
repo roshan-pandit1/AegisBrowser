@@ -51,17 +51,22 @@ internal sealed class ProbeForm : Form
         {
             await localLoaded.Task.WaitAsync(TimeSpan.FromSeconds(20));
             Console.WriteLine("MANAGED_EVENT: LOCAL_PAGE_LOADED");
-            var script = await browser.EvaluateScriptAsync("6 * 7").WaitAsync(TimeSpan.FromSeconds(10));
-            if (!script.Success || Convert.ToInt32(script.Result) != 42)
-                throw new InvalidOperationException("JAVASCRIPT_RESULT_MISMATCH");
-            Console.WriteLine("MANAGED_EVENT: JAVASCRIPT_RESULT_VERIFIED");
-
             https = ManagedEntry.ControlledHttpsUri()
                 ?? throw new InvalidOperationException("HTTPS_FIXTURE_UNAVAILABLE");
             browser.Load(https.AbsoluteUri);
             await httpsLoaded.Task.WaitAsync(TimeSpan.FromSeconds(20));
-            var body = await browser.EvaluateScriptAsync("document.body.textContent.trim()")
-                .WaitAsync(TimeSpan.FromSeconds(10));
+            Console.WriteLine("MANAGED_EVENT: HTTPS_NAVIGATION_COMPLETED");
+            // This supported frame API bypasses CefSharp's browser-level
+            // CanExecuteJavascriptInMainFrame precheck; a response is still
+            // required from the renderer and no result is manufactured.
+            using var frame = browser.GetMainFrame();
+            var script = await frame.EvaluateScriptAsync("6 * 7", frame.Url, 1, TimeSpan.FromSeconds(10), false)
+                .WaitAsync(TimeSpan.FromSeconds(12));
+            if (!script.Success || Convert.ToInt32(script.Result) != 42)
+                throw new InvalidOperationException("JAVASCRIPT_RESULT_MISMATCH");
+            Console.WriteLine("MANAGED_EVENT: JAVASCRIPT_RESULT_VERIFIED");
+            var body = await frame.EvaluateScriptAsync("document.body.textContent.trim()", frame.Url, 1, TimeSpan.FromSeconds(10), false)
+                .WaitAsync(TimeSpan.FromSeconds(12));
             if (!body.Success || !string.Equals(body.Result as string, "AEGIS_P0_HTTPS_OK", StringComparison.Ordinal))
                 throw new InvalidOperationException("HTTPS_FIXTURE_CONTENT_MISMATCH");
             Console.WriteLine("MANAGED_EVENT: HTTPS_PAGE_VERIFIED");

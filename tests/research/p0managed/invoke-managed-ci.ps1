@@ -181,7 +181,8 @@ try {
     }
     $fixtureExit = $fixture.ExitCode
     Write-Output ("HTTPS_FIXTURE_EXIT: {0}" -f $fixtureExit)
-    Write-Output ($fixtureOut.GetAwaiter().GetResult())
+    $fixtureLog = $fixtureOut.GetAwaiter().GetResult()
+    Write-Output $fixtureLog
     Write-Output ($fixtureErr.GetAwaiter().GetResult())
     if (Test-Path -LiteralPath $ready -PathType Leaf) { Remove-Item -LiteralPath $ready }
     $fixture.Dispose()
@@ -249,7 +250,7 @@ $markers = @('NATIVE_ENTRY: RunWinMain role=browser sandbox_info=present',
     'MANAGED_HOST: BROWSER_NATIVE_DISPATCH_COMPLETE', 'MANAGED_HOST: HOSTFXR_LOADED role=browser',
     'MANAGED_HOST: RUNTIME_CONFIG_ACCEPTED role=browser', 'MANAGED_HOST: CLR_ENTRY_REQUESTED role=browser sandbox_info=present',
     'MANAGED_EVENT: CEF_INITIALIZED_SANDBOX_CONTEXT_PRESENT', 'MANAGED_EVENT: WINDOW_SHOWN',
-    'MANAGED_EVENT: LOCAL_PAGE_LOADED', 'MANAGED_EVENT: JAVASCRIPT_RESULT_VERIFIED',
+    'MANAGED_EVENT: LOCAL_PAGE_LOADED', 'MANAGED_EVENT: HTTPS_NAVIGATION_COMPLETED', 'MANAGED_EVENT: JAVASCRIPT_RESULT_VERIFIED',
     'MANAGED_EVENT: HTTPS_PAGE_VERIFIED', 'MANAGED_EVENT: BROWSER_BEFORE_CLOSE',
     'MANAGED_EVENT: WINFORMS_LOOP_RETURNED', 'MANAGED_EVENT: CEF_SHUTDOWN_RETURNED',
     'MANAGED_HOST: CLR_ENTRY_RETURNED code=0')
@@ -257,12 +258,14 @@ $missing = @($markers | Where-Object { -not $record.result.Stdout.Text.Contains(
 $evidence = [ordered]@{ source_sha = $env:GITHUB_SHA; process_exit = $record.result.ProcessExit;
     native_exit_code = $record.result.NativeExitCode; output_complete = $record.result.OutputComplete;
     missing_markers = $missing; renderer_identity = 'INCONCLUSIVE'; sandbox_enforcement = 'INCONCLUSIVE';
-    subprocess_cleanup = 'INCONCLUSIVE'; https_fixture_exit = $fixtureExit }
+    subprocess_cleanup = 'INCONCLUSIVE'; https_fixture_exit = $fixtureExit;
+    https_navigation_observed = ($fixtureExit -eq 0 -and $fixtureLog.Contains('P0_HTTPS_RESPONSE_SERVED') -and
+        $record.result.Stdout.Text.Contains('MANAGED_EVENT: HTTPS_NAVIGATION_COMPLETED')) }
 [IO.File]::WriteAllText($evidencePath, ($evidence | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 Write-Output ('MANAGED_EVIDENCE_JSON: ' + ($evidence | ConvertTo-Json -Depth 5 -Compress))
 if ($fixtureExit -ne 0 -or $supervisorExit -ne 0 -or $record.result.NativeExitCode -ne 0 -or
     $record.result.ProcessExit -cne 'NORMAL' -or -not $record.result.OutputComplete -or
-    $null -eq $identity -or $identity.ImageSha256 -cne $expectedBootstrap -or $missing.Count -ne 0) {
+    -not $evidence.https_navigation_observed -or $null -eq $identity -or $identity.ImageSha256 -cne $expectedBootstrap -or $missing.Count -ne 0) {
     throw ("Managed browser lifecycle did not satisfy its gates. Missing markers: " + ($missing -join ', '))
 }
 Write-Output 'MANAGED_BROWSER_LIFECYCLE: OBSERVED; SANDBOX_ENFORCEMENT: INCONCLUSIVE'
