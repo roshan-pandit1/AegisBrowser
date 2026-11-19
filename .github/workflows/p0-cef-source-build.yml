@@ -1,0 +1,81 @@
+name: P0 isolated CEF source build
+
+# workflow_dispatch is available only after this workflow exists on the default
+# branch. Do not copy it there until an administrator has configured the
+# protected environment and a repository-restricted, disposable runner group.
+# The runner must never be available to pull requests or untrusted workflows.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Run qualification only, or build the prepared baseline
+        required: true
+        type: choice
+        options:
+          - preflight
+          - baseline
+        default: preflight
+      depot_tools_revision:
+        description: Independently reviewed full depot_tools commit SHA
+        required: true
+        type: string
+      acknowledgement:
+        description: Enter AUTHORIZE_RESEARCH_BUILD after runner approval
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-isolated-cef-source-builder
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    if: ${{ github.ref == 'refs/heads/experiment/p0-cef-authoritative-lifecycle' && inputs.acknowledgement == 'AUTHORIZE_RESEARCH_BUILD' }}
+    runs-on: [self-hosted, Windows, X64, aegis-cef-isolated]
+    # An administrator MUST create this environment with required reviewers,
+    # restrict its deployment branches, and restrict access to the runner group.
+    # Merely naming an environment here does not configure those protections.
+    environment: aegis-cef-source-build
+    timeout-minutes: 720
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Qualify builder and optionally compile the prepared baseline
+        env:
+          AEGIS_OPERATION: ${{ inputs.operation }}
+          AEGIS_DEPOT_REVISION: ${{ inputs.depot_tools_revision }}
+          AEGIS_DOWNLOAD_ROOT: ${{ vars.AEGIS_CEF_DOWNLOAD_ROOT }}
+          AEGIS_DEPOT_ROOT: ${{ vars.AEGIS_DEPOT_TOOLS_ROOT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:AEGIS_DEPOT_REVISION -cnotmatch '^[0-9a-f]{40}$') {
+            throw 'A reviewed, full lowercase depot_tools commit is required.'
+          }
+          if (-not $env:AEGIS_DOWNLOAD_ROOT -or -not $env:AEGIS_DEPOT_ROOT) {
+            throw 'Configure AEGIS_CEF_DOWNLOAD_ROOT and AEGIS_DEPOT_TOOLS_ROOT in the protected environment.'
+          }
+          if ($env:AEGIS_OPERATION -cnotin @('preflight', 'baseline')) {
+            throw 'Unsupported operation.'
+          }
+          & ./scripts/chromium-build/preflight.ps1 -BuildRoot $env:AEGIS_DOWNLOAD_ROOT -Stage Host
+          if ($LASTEXITCODE -ne 0) { throw 'Builder qualification did not pass.' }
+          if ($env:AEGIS_OPERATION -ceq 'baseline') {
+            # The source must have been prepared separately on this same isolated
+            # builder. This workflow never clones, updates, or cleans a checkout.
+            $evidence = Join-Path $env:RUNNER_TEMP ("aegis-cef-baseline-{0}-{1}" -f $env:GITHUB_RUN_ID, $env:GITHUB_RUN_ATTEMPT)
+            & ./scripts/chromium-build/build-baseline.ps1 -DownloadRoot $env:AEGIS_DOWNLOAD_ROOT `
+              -DepotToolsPath $env:AEGIS_DEPOT_ROOT -ExpectedDepotToolsRevision $env:AEGIS_DEPOT_REVISION `
+              -EvidenceDirectory $evidence -AcknowledgeSourceBuild
+          }
+          Write-Output 'Research only: native smoke, renderer enforcement, and production readiness remain unverified.'
+
+# Build logs and evidence remain on the isolated builder for security review.
+# They may contain machine paths or other sensitive values; do not publish them
+# automatically. This job does not run instrumented or native sandbox tests.
