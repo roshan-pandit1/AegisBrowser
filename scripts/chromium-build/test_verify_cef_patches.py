@@ -143,6 +143,34 @@ class RepositoryTests(unittest.TestCase):
         self.assert_failure('HIDDEN_INDEX_FLAGS', lambda: subject.reconstruct_root(
             self.repo, self.commit, [self.patch_record(patch)]))
 
+    def test_alternate_object_store_is_rejected(self):
+        info = self.repo / '.git' / 'objects' / 'info'
+        info.mkdir(parents=True, exist_ok=True)
+        (info / 'alternates').write_text('untrusted-store\n', encoding='utf-8')
+        self.assert_failure('GIT_OBJECT_INDIRECTION_UNSUPPORTED', lambda: subject.reconstruct_root(
+            self.repo, self.commit, []))
+
+    def test_replace_ref_is_rejected(self):
+        (self.repo / 'file.txt').write_bytes(b'replacement\n')
+        git(self.repo, 'add', 'file.txt')
+        git(self.repo, 'commit', '-qm', 'replacement')
+        replacement = git(self.repo, 'rev-parse', 'HEAD').decode().strip()
+        git(self.repo, 'replace', self.commit, replacement)
+        self.assert_failure('GIT_REPLACE_REFS_UNSUPPORTED', lambda: subject.reconstruct_root(
+            self.repo, self.commit, []))
+
+    def test_configured_clean_filter_is_rejected_before_worktree_diff(self):
+        git(self.repo, 'config', 'filter.sentinel.clean', 'should-never-run')
+        self.assert_failure('GIT_FILTER_CONFIGURATION_UNSUPPORTED', lambda: subject.reconstruct_root(
+            self.repo, self.commit, []))
+
+    def test_git_environment_drops_external_redirection(self):
+        with mock.patch.dict(os.environ, {'GIT_DIR': 'external', 'GIT_INDEX_FILE': 'external'}):
+            env = subject.git_environment()
+        self.assertNotIn('GIT_DIR', env)
+        self.assertNotIn('GIT_INDEX_FILE', env)
+        self.assertEqual(env['GIT_NO_REPLACE_OBJECTS'], '1')
+
     def test_partial_patch_rejected(self):
         patch = self.patch() + b'\nthis is not a valid second diff\n'
         # The expected content differs from what was actually checked out.

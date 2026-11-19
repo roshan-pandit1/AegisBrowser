@@ -40,6 +40,7 @@ def git_environment(index=None):
     env['GIT_CONFIG_GLOBAL'] = os.devnull
     env['GIT_TERMINAL_PROMPT'] = '0'
     env['GIT_OPTIONAL_LOCKS'] = '0'
+    env['GIT_NO_REPLACE_OBJECTS'] = '1'
     if index is not None:
         env['GIT_INDEX_FILE'] = str(index)
     return env
@@ -57,6 +58,7 @@ def run_git(repo, args, *, data=None, env=None, check=True):
 
 def checkout_identity(repo, revision, origin):
     path = Path(repo).resolve(strict=True)
+    assert_no_object_indirection(path)
     top = run_git(path, ['rev-parse', '--show-toplevel']).stdout.decode().strip()
     if Path(top).resolve() != path:
         raise VerifyError('REPOSITORY_ROOT_MISMATCH')
@@ -69,6 +71,38 @@ def checkout_identity(repo, revision, origin):
     return path
 
 
+def assert_no_object_indirection(repo):
+    """Reject repository-controlled object substitution or borrowed stores."""
+    for suffix in ('info/grafts', 'objects/info/alternates'):
+        raw = run_git(repo, ['rev-parse', '--git-path', suffix]).stdout.decode('utf-8').strip()
+        path = Path(raw)
+        if not path.is_absolute():
+            path = Path(repo) / path
+        if path.exists() or path.is_symlink():
+            raise VerifyError('GIT_OBJECT_INDIRECTION_UNSUPPORTED')
+    if run_git(repo, ['for-each-ref', '--format=%(refname)', 'refs/replace/']).stdout.strip():
+        raise VerifyError('GIT_REPLACE_REFS_UNSUPPORTED')
+    # git diff may invoke clean/process filters configured by the checkout.
+    # Reject them before examining worktree content; --no-ext-diff alone does
+    # not disable clean filters. System/global config is disabled separately.
+    filters = run_git(repo, ['config', '--includes', '--get-regexp',
+                             r'^filter\..*\.(clean|process|required)$'], check=False)
+    if filters.returncode == 0:
+        raise VerifyError('GIT_FILTER_CONFIGURATION_UNSUPPORTED')
+    if filters.returncode != 1:
+        raise VerifyError('GIT_FILTER_CONFIGURATION_UNREADABLE')
+
+
+def assert_no_symlink_components(root, name):
+    current = Path(root)
+    for component in PurePosixPath(name).parts:
+        current = current / component
+        if current.is_symlink():
+            raise VerifyError('PINNED_FILE_SYMLINK_COMPONENT')
+        if current.exists() and getattr(current.lstat(), 'st_file_attributes', 0) & 0x400:
+            raise VerifyError('PINNED_FILE_SYMLINK_COMPONENT')
+
+
 def clean_repository(repo):
     status = run_git(repo, ['status', '--porcelain=v1', '--untracked-files=all']).stdout
     if status:
@@ -76,6 +110,7 @@ def clean_repository(repo):
 
 
 def committed_file(repo, name):
+    assert_no_symlink_components(repo, name)
     p = Path(repo) / Path(*PurePosixPath(name).parts)
     if p.is_symlink() or not p.is_file():
         raise VerifyError('PINNED_FILE_MISSING_OR_SYMLINK')
@@ -144,6 +179,7 @@ def patch_plan(cef, config, environment):
 def reconstruct_root(repo, commit, patches):
     # Clone shares read-only source objects but has its own index, refs and new
     # objects. Never apply a patch or write an index in the prepared checkout.
+    assert_no_object_indirection(repo)
     flags = run_git(repo, ['ls-files', '-v', '-z']).stdout.split(b'\0')
     if any(v and (v[:1] == b'S' or v[:1].islower()) for v in flags):
         raise VerifyError('HIDDEN_INDEX_FLAGS')
@@ -183,6 +219,120 @@ def reconstruct_root(repo, commit, patches):
         return expected, actual
 
 
+def resolve_direct_deps_from_committed_file(chromium, targets):
+    """Resolve simple direct DEPS declarations without executing DEPS.
+
+    This reports candidate mappings, not authenticated gclient resolution.
+    In particular, external .gclient custom_deps/custom_vars and nested DEPS
+    overrides are not checked here. Callers must not use these candidates to
+    authorize a build until those inputs are independently established.
+    """
+    data = committed_file(chromium, 'DEPS')
+    try:
+        tree = ast.parse(data.decode('utf-8'))
+        selected = {}
+        for node in tree.body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                nodes = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in nodes:
+                    if isinstance(target, ast.Name) and target.id in ('vars', 'deps'):
+                        if target.id in selected or not isinstance(node, ast.Assign):
+                            raise ValueError()
+                        if len(node.targets) != 1 or not isinstance(node.value, ast.Dict):
+                            raise ValueError()
+                        selected[target.id] = node.value
+                    elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) and target.value.id in ('vars', 'deps'):
+                        raise ValueError()
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
+                value = node.value.func.value
+                if isinstance(value, ast.Name) and value.id in ('vars', 'deps'):
+                    raise ValueError()
+        if set(selected) != {'vars', 'deps'}:
+            raise ValueError()
+        def entries(node):
+            out = {}
+            for key, val in zip(node.keys, node.values):
+                if not isinstance(key, ast.Constant) or not isinstance(key.value, str) or key.value in out:
+                    raise ValueError()
+                out[key.value] = val
+            return out
+        variables, deps = entries(selected['vars']), entries(selected['deps'])
+        def evaluate(node):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return node.value
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                return evaluate(node.left) + evaluate(node.right)
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'Var'
+                    and len(node.args) == 1 and not node.keywords and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                value = variables[node.args[0].value]
+                if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+                    raise ValueError()
+                return value.value
+            raise ValueError()
+        result = {}
+        for target in targets:
+            if not isinstance(target, str) or not target or '\\' in target or ':' in target or any(
+                    p in ('', '.', '..') for p in target.split('/')):
+                raise ValueError()
+            dep_name = 'src/' + target
+            value = evaluate(deps[dep_name])
+            remote, sep, revision = value.rpartition('@')
+            if not sep or not SHA.fullmatch(revision) or not re.fullmatch(
+                    r'https://(?:chromium|dawn)\.googlesource\.com/[A-Za-z0-9_./-]+', remote):
+                raise ValueError()
+            result[target] = {'origin': remote, 'revision': revision}
+        return result
+    except (SyntaxError, UnicodeError, ValueError, TypeError, KeyError, RecursionError):
+        raise VerifyError('DEPS_RESOLUTION_UNSUPPORTED', 'INCONCLUSIVE')
+
+
+def dependency_repo_path(chromium, relative):
+    """Reject path escapes and verify the directory is its own Git root."""
+    root = Path(chromium).resolve(strict=True)
+    current = root
+    for component in relative.split('/'):
+        if component in ('', '.', '..') or '\\' in component or ':' in component:
+            raise VerifyError('INVALID_DEPENDENCY_PATH')
+        current = current / component
+        try:
+            item = current.lstat()
+        except FileNotFoundError:
+            raise VerifyError('DEPENDENCY_CHECKOUT_MISSING', 'INCONCLUSIVE')
+        if current.is_symlink() or getattr(item, 'st_file_attributes', 0) & 0x400:
+            raise VerifyError('DEPENDENCY_REPARSE_POINT')
+    metadata = current / '.git'
+    if (metadata.is_symlink() or not metadata.is_dir() or
+            getattr(metadata.lstat(), 'st_file_attributes', 0) & 0x400):
+        raise VerifyError('DEPENDENCY_GIT_BOUNDARY_UNSUPPORTED', 'INCONCLUSIVE')
+    for relative_git_path in ('objects/info/alternates', 'info/grafts'):
+        if (metadata / relative_git_path).exists():
+            raise VerifyError('DEPENDENCY_OBJECT_REDIRECTION_UNSUPPORTED', 'INCONCLUSIVE')
+    return current
+
+
+def reconstruct_direct_dependencies(chromium, plan):
+    """Compare direct dependency roots; never authorizes full CEF provenance.
+
+    This isolated helper is intentionally not wired to the build preflight:
+    .gclient overrides, dependency hooks, ignored generated inputs, early-vs-
+    final patch phases and cross-repository snapshot atomicity remain unresolved.
+    """
+    targets = list(dict.fromkeys(p['target'] for p in plan if p['enabled'] and p['target']))
+    candidates = resolve_direct_deps_from_committed_file(chromium, targets)
+    results = []
+    for target in targets:
+        path = dependency_repo_path(chromium, target)
+        candidate = candidates[target]
+        checkout_identity(path, candidate['revision'], candidate['origin'])
+        patches = [p for p in plan if p['enabled'] and p['target'] == target]
+        expected, actual = reconstruct_root(path, candidate['revision'], patches)
+        results.append({'path': target, 'revision': candidate['revision'],
+                        'expected_tree': expected, 'actual_tree': actual})
+    return {'status': 'INCONCLUSIVE', 'reason': 'EXTERNAL_DEPENDENCY_RESOLUTION_AND_BUILD_PHASE_UNVERIFIED',
+            'repositories': results}
+
+
 def verify(chromium, cef, depot, depot_commit):
     if not SHA.fullmatch(depot_commit):
         raise VerifyError('INVALID_DEPOT_REVISION')
@@ -208,10 +358,16 @@ def verify(chromium, cef, depot, depot_commit):
     # generated files have not yet been independently established. Refuse to
     # authorize rather than verify only the Chromium root and call it complete.
     if any(p['enabled'] and p['target'] for p in plan):
+        try:
+            evidence['dependency_comparisons'] = reconstruct_direct_dependencies(chromium, plan)
+        except VerifyError as error:
+            raise VerifyError(error.code, error.status, evidence) from error
+        # Direct DEPS is only a candidate: .gclient overrides, hooks and the
+        # post-hook compiler-input boundary are not independently authenticated.
         raise VerifyError('MULTI_REPOSITORY_PROVENANCE_UNSUPPORTED', 'INCONCLUSIVE', evidence)
     expected, actual = reconstruct_root(chromium, CHROMIUM_COMMIT, [p for p in plan if p['enabled']])
-    return dict(evidence, schema='aegis-cef-patch-provenance-v1', status='VERIFIED',
-                expected_tree=expected, actual_tree=actual)
+    evidence.update(expected_tree=expected, actual_tree=actual)
+    raise VerifyError('COMPILER_INPUT_PROVENANCE_UNSUPPORTED', 'INCONCLUSIVE', evidence)
 
 
 def main(argv=None):

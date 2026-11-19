@@ -108,16 +108,25 @@ The wrapper below will fail closed if its stricter preflight cannot establish
 source provenance. `verify_cef_patches.py` parses a literal patch config without
 executing it, checks committed patch bytes and can compare a single-root patch
 reconstruction in a disposable Git clone. The actual pinned CEF configuration
-also targets multiple dependency repositories. Their revision and patch
-provenance is not implemented, so it returns `INCONCLUSIVE` for this checkout.
-Ignored files also require explicit review. An ordinary synchronized checkout
-therefore remains blocked even on a qualified builder.
+also targets multiple dependency repositories. The verifier can independently
+reconstruct direct DEPS string/`Var` candidates in separate repositories, but these
+candidates do not authenticate gclient overrides, nested dependency selection,
+hook outputs, or toolchain inputs. Even when candidate trees match, the full
+result remains `INCONCLUSIVE`. Ignored files require explicit review. An ordinary
+synchronized checkout therefore remains blocked even on a qualified builder.
 
 There is a separate build-order blocker: pinned CEF's no-build sync applies the
 runhooks patch, while its later build hook applies the remaining patch series.
 The wrapper cannot yet verify the post-hook inputs immediately before compiler
 execution, and deliberately refuses to start the automator. Do not bypass either
 gate, discard patches or describe the source as a verified baseline.
+
+`cef_phase_plan.py` models the expected early and later patch ordering without
+claiming either phase ran. `input_snapshot.py` can compare selected directory
+contents, including ignored files, but its results are observational: they do not
+freeze a workspace or identify all compiler inputs. Neither helper authorizes a
+build. Verification must also address mutable shared Git object stores and trusted
+tool identities before any compiler-input claim.
 
 An acquisition verification can optionally invoke the verifier and write a new
 report outside the source and tool checkouts:
@@ -175,6 +184,9 @@ and do not qualify the current machine as a builder:
 .\scripts\chromium-build\test-build-baseline.ps1
 python3 -B -m unittest discover -s scripts/chromium-build -p test_acquire_source.py -v
 python3 -B -m unittest discover -s scripts/chromium-build -p test_verify_cef_patches.py -v
+python3 -B -m unittest discover -s scripts/chromium-build -p test_multi_repository_provenance.py -v
+python3 -B -m unittest discover -s scripts/chromium-build -p test_cef_phase_plan.py -v
+python3 -B -m unittest discover -s scripts/chromium-build -p test_input_snapshot.py -v
 ```
 
 Keep failed logs and manifests in a restricted disposable evidence location.
