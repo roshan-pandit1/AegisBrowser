@@ -35,7 +35,9 @@ function Get-AegisChromiumChecks {
     if ($Stage -eq 'Build') {
         Add-Check 'chromium_revision' $Observed.ChromiumRevisionMatches 'Chromium b859317bf11f6be47f9b7799ec690a0a42a1fb33' $true
         Add-Check 'cef_revision' $Observed.CefRevisionMatches 'CEF 14c5a089e8452874cb1a556dc3fde26ed2d87723' $true
-        Add-Check 'chromium_checkout_provenance' $Observed.ChromiumClean 'Clean source, or separately verified expected CEF patch provenance' $true
+        # Even a clean checkout does not establish that no patches are expected.
+        # This value is produced only by a fresh verifier invocation in this run.
+        Add-Check 'chromium_checkout_provenance' $Observed.ChromiumProvenance 'Fresh independently verified CEF patch provenance' $true
         Add-Check 'cef_checkout_clean' $Observed.CefClean 'No unrelated CEF working-tree changes' $true
     }
     return ,$checks.ToArray()
@@ -44,4 +46,12 @@ function Get-AegisChromiumChecks {
 function Test-AegisChromiumQualification {
     param([Parameter(Mandatory)][object[]] $Checks)
     return (@($Checks | Where-Object { $_.required -and $_.status -cne 'PASS' }).Count -eq 0)
+}
+
+function Assert-AegisPostHookCompilerInputBinding {
+    # CEF's build automator invokes hooks that may change source after the
+    # preflight comparison. No implemented gate yet re-verifies the actual
+    # post-hook source tree before the compiler reads it. Do not authorize the
+    # automator based only on a previously verified pre-hook state.
+    throw 'BUILD_NOT_STARTED: post-hook source provenance is not bound to compiler inputs.'
 }

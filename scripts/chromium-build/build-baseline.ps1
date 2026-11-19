@@ -9,6 +9,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'preflight-lib.ps1')
 
 # This wrapper builds only the pinned, uninstrumented baseline. A successful
 # compiler exit is not a native smoke test, sandbox proof, or release approval.
@@ -53,15 +54,6 @@ $preflight = Join-Path $PSScriptRoot 'preflight.ps1'
 foreach ($required in @($src, $cef, $cefInSrc, $automate, $preflight, (Join-Path $depot 'python3.bat'))) {
     if (-not (Test-Path -LiteralPath $required)) { throw 'BUILD_NOT_STARTED: required prepared source, tool or preflight is missing.' }
 }
-
-# Require the stricter source stage. In particular, a modified Chromium tree
-# cannot be called a stock baseline merely because its HEAD matches the pin.
-$preflightJson = (& $preflight -BuildRoot $root -Stage Build -DepotToolsPath $depot `
-    -ExpectedDepotToolsRevision $ExpectedDepotToolsRevision -ChromiumSourcePath $src -CefSourcePath $cef | Out-String)
-$preflightExit = $LASTEXITCODE
-if ($preflightExit -ne 0) { throw ('BUILD_NOT_STARTED: preflight was not qualified: ' + $preflightJson) }
-$preflightResult = $preflightJson | ConvertFrom-Json
-if ($preflightResult.qualified -ne $true) { throw 'BUILD_NOT_STARTED: preflight did not report qualified.' }
 
 function Assert-Revision([string]$path, [string]$expected, [string]$label) {
     $actual = (& git -C $path rev-parse --verify HEAD).Trim()
@@ -134,6 +126,24 @@ try {
     $env:DEPOT_TOOLS_UPDATE = '0'
     $env:DEPOT_TOOLS_WIN_TOOLCHAIN = '0'
     $env:GN_DEFINES = 'is_official_build=false is_component_build=false symbol_level=1'
+    # A source report from a previous command never authorizes this build.
+    # Generate and consume fresh evidence immediately before invoking CEF.
+    $provenancePath = Join-Path $evidence 'source-provenance.json'
+    $preflightJson = (& $preflight -BuildRoot $root -Stage Build -DepotToolsPath $depot `
+        -ExpectedDepotToolsRevision $ExpectedDepotToolsRevision -ChromiumSourcePath $src -CefSourcePath $cef `
+        -ProvenanceReportPath $provenancePath | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw ('BUILD_NOT_STARTED: preflight was not qualified: ' + $preflightJson) }
+    $preflightResult = $preflightJson | ConvertFrom-Json
+    if ($preflightResult.qualified -ne $true -or -not (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
+        throw 'BUILD_NOT_STARTED: fresh provenance preflight did not report qualified.'
+    }
+    $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
+    if ($provenance.status -cne 'VERIFIED') { throw 'BUILD_NOT_STARTED: source provenance is not verified.' }
+    $manifest.source_patch_provenance = 'VERIFIED'
+    $manifest.artifacts += [ordered]@{ name = 'source-provenance.json'; sha256 = (Get-FileHash -LiteralPath $provenancePath -Algorithm SHA256).Hash.ToLowerInvariant() }
+    $manifest.build = 'BLOCKED_POST_HOOK_PROVENANCE'
+    Save-Manifest
+    Assert-AegisPostHookCompilerInputBinding
     $argsList = @($automate, "--download-dir=$root", "--depot-tools-dir=$depot", "--branch=$cefBranch",
         "--checkout=$cefCommit", "--chromium-checkout=$chromiumTag", '--no-update', '--force-build',
         '--no-debug-build', '--no-distrib', '--x64-build', '--build-target=cefsimple', '--build-log-file')
@@ -168,7 +178,7 @@ try {
         if ((Get-PeMachine $file) -ne 0x8664) { throw "CEF_BUILD_OUTPUT_NOT_X64: $name" }
         $manifest.artifacts += [ordered]@{ name = $name; machine = 'AMD64'; sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }
     }
-    $manifest.build = 'COMPILED_SOURCE_PROVENANCE_INCONCLUSIVE'
+    $manifest.build = 'COMPILED'
 } catch {
     if ($manifest.build -eq 'IN_PROGRESS') { $manifest.build = 'FAILED' }
     throw

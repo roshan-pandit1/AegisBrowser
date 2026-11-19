@@ -5,7 +5,8 @@ param(
     [string] $DepotToolsPath,
     [string] $ExpectedDepotToolsRevision,
     [string] $ChromiumSourcePath,
-    [string] $CefSourcePath
+    [string] $CefSourcePath,
+    [string] $ProvenanceReportPath
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -19,7 +20,7 @@ $o = @{
     SdkVersion=$null; GitReady=$null; PythonReady=$null; WindowsLongPaths=$null; GitLongPaths=$null;
     DepotToolsFiles=$null; DepotToolsOrigin=$null; DepotToolsRevisionMatches=$null; DepotToolsClean=$null;
     DepotToolsRevision=$null; ChromiumRevisionMatches=$null; CefRevisionMatches=$null;
-    ChromiumClean=$null; CefClean=$null; ChromiumRevision=$null; CefRevision=$null
+    ChromiumProvenance=$null; CefClean=$null; ChromiumRevision=$null; CefRevision=$null
 }
 try {
     $o.WindowsX64 = ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
@@ -162,13 +163,34 @@ if ($Stage -eq 'Build') {
         $chromium = Get-GitCheckoutState $ChromiumSourcePath 'b859317bf11f6be47f9b7799ec690a0a42a1fb33'
         if ($null -ne $chromium) {
             $o.ChromiumRevision=$chromium.revision; $o.ChromiumRevisionMatches=$chromium.matches
-            if ($chromium.clean) { $o.ChromiumClean=$true }
-            # CEF's legitimate patch series changes Chromium; without independent
-            # patch-provenance evidence, do not classify that state as verified.
         }
         $cef = Get-GitCheckoutState $CefSourcePath '14c5a089e8452874cb1a556dc3fde26ed2d87723'
         if ($null -ne $cef) { $o.CefRevision=$cef.revision; $o.CefRevisionMatches=$cef.matches; $o.CefClean=$cef.clean }
     } catch { }
+    # Never accept a supplied or cached report as authority. A new verifier
+    # process must reconstruct and compare the current checkout in this run.
+    try {
+        $verifier = Join-Path $PSScriptRoot 'verify_cef_patches.py'
+        if ($python -and $ChromiumSourcePath -and $CefSourcePath -and $DepotToolsPath -and
+            $ExpectedDepotToolsRevision -cmatch '^[0-9a-f]{40}$' -and $ProvenanceReportPath -and
+            [IO.Path]::IsPathRooted($ProvenanceReportPath) -and
+            -not (Test-Path -LiteralPath $ProvenanceReportPath) -and
+            (Test-Path -LiteralPath $verifier -PathType Leaf)) {
+            $o.ChromiumProvenance = $false
+            $null = & $python.Source -I $verifier --chromium-source $ChromiumSourcePath `
+                --cef-source $CefSourcePath --depot-tools $DepotToolsPath `
+                --depot-tools-commit $ExpectedDepotToolsRevision --report $ProvenanceReportPath 2>$null
+            $verifierExit = $LASTEXITCODE
+            if (Test-Path -LiteralPath $ProvenanceReportPath -PathType Leaf) {
+                $report = Get-Content -LiteralPath $ProvenanceReportPath -Raw | ConvertFrom-Json
+                if ($verifierExit -eq 0 -and $report.status -ceq 'VERIFIED') {
+                    $o.ChromiumProvenance = $true
+                } elseif ($report.status -cin @('INCONCLUSIVE','BLOCKED','NOT_RUN')) {
+                    $o.ChromiumProvenance = $null
+                }
+            }
+        }
+    } catch { $o.ChromiumProvenance = $false }
 }
 $checks = Get-AegisChromiumChecks -Observed $o -Stage $Stage
 $qualified = Test-AegisChromiumQualification -Checks $checks

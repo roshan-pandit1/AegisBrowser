@@ -15,6 +15,15 @@ sandbox enforcement. A source build, native launch and all security gates remain
 | CefSharp reference | `154.0.340`, `ec1027aa21e1af1217681a349104c15d29bbc21a` |
 | depot_tools | A full, independently reviewed commit supplied by the operator; the pinned CEF metadata does not pin one. |
 
+The pinned [Chromium DEPS](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/DEPS)
+selects `c101dcbe0489c455fce7c2247bfee19680b116c3` for its internal
+`third_party/depot_tools` checkout. An [official Chromium infrastructure roll](https://chromium.googlesource.com/infra/infra/+/e5c61e89fa99c163707961b40ad40669e9b7a4ff)
+and [Skia roller record](https://skia.googlesource.com/buildbot/+/33b93dc8a94158af5a61cb76e55ceab6b4f8c46c)
+identify the change on 2026-08-31. It is a candidate for the external bootstrap,
+not a verified compatibility guarantee: source sync on a qualified builder is
+still required. The scripts require an explicit revision rather than silently
+selecting a moving branch.
+
 CEF's pinned [compatibility metadata](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/CHROMIUM_BUILD_COMPATIBILITY.txt)
 specifies the Chromium tag. Follow the matching
 [CEF automated build instructions](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/docs/automated_build_setup.md)
@@ -93,28 +102,45 @@ prepared empty root for another attempt. `verify` writes a new
 Its structured output records source revisions and the Chromium diff hash, but
 does not independently establish that the diff is the expected CEF patch set.
 
-### Baseline build gate and current limitation
+### Baseline build gate and current limitations
 
 The wrapper below will fail closed if its stricter preflight cannot establish
-source provenance. In particular, upstream CEF may legitimately patch Chromium,
-but these scripts do not yet independently verify that patch set. Thus an
-ordinary synchronized checkout can be blocked even on a qualified builder.
-Do not bypass the gate, discard patches or call the checkout an unmodified
-baseline. Implement and independently review patch-provenance verification
-before attempting to use this automation on that state.
+source provenance. `verify_cef_patches.py` parses a literal patch config without
+executing it, checks committed patch bytes and can compare a single-root patch
+reconstruction in a disposable Git clone. The actual pinned CEF configuration
+also targets multiple dependency repositories. Their revision and patch
+provenance is not implemented, so it returns `INCONCLUSIVE` for this checkout.
+Ignored files also require explicit review. An ordinary synchronized checkout
+therefore remains blocked even on a qualified builder.
 
-If all preflight checks genuinely pass, an authorized operator can attempt the
-baseline build, with a new evidence path outside both checkout and depot_tools:
+There is a separate build-order blocker: pinned CEF's no-build sync applies the
+runhooks patch, while its later build hook applies the remaining patch series.
+The wrapper cannot yet verify the post-hook inputs immediately before compiler
+execution, and deliberately refuses to start the automator. Do not bypass either
+gate, discard patches or describe the source as a verified baseline.
+
+An acquisition verification can optionally invoke the verifier and write a new
+report outside the source and tool checkouts:
+
+```powershell
+python3 .\scripts\chromium-build\acquire_source.py verify --workspace $workspace --download-root "$workspace\baseline" --depot-tools-commit $depotRevision --patch-report 'C:\cef-evidence\patch-report.json'
+```
+
+The dependency snapshot is created first and must not already exist. In the
+current implementation the pinned multi-repository case cannot return VERIFIED.
+
+After multi-repository verification and post-hook input binding have been
+implemented and reviewed, the intended wrapper invocation uses a new evidence
+path outside both checkout and depot_tools. **It currently refuses to build**:
 
 ```powershell
 New-Item -ItemType Directory -Path 'C:\cef-evidence' -ErrorAction SilentlyContinue
 .\scripts\chromium-build\build-baseline.ps1 -DownloadRoot "$workspace\baseline" -DepotToolsPath "$workspace\depot_tools" -ExpectedDepotToolsRevision $depotRevision -EvidenceDirectory 'C:\cef-evidence\baseline-001' -AcknowledgeSourceBuild
 ```
 
-The wrapper builds the pinned, uninstrumented target and records timestamps,
-configuration, exit status and output hashes when available. Even a successful
-compiler exit is labeled `COMPILED_SOURCE_PROVENANCE_INCONCLUSIVE`; inspect the
-manifest and logs. It does **not** launch CEF or establish browser, renderer,
+The intended wrapper records timestamps, configuration, exit status, source
+provenance and output hashes when available. It does **not** currently start a
+build or launch CEF, and does not establish browser, renderer,
 lockdown or cleanup behavior. There is no instrumented-build or security-test
 implementation in this package. Do not publish output as a production runtime.
 The bounded `watch-space.ps1` monitor can be run in a separate operator session:
@@ -148,6 +174,7 @@ and do not qualify the current machine as a builder:
 .\scripts\chromium-build\test-preflight.ps1
 .\scripts\chromium-build\test-build-baseline.ps1
 python3 -B -m unittest discover -s scripts/chromium-build -p test_acquire_source.py -v
+python3 -B -m unittest discover -s scripts/chromium-build -p test_verify_cef_patches.py -v
 ```
 
 Keep failed logs and manifests in a restricted disposable evidence location.

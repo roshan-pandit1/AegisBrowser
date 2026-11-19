@@ -282,6 +282,7 @@ def main(argv=None) -> int:
     parser.add_argument("--workspace", required=True, help="Existing short NTFS builder root; no spaces.")
     parser.add_argument("--depot-tools-commit", required=True, help="Explicit reviewed depot_tools full SHA; CEF metadata does not pin it.")
     parser.add_argument("--download-root", help="Direct baseline or instrumented child of workspace.")
+    parser.add_argument("--patch-report", help="For verify only: new external provenance-report path; invokes the fail-closed verifier.")
     parser.add_argument("--timeout-minutes", type=int, default=360, help="Source sync process deadline (1..720).")
     parser.add_argument("--execute", action="store_true", help="Explicitly authorize tools or checkout mutations.")
     args = parser.parse_args(argv)
@@ -297,6 +298,8 @@ def main(argv=None) -> int:
         if not 1 <= args.timeout_minutes <= 720:
             raise AcquisitionError("TIMEOUT_OUT_OF_RANGE")
         if args.action == "tools":
+            if args.patch_report:
+                raise AcquisitionError("PATCH_REPORT_ONLY_FOR_VERIFY")
             prepare_tools(workspace, revision)
         else:
             if not args.download_root:
@@ -304,11 +307,26 @@ def main(argv=None) -> int:
             download = checked_path(Path(args.download_root))
             validate_layout(workspace, download)
             if args.action == "checkout":
+                if args.patch_report:
+                    raise AcquisitionError("PATCH_REPORT_ONLY_FOR_VERIFY")
                 acquire(workspace, download, revision, args.timeout_minutes)
             else:
                 # verify creates only an explicitly named new dependency snapshot;
                 # it never updates/reverts any source checkout.
-                print(json.dumps(verify(workspace, download, revision), indent=2))
+                result = verify(workspace, download, revision)
+                if args.patch_report:
+                    verifier = Path(__file__).resolve().with_name('verify_cef_patches.py')
+                    report = checked_path(Path(args.patch_report))
+                    try:
+                        run([sys.executable, '-I', str(verifier), '--chromium-source',
+                             str(download / 'chromium' / 'src'), '--cef-source', str(download / 'cef'),
+                             '--depot-tools', str(workspace / 'depot_tools'), '--depot-tools-commit',
+                             revision, '--report', str(report)], timeout=3600)
+                    except AcquisitionError:
+                        raise AcquisitionError('PATCH_PROVENANCE_NOT_VERIFIED_SEE_REPORT')
+                    result['patch_provenance'] = {'file': report.name,
+                                                  'sha256': hashlib.sha256(report.read_bytes()).hexdigest()}
+                print(json.dumps(result, indent=2))
         return 0
     except (AcquisitionError, OSError, UnicodeError) as exc:
         print("SOURCE_ACQUISITION_FAILED: " + str(exc), file=sys.stderr)
