@@ -132,3 +132,169 @@ checked against retained OS process handles. A successful pipe connection
 **alone** is not an independently corroborated Chromium renderer role or a
 sandbox enforcement verdict. Evidence must retain the actual run commit and
 original errors. No production release is authorized by this adjustment.
+
+## Brokered observation follow-up
+
+The PR #79 head `e0dd75742c5fa760f889fdafce80a7ff9182c674` was exercised in
+[Windows x64 run 44298542524](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44298542524).
+Its managed browser loaded the controlled HTTPS page, evaluated JavaScript,
+and shut down normally. The browser-owned broker relayed a claimed renderer
+PID; a retained child handle showed a restricted token and Win32k mitigation.
+The final security gate **failed**: the renderer role, exact-object denial and
+complete subprocess cleanup remain inconclusive. The non-CEF reader opened
+the retained sentinel in that run; that does not authenticate the separate
+renderer denial claim.
+
+Two test-harness defects are corrected in this follow-up. Previously a stdout
+claim and the broker competed for one observation slot, so the untrusted
+stdout claim could prevent the broker observation. Each path now gets at most
+one retained candidate; conflicting process identities remain inconclusive,
+and both handles are closed. The passive tracker previously stopped after 128
+snapshots (about 25.6 seconds) even when the supervisor allowed 90 seconds.
+Its scan budget now follows the validated supervisor deadline, capped at 601
+snapshots. Sampling can still miss short-lived processes, and it never proves
+complete descendant accounting or cleanup.
+
+Local Windows ARM64/x64-emulation tests passed 45 synthetic pipe-observer
+checks and 38 passive-process checks. These are not Chromium renderer tests.
+The local sentinel self-test failed with
+`POSITIVE_CONTROL_POSITIVE_TOKEN_NOT_ESTABLISHED`; no result from that run is
+treated as an unrestricted positive control or sandbox evidence. The hosted
+Windows x64 test must be assessed separately.
+
+The pinned CEF internal frame implementation exposes its render-frame host,
+but the public CEF frame API does not expose the corresponding OS process
+handle. Pinned Chromium's browser-side tracing emits a frame/process mapping.
+The experimental managed fixture now tries a bounded page-target tracing
+probe through CefSharp's in-process DevTools API, with no remote debugging
+port. It accepts only a matching browser PID and DevTools main-frame ID,
+limits data and rejects ambiguous observations; unconfirmed tracing shutdown
+fails the fixture. Five synthetic parsing checks pass locally. Actual CEF
+tracing, process-handle binding, liveness and navigation races are not yet
+verified. This diagnostic does not establish authoritative renderer identity.
+
+The relevant upstream implementations are pinned
+[Chromium tracing_handler.cc](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/content/browser/devtools/protocol/tracing_handler.cc)
+and [CEF frame_host_impl.cc](https://github.com/chromiumembedded/cef/blob/14c5a089e8452874cb1a556dc3fde26ed2d87723/libcef/browser/frame_host_impl.cc).
+Renderer identity, real enforcement, full CefSharp compatibility and
+complete cleanup remain release blockers.
+
+The first native run of the tracing probe, on commit `ef23b7b`, is
+[run 44303868493](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44303868493).
+It reported one current-main-frame trace candidate and a different earlier
+broker candidate; a process with the trace PID also appeared in passive
+tracking. The managed HTTPS and shutdown fixture succeeded, but the security
+gate failed: shared output and independently sampled PIDs did not authenticate
+the trace or bind it to a live handle at the trace time.
+
+The subsequent test-only handoff uses a separate supervisor pipe, verifies the
+kernel-reported browser client PID against the retained browser handle and
+creation time, and establishes a process-tracker scan barrier before tracing.
+The supervisor accepts only a live process handle retained before that barrier.
+Malformed, duplicate, stale and wrong-peer messages remain inconclusive. Local
+synthetic controls passed, but this handoff has not yet proved that the frame
+remained associated with the same renderer throughout navigation or that the
+sentinel access targeted the held file. It does not promote renderer identity,
+sandbox enforcement or descendant cleanup to verified.
+
+The handoff's initial hosted run
+[44306036881](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44306036881)
+failed its synthetic exited-process assertion before starting the native CEF
+fixture. Its output did not include the actual status or reason. A local
+reproduction observed a still-live retained handle after the fixture's
+managed exit check. The test now waits for the owned Windows process handle
+to signal and confirms that the tracker rejects it before submitting the
+stale PID. Fifty bounded local synthetic runs passed after this change; that
+does not establish the exact cause of the hosted failure or prove that the
+failure cannot recur. Native CEF and final security gates require a new run.
+
+[Run 44307646689](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44307646689)
+passed the corrected synthetic controls but failed while decoding the native
+fixture's output: the strict record allowlist did not include the new trace
+correlation record. The decoder now requires exactly one record with bounded,
+explicit fields and still rejects unknown kinds and any attempt to promote
+identity or enforcement. The native correlation result from that failed run
+was not reported and must not be inferred.
+
+[Run 44309510925](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44309510925)
+failed the decoder's synthetic positive control before launching CEF. The
+fixture assumed JSON integers deserialize as `Int32`; the hosted PowerShell 7
+deserializes them as `Int64`. The validator now accepts either integral type
+within the existing bounds and rejects floats, decimals, strings and forged
+security statuses. The corrected synthetic tests passed in local PowerShell
+7.4.22; a new Windows native run is required.
+
+[Run 44310674715](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44310674715)
+first failed because the pinned CEF download host did not resolve. One
+explicit rerun fetched the pinned distribution and exercised the handoff:
+the browser-authenticated main-frame trace named PID 1116, whose live handle
+and creation time were retained before tracing. A separate brokered token
+observation concerned PID 2488; it must not be attributed to PID 1116. The
+fixture loaded controlled HTTPS content and shut down; the independent
+security gate still failed. The test-owned non-CEF positive reader matched
+the held sentinel, while the renderer denial was not bound to it.
+
+The follow-up duplicates the trace candidate's already-retained handle under
+the tracker lock and inspects that duplicate's token without reopening by PID.
+Local synthetic tests cover live and stale handles, ownership and evidence
+schema. This new token observation still requires native CEF execution; it
+does not resolve frame-lifetime races or prove sandbox enforcement.
+
+On [native run 44314787972](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44314787972),
+commit `b1fb855`, the browser-authenticated trace named PID 5812 and the
+supervisor inspected a duplicate of its pre-trace retained handle. The
+candidate token snapshot showed integrity RID 0, one restricting SID,
+12 deny-only groups, no privileges, job membership and Win32k syscall
+mitigation. The managed HTTPS/JavaScript and shutdown fixture passed, but
+renderer identity and enforcement remained inconclusive and the security
+gate failed. The separate broker PID was 2308 and is not the same candidate.
+
+The held sentinel previously permitted delete sharing. It now omits that
+sharing permission, and synthetic Windows tests require ordinary file rename
+and delete to fail while the handle is held. The positive reader must still
+match the held file identity; the strict test continues to require its
+unrestricted-token control. This does not secure every parent path component,
+authenticate the earlier renderer denial, or establish sandbox enforcement.
+
+The subsequent [native run 44449900947](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44449900947)
+confirmed the sharing checks and the same-file positive reader on commit
+`b287565`. A browser-authenticated trace candidate's retained handle again
+showed restricted-token attributes; the independent sandbox gate failed.
+The managed renderer fixture no longer performs its previous early sentinel
+open or direct observation-pipe open during V8 context creation. Those
+attempts preceded independently verified renderer identity and lockdown
+timing and cannot serve as enforcement evidence. Historical output remains
+documented, and the positive control and browser-broker diagnostics remain.
+
+## Two-epoch frame and retained-handle observation
+
+In run 44452186353 the browser relay first reported PID 6552 after the
+controlled data-page load; a later renderer claim and the HTTPS trace named
+PID 1000. The output was buffered and reprinted after browser exit, so GitHub
+log timestamps do not establish when Chromium produced those events. The
+ordering is consistent with a navigation transition, but does not prove a
+renderer swap or identify the documents owned by those PIDs.
+
+The experiment now records bounded browser-side CEF frame IDs and monotonic
+QPC timestamps for frame-load and broker callbacks. It samples two independent
+browser-origin tracing epochs, each bracketed by CEF main-frame and CDP
+frame/loader/document checks. Navigation, detachment, trace loss, conflicting
+or missing records and changed frame, loader or PID invalidate the observation.
+Between epochs the supervisor snapshots the pre-trace retained process handle;
+after the second epoch it rechecks the same held object and snapshots its token
+again. A final document check follows the second receipt. Matching snapshots
+are labeled `CONSISTENT_UNVERIFIED`, not verified renderer identity.
+
+The original CEF frame ID and CDP frame token are different identifiers and
+are not equated. Sampling and event coverage do not prove continuous identity
+through process swaps, and this implementation invalidates rather than retries
+an observation after a change. In particular, the process primary token may
+already be restricted while the renderer's initial thread is still
+impersonating. Pinned Chromium's
+[Windows renderer delegate](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/content/renderer/renderer_main_platform_delegate_win.cc)
+calls `LowerToken()`, and the pinned
+[target-services implementation](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/sandbox/win/src/target_services.cc)
+shows that primary-token observations alone do not prove its completion.
+Job membership alone also does not identify Chromium's job or its limits.
+Renderer identity, lockdown timing and exact-object enforcement remain
+inconclusive pending independent evidence.

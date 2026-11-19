@@ -14,7 +14,9 @@ internal static class Program
         if (args.Length >= 2 && args[0] == "--fixture-helper") return await Helper(args[1], args.Skip(2).ToArray());
         if (args.Length == 1 && args[0] == "--self-test") return await SelfTest.Run();
         if (args.Length == 1 && args[0] == "--renderer-self-test") return await RendererPipeTests.Run();
-        if (args.Length == 1 && args[0] == "--sentinel-self-test") return await SentinelSelfTest();
+        if (args.Length == 1 && args[0] == "--trace-self-test") return await TracePipeTests.Run();
+        if (args.Length == 1 && args[0] == "--sentinel-self-test") return await SentinelSelfTest(requireOrdinaryToken: true);
+        if (args.Length == 1 && args[0] == "--sentinel-sharing-self-test") return await SentinelSelfTest(requireOrdinaryToken: false);
         if (args.Length == 1 && args[0] == "--fixture-wire-selftest") return await SelfTest.WireFixture();
         if (args.Length != 5 || args[0] != "supervise" || !int.TryParse(args[4], out int timeout))
         {
@@ -67,16 +69,43 @@ internal static class Program
             }
             AegisBrowser.P309J.PassiveTrackingSession? tracking = null;
             string trackingFailure = "TRACKING_NOT_STARTED";
+            TracePipeObserver? trace = null;
+            string traceFailure = "TRACE_OBSERVER_UNAVAILABLE";
+            try { trace = TracePipeObserver.Create(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
+                PlatformNotSupportedException or System.ComponentModel.Win32Exception or System.Security.SecurityException)
+            { traceFailure = "TRACE_CREATE_FAILED_" + ex.GetType().Name; }
+            using var traceLifetime = trace;
+            string? oldTracePipe = Environment.GetEnvironmentVariable("AEGIS_P0_TRACE_PIPE");
             var bootstrapArgs = string.Equals(executableName, "bootstrap.exe", StringComparison.OrdinalIgnoreCase)
                 ? new[] { "--module=p309f_client" } : Array.Empty<string>();
-            var result = await ProcessRunner.RunAsync(bootstrap, bundle.BootstrapHash, bootstrapArgs, dir, timeout, true,
+            ProcessRunner.Result result;
+            try
+            {
+            Environment.SetEnvironmentVariable("AEGIS_P0_TRACE_PIPE", trace?.FullName);
+            result = await ProcessRunner.RunAsync(bootstrap, bundle.BootstrapHash, bootstrapArgs, dir, timeout, true,
                 (id, handle) => {
                     Console.WriteLine(JsonSerializer.Serialize(new { kind = "PROCESS_IDENTITY", identity = id }));
                     observer?.Start(id, handle);
-                    try { tracking = AegisBrowser.P309J.PassiveTrackingSession.Start(handle, checked((uint)id.Pid), id.CreationFileTimeUtc, id.ImagePath); }
+                    try {
+                        tracking = AegisBrowser.P309J.PassiveTrackingSession.Start(handle, checked((uint)id.Pid), id.CreationFileTimeUtc, id.ImagePath, timeout);
+                        trace?.Start(id, handle, tracking);
+                    }
                     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
                     { trackingFailure = "TRACKING_START_FAILED_" + ex.GetType().Name; }
                 }, observer?.FullName, line => observer?.AcceptLine(line));
+            }
+            catch
+            {
+                // Do not leave the optional observer or its tracker worker
+                // alive if process startup or supervised execution fails.
+                if (trace != null) { try { await trace.FinishAsync(); } catch (Exception ex) { Console.Error.WriteLine("TRACE_FAILURE_CLEANUP_" + ex.GetType().Name); } }
+                if (tracking != null) { try { await tracking.FinishAsync(); } catch (Exception ex) { Console.Error.WriteLine("TRACKING_FAILURE_CLEANUP_" + ex.GetType().Name); } }
+                throw;
+            }
+            finally { Environment.SetEnvironmentVariable("AEGIS_P0_TRACE_PIPE", oldTracePipe); }
+            var traceEvidence = trace != null ? await trace.FinishAsync() : new TracePipeObserver.Evidence("INCONCLUSIVE", traceFailure);
+            Console.WriteLine(JsonSerializer.Serialize(new { kind = "TRACE_PROCESS_CORRELATION", traceEvidence }));
             AegisBrowser.P309J.PassiveProcessTracker.Report? trackingReport = null;
             if (tracking != null)
             {
@@ -105,9 +134,10 @@ internal static class Program
     private sealed record SentinelControlResult(string Status, string Reason, bool SameObject,
         AegisBrowser.P309G.TokenObservation? PositiveProcessToken);
 
-    private static async Task<int> SentinelSelfTest()
+    private static async Task<int> SentinelSelfTest(bool requireOrdinaryToken)
     {
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("SENTINEL_SELF_TEST: WINDOWS_REQUIRED"); return 2; }
+        string? unexpectedMove = null;
         try
         {
             string nonce = Guid.NewGuid().ToString("N");
@@ -116,10 +146,28 @@ internal static class Program
             using (var sentinel = RendererSentinel.Create(pipe))
             {
                 path = sentinel.Pathname;
+                string renamed = path + ".rename-" + Guid.NewGuid().ToString("N");
+                if (File.Exists(renamed)) throw new InvalidOperationException("SENTINEL_RENAME_TARGET_EXISTS");
+                try
+                {
+                    File.Move(path, renamed);
+                    unexpectedMove = renamed;
+                    throw new InvalidOperationException("SENTINEL_RENAME_UNEXPECTEDLY_SUCCEEDED");
+                }
+                catch (IOException ex) when ((ex.HResult & 0xffff) == 32) { }
+                try
+                {
+                    File.Delete(path);
+                    throw new InvalidOperationException("SENTINEL_DELETE_UNEXPECTEDLY_SUCCEEDED");
+                }
+                catch (IOException ex) when ((ex.HResult & 0xffff) == 32) { }
+                Console.WriteLine("PASS: held sentinel rejects ordinary rename and delete with sharing violation");
                 var positive = await RunSentinelControl(sentinel, pipe);
-                if (positive.Status != "PASS" || !positive.SameObject)
+                if (!positive.SameObject || (requireOrdinaryToken && positive.Status != "PASS"))
                     throw new InvalidOperationException("POSITIVE_CONTROL_" + positive.Reason);
                 Console.WriteLine("PASS: separate non-CEF positive reader opened the exact retained file identity");
+                if (positive.Status != "PASS")
+                    Console.WriteLine("INCONCLUSIVE: positive reader unrestricted token not established; no sandbox claim");
                 bool badPipe = false, badPath = false;
                 try { RendererSentinel.NameForPipe(pipe + "x"); } catch (InvalidDataException) { badPipe = true; }
                 try { RendererSentinel.ValidatePath(Path.Combine(Path.GetTempPath(), "not-an-aegis-sentinel.dat")); } catch (InvalidDataException) { badPath = true; }
@@ -134,6 +182,13 @@ internal static class Program
         {
             Console.Error.WriteLine("SENTINEL_SELF_TEST_FAILED: " + ex.GetType().Name + ": " + ex.Message);
             return 1;
+        }
+        finally
+        {
+            // Only an unexpectedly successful move can create this unique,
+            // test-owned destination. The retained file is closed before this
+            // cleanup runs; never delete unrelated files or directories.
+            if (unexpectedMove != null && File.Exists(unexpectedMove)) File.Delete(unexpectedMove);
         }
     }
 

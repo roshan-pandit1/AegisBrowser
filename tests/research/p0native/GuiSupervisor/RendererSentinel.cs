@@ -85,7 +85,12 @@ internal sealed class RendererSentinel : IDisposable
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         string temp = System.IO.Path.GetFullPath(System.IO.Path.GetTempPath());
         string path = ValidatePath(System.IO.Path.Combine(temp, NameForPipe(pipe)));
-        var stream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        // Keep delete sharing disabled for the lifetime of this test-owned
+        // file. This prevents ordinary Windows rename/delete opens from
+        // replacing the pathname while the controller holds the file. It does
+        // not prove that every parent path component is stable or that a
+        // renderer attempted to access this file.
+        var stream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite);
         try
         {
             stream.WriteByte(0x41); stream.Flush(true);

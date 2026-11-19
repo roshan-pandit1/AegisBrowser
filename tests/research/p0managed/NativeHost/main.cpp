@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 #include "FixtureGate.h"
-#include "RendererSentinelProbe.h"
 #include "ManagedBootstrap.h"
 
 #include "include/cef_app.h"
@@ -241,7 +240,6 @@ class Client final : public CefClient, public CefLifeSpanHandler, public CefLoad
 class App final : public CefApp, public CefBrowserProcessHandler, public CefRenderProcessHandler {
  public:
   App(State* state, std::string pipe) : state_(state), pipe_(std::move(pipe)) {}
-  ~App() override { if (pipe_handle_ != INVALID_HANDLE_VALUE) CloseHandle(pipe_handle_); }
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
   CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
   // Native research-only subset of pinned CefSharp renderer IPC.
@@ -330,27 +328,9 @@ class App final : public CefApp, public CefBrowserProcessHandler, public CefRend
     diagnostic("P309I_CONTEXT", 0);
     const DWORD pid = GetCurrentProcessId();
     if (pid > 0 && pid <= INT_MAX) diagnostic("P309I_PID", pid);
-    if (!p309g::IsObservationPipe(pipe_)) { diagnostic("P309I_PIPE_MISSING", 0); return; }
-    // A result here remains a renderer claim, including access denied. The
-    // supervisor's independent positive control must match the held file ID.
-    diagnostic("P309I_SENTINEL_OPEN_RESULT", p0sentinel::ReadOpenClaim(pipe_));
-    HANDLE pipe = CreateFileA(pipe_.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-                              FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (pipe == INVALID_HANDLE_VALUE) { diagnostic("P309I_PIPE_OPEN_FAILED", GetLastError()); return; }
-    DWORD mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
-    if (!SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr)) {
-      DWORD error = GetLastError(); CloseHandle(pipe); diagnostic("P309I_PIPE_MODE_FAILED", error); return;
-    }
-    constexpr char marker[] = "P309I_RENDERER_V1\n";
-    DWORD written = 0;
-    const BOOL ok = WriteFile(pipe, marker, sizeof(marker) - 1, &written, nullptr);
-    if (!ok || written != sizeof(marker) - 1) {
-      DWORD error = ok ? ERROR_WRITE_FAULT : GetLastError(); CloseHandle(pipe); diagnostic("P309I_PIPE_WRITE_FAILED", error); return;
-    }
-    // The observer obtains a kernel-supplied client PID and retains its own
-    // process handle. The marker/pipe name alone never authenticates a role.
-    pipe_handle_ = pipe;
-    diagnostic("P309I_PIPE_SENT", 0);
+    // Do not attempt a native sentinel open until the renderer identity and
+    // sandbox lockdown timing are independently established. Diagnostics
+    // above are claims forwarded by the browser, not identity proof.
   }
   void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command_line) override {
     // The initial browser passed the explicit environment opt-in before CEF
@@ -389,7 +369,6 @@ class App final : public CefApp, public CefBrowserProcessHandler, public CefRend
   State* const state_;
   const std::string pipe_;
   bool attempted_ = false;  // renderer-main-thread only
-  HANDLE pipe_handle_ = INVALID_HANDLE_VALUE;
   std::atomic<unsigned int> launch_diagnostics_{0};
   IMPLEMENT_REFCOUNTING(App);
 };

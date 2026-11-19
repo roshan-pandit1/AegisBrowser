@@ -92,6 +92,109 @@ internal static class RendererPipeTests
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Check(child.ExitCode == 0, "synthetic broker target exits cleanly");
             }
+            // The real browser can emit a stdout PID claim and write its
+            // broker frame nearly simultaneously. Either ordering must keep
+            // the bounded pipe slot available, and neither authenticates a
+            // renderer role or proves sandbox enforcement.
+            foreach (bool claimFirst in new[] { true, false })
+            {
+                using var observer = RendererPipeObserver.Create();
+                observer.Start(identity, self.SafeHandle);
+                using var child = StartControlled("renderer-hold");
+                try
+                {
+                    if (claimFirst)
+                    {
+                        observer.AcceptLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
+                        var claim = await observer.WaitForClaimEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                        Check(claim.Status == "OBSERVED" && claim.RoleEvidence == "CLIENT_PID_CLAIM",
+                            "stdout-first claim gets its own bounded observation slot");
+                    }
+                    await SendSyntheticBrokerRelay(observer.FullName, checked((uint)child.Id));
+                    var broker = await observer.WaitForEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    Check(broker.Status == "OBSERVED" && broker.CandidatePid == child.Id &&
+                          broker.RoleEvidence == "CEF_BROWSER_BROKER_ROLE_CLAIM",
+                        (claimFirst ? "stdout-first" : "broker-first") + " broker receives an independent observation slot");
+                    if (!claimFirst)
+                    {
+                        observer.AcceptLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
+                        var claim = await observer.WaitForClaimEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                        Check(claim.Status == "OBSERVED" && claim.RoleEvidence == "CLIENT_PID_CLAIM",
+                            "broker-first stdout claim gets its own bounded observation slot");
+                    }
+                    var result = await observer.FinishAsync();
+                    Check(result.Status == "OBSERVED" && result.CandidatePid == child.Id &&
+                          result.RoleEvidence == "CEF_BROWSER_BROKER_ROLE_CLAIM" &&
+                          result.RendererIdentity == "INCONCLUSIVE" && result.SandboxEnforcement == "INCONCLUSIVE",
+                        "pipe evidence takes precedence without promoting role or sandbox claims");
+                    Check(observer.CandidateHandleClosedForTest, "both retained candidate handles are closed");
+                }
+                finally
+                {
+                    if (!child.HasExited) { Release(child); await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                }
+            }
+            using (var observer = RendererPipeObserver.Create())
+            {
+                observer.Start(identity, self.SafeHandle);
+                using var claimed = StartControlled("renderer-hold");
+                using var brokered = StartControlled("renderer-hold");
+                try
+                {
+                    observer.AcceptLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + claimed.Id);
+                    var claim = await observer.WaitForClaimEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    await SendSyntheticBrokerRelay(observer.FullName, checked((uint)brokered.Id));
+                    var pipeEvidence = await observer.WaitForEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    Check(claim.Status == "OBSERVED" && claim.CandidatePid == claimed.Id &&
+                          pipeEvidence.Status == "OBSERVED" && pipeEvidence.CandidatePid == brokered.Id,
+                        "distinct claims retain their own bounded process handles");
+                    var result = await observer.FinishAsync();
+                    Check(result.Status == "INCONCLUSIVE" && result.Token == null &&
+                          result.Reason == "CONFLICTING_CANDIDATE_IDENTITIES" &&
+                          result.RendererIdentity == "INCONCLUSIVE" && result.SandboxEnforcement == "INCONCLUSIVE",
+                        "conflicting candidate lifetimes are rejected rather than attributed to one renderer");
+                    Check(observer.CandidateHandleClosedForTest, "distinct candidate handles are both closed");
+                }
+                finally
+                {
+                    if (!claimed.HasExited) { Release(claimed); await claimed.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                    if (!brokered.HasExited) { Release(brokered); await brokered.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                }
+            }
+            using (var observer = RendererPipeObserver.Create())
+            {
+                observer.Start(identity, self.SafeHandle);
+                using var child = StartControlled("renderer-hold");
+                Release(child);
+                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                await SendSyntheticBrokerRelay(observer.FullName, checked((uint)child.Id));
+                var stale = await observer.WaitForEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                Check(stale.Status == "INCONCLUSIVE" && stale.Token == null,
+                    "broker relay for an exited child cannot produce token evidence");
+                await observer.FinishAsync();
+            }
+            using (var observer = RendererPipeObserver.Create())
+            {
+                observer.Start(identity, self.SafeHandle);
+                using var child = StartControlled("renderer-hold");
+                try
+                {
+                    observer.AcceptLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
+                    _ = await observer.WaitForClaimEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    observer.AcceptLine("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=" + child.Id);
+                    await SendSyntheticBrokerRelay(observer.FullName, checked((uint)child.Id));
+                    _ = await observer.WaitForEvidenceAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    var result = await observer.FinishAsync();
+                    Check(result.Status == "INCONCLUSIVE" && result.Token == null &&
+                          result.Reason == "PID_CLAIM_MALFORMED_OR_DUPLICATE" && result.CandidateExit == "NOT_OBSERVED",
+                        "duplicate stdout claim remains rejected even when broker evidence arrives");
+                    Check(observer.CandidateHandleClosedForTest, "duplicate-claim path closes both retained handles");
+                }
+                finally
+                {
+                    if (!child.HasExited) { Release(child); await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                }
+            }
             // A non-parent client cannot impersonate the browser-process broker.
             using (var observer = RendererPipeObserver.Create())
             using (var otherParent = StartControlled("renderer-hold"))

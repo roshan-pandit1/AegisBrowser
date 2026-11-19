@@ -15,13 +15,19 @@ public sealed class PassiveProcessTracker : IDisposable
         uint ParentPid, int Depth, string Role, string Exit, uint? ExitCode);
     public sealed record Report(string Discovery, string Accounting, string Cleanup,
         int Snapshots, int CandidatesRejected, bool LimitReached,
-        string LastError, IReadOnlyList<ProcessRecord> Processes);
+        string LastError, IReadOnlyList<ProcessRecord> Processes)
+    {
+        public int ScanBudget { get; init; }
+    }
 
     private const uint QueryLimited = 0x1000, Synchronize = 0x100000;
     private const uint WaitObject0 = 0, WaitTimeout = 258;
     private const int MaxEntries = 32768;
     private const int MaxProcesses = 32;
-    private const int MaxScans = 128;
+    public const int ScanIntervalMilliseconds = 200;
+    public const int MaximumObservationMilliseconds = 120000;
+    public const int MaximumScanBudget = MaximumObservationMilliseconds / ScanIntervalMilliseconds + 1;
+    private const int DefaultScanBudget = 128;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct ProcessEntry
@@ -59,18 +65,25 @@ public sealed class PassiveProcessTracker : IDisposable
     private static extern uint WaitForSingleObject(SafeProcessHandle process, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint code);
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DuplicateHandle(IntPtr sourceProcess, SafeProcessHandle sourceHandle,
+        IntPtr targetProcess, out SafeProcessHandle targetHandle, uint access, bool inherit, uint options);
     [DllImport("ntdll.dll")]
     private static extern int NtQueryInformationProcess(SafeProcessHandle process, int infoClass,
         out BasicInformation information, int length, out int returned);
 
-    private sealed record Held(uint Pid, long Created, uint ParentPid, int Depth, SafeProcessHandle Handle);
+    public sealed record BarrierMatch(string Status, string Reason, uint? Pid, long? CreationFileTimeUtc);
+    private sealed record Held(uint Pid, long Created, uint ParentPid, int Depth, int FirstScan, SafeProcessHandle Handle);
     private readonly SafeProcessHandle root;
     private readonly uint rootPid;
     private readonly long rootCreated;
     private readonly string expectedImage;
     private readonly string expectedName;
+    private readonly int scanBudget;
     private readonly Dictionary<uint, Held> held = new();
-    private int scans, successfulScans, rejected;
+    private int scans, successfulScans, lastSuccessfulScan, rejected;
     private bool limit, disposed;
     private string lastError = "";
 
@@ -78,19 +91,32 @@ public sealed class PassiveProcessTracker : IDisposable
     // call Scan concurrently or after disposing that handle. The host may call
     // Finish after root exit, but may not infer that all descendants exited.
     public PassiveProcessTracker(SafeProcessHandle root, uint rootPid,
-        long rootCreated, string expectedImage)
+        long rootCreated, string expectedImage, int maximumScans = DefaultScanBudget)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        if (maximumScans < 1 || maximumScans > MaximumScanBudget)
+            throw new ArgumentOutOfRangeException(nameof(maximumScans));
         if (root == null || root.IsInvalid || root.IsClosed || rootPid == 0 || rootCreated <= 0 ||
             string.IsNullOrWhiteSpace(expectedImage) || !Path.IsPathFullyQualified(expectedImage))
             throw new ArgumentException("ROOT_IDENTITY_INVALID");
         this.root = root;
         this.rootPid = rootPid;
         this.rootCreated = rootCreated;
+        scanBudget = maximumScans;
         this.expectedImage = Path.GetFullPath(expectedImage);
         expectedName = Path.GetFileName(this.expectedImage);
         if (!Matches(root, rootPid, rootCreated, this.expectedImage))
             throw new ArgumentException("ROOT_IDENTITY_MISMATCH_OR_NOT_LIVE");
+    }
+
+    // One initial scan plus enough 200 ms intervals to cover the validated
+    // process observation deadline. This bounds work; snapshots still cannot
+    // prove complete process accounting or cleanup.
+    public static int ScanBudgetForDeadline(int observationMilliseconds)
+    {
+        if (observationMilliseconds < 1 || observationMilliseconds > MaximumObservationMilliseconds)
+            throw new ArgumentOutOfRangeException(nameof(observationMilliseconds));
+        return (observationMilliseconds + ScanIntervalMilliseconds - 1) / ScanIntervalMilliseconds + 1;
     }
 
     // One point-in-time snapshot; no loop, no network, no process termination.
@@ -99,7 +125,7 @@ public sealed class PassiveProcessTracker : IDisposable
     public bool Scan()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        if (scans >= MaxScans) { limit = true; lastError = "SCAN_LIMIT"; return false; }
+        if (scans >= scanBudget) { limit = true; lastError = "SCAN_LIMIT"; return false; }
         if (!Matches(root, rootPid, rootCreated, expectedImage))
         { lastError = "ROOT_NOT_LIVE_OR_MISMATCH"; return false; }
         scans++;
@@ -147,7 +173,7 @@ public sealed class PassiveProcessTracker : IDisposable
                         !HasParent(child, entry.Pid, entry.Parent) ||
                         !Matches(parentHandle, entry.Parent, parentCreated, expectedImage))
                     { rejected++; rejectedThisScan.Add(entry.Pid); continue; }
-                    held.Add(entry.Pid, new Held(entry.Pid, created, entry.Parent, depth, child));
+                    held.Add(entry.Pid, new Held(entry.Pid, created, entry.Parent, depth, scans, child));
                     retain = true;
                     added = true;
                 }
@@ -157,6 +183,7 @@ public sealed class PassiveProcessTracker : IDisposable
         }
         lastError = "";
         successfulScans++;
+        lastSuccessfulScan = scans;
         return true;
     }
 
@@ -174,9 +201,40 @@ public sealed class PassiveProcessTracker : IDisposable
             records.Add(new(process.Pid, process.Created, process.ParentPid, process.Depth, "UNKNOWN", status, code));
         }
         // Even every retained child exiting cannot cover undetected lifetimes.
-        return new(successfulScans > 0 ? "PARTIAL" : "INCONCLUSIVE",
+        return new Report(successfulScans > 0 ? "PARTIAL" : "INCONCLUSIVE",
             successfulScans > 0 ? "PARTIAL" : "INCONCLUSIVE", "INCONCLUSIVE", scans,
-            rejected, limit, lastError, records);
+            rejected, limit, lastError, records) { ScanBudget = scanBudget };
+    }
+
+    // Caller must serialize this method with Scan and Dispose. A positive
+    // result only matches a live handle retained before the caller's barrier;
+    // it cannot establish a Chromium process role or sandbox enforcement.
+    public int CaptureBarrier() => lastError.Length == 0 ? lastSuccessfulScan : 0;
+
+    public BarrierMatch MatchBeforeBarrier(uint pid, int barrier)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (barrier <= 0 || barrier > lastSuccessfulScan) return new("INCONCLUSIVE", "BARRIER_INVALID", null, null);
+        if (!held.TryGetValue(pid, out var candidate)) return new("INCONCLUSIVE", "CANDIDATE_NOT_RETAINED", null, null);
+        if (candidate.FirstScan > barrier) return new("INCONCLUSIVE", "CANDIDATE_RETAINED_AFTER_BARRIER", null, null);
+        if (!Matches(root, rootPid, rootCreated, expectedImage) ||
+            !Matches(candidate.Handle, candidate.Pid, candidate.Created, expectedImage))
+            return new("INCONCLUSIVE", "RETAINED_LIFETIME_NOT_LIVE", null, null);
+        return new("OBSERVED", "LIVE_HANDLE_RETAINED_BEFORE_TRACE", candidate.Pid, candidate.Created);
+    }
+
+    // Caller serializes against Scan/Dispose and owns any returned duplicate.
+    // DuplicateHandle refers to the same kernel object; this never reopens a PID.
+    public BarrierMatch DuplicateMatchBeforeBarrier(uint pid, int barrier, out SafeProcessHandle? duplicate)
+    {
+        duplicate = null;
+        var match = MatchBeforeBarrier(pid, barrier);
+        if (match.Status != "OBSERVED") return match;
+        var current = GetCurrentProcess();
+        if (!DuplicateHandle(current, held[pid].Handle, current, out var copy, 0, false, 2))
+        { copy?.Dispose(); return new("INCONCLUSIVE", "HANDLE_DUPLICATION_FAILED", null, null); }
+        duplicate = copy;
+        return match;
     }
 
     private static bool HasParent(SafeProcessHandle child, uint pid, uint parentPid)

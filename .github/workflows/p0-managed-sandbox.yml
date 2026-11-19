@@ -6,6 +6,7 @@ on:
     branches:
       - experiment/p0-managed-sandbox-host
       - experiment/p0-renderer-sandbox-verification
+      - experiment/p0-authoritative-renderer-identity
 
 permissions:
   contents: read
@@ -34,12 +35,19 @@ jobs:
         run: |
           dotnet run --project ./tests/research/p0managed/ManagedHost.Tests -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'Managed metadata checks failed.' }
+          dotnet run --project ./tests/research/p0managed/FrameStability.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Frame stability controls failed.' }
+          ./tests/research/p0managed/test-trace-result.ps1
           dotnet run --project ./tests/research/p309j/PipeDaclProbe.Tests -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic pipe diagnostics failed.' }
+          dotnet run --project ./tests/research/p309j/PassiveProcessTracker.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Passive process tracking checks failed.' }
           dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Supervisor checks failed.' }
           dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --renderer-self-test
           if ($LASTEXITCODE -ne 0) { throw 'Renderer observation controls failed.' }
+          dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --trace-self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Trace correlation controls failed.' }
           dotnet run --project ./tests/research/p0native/GuiSupervisor -c Release -- --sentinel-self-test
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic sentinel controls failed.' }
           python -B -m unittest discover -s research/cefsharp-sandbox-bridge -p 'test_patch_contract.py' -v
