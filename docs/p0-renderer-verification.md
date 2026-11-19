@@ -255,3 +255,13 @@ and delete to fail while the handle is held. The positive reader must still
 match the held file identity; the strict test continues to require its
 unrestricted-token control. This does not secure every parent path component,
 authenticate the earlier renderer denial, or establish sandbox enforcement.
+
+The subsequent [native run 44449900947](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44449900947)
+confirmed the sharing checks and the same-file positive reader on commit
+`b287565`. A browser-authenticated trace candidate's retained handle again
+showed restricted-token attributes; the independent sandbox gate failed.
+The managed renderer fixture no longer performs its previous early sentinel
+open or direct observation-pipe open during V8 context creation. Those
+attempts preceded independently verified renderer identity and lockdown
+timing and cannot serve as enforcement evidence. Historical output remains
+documented, and the positive control and browser-broker diagnostics remain.
