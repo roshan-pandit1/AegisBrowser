@@ -15,7 +15,8 @@ internal static class Program
         if (args.Length == 1 && args[0] == "--self-test") return await SelfTest.Run();
         if (args.Length == 1 && args[0] == "--renderer-self-test") return await RendererPipeTests.Run();
         if (args.Length == 1 && args[0] == "--trace-self-test") return await TracePipeTests.Run();
-        if (args.Length == 1 && args[0] == "--sentinel-self-test") return await SentinelSelfTest();
+        if (args.Length == 1 && args[0] == "--sentinel-self-test") return await SentinelSelfTest(requireOrdinaryToken: true);
+        if (args.Length == 1 && args[0] == "--sentinel-sharing-self-test") return await SentinelSelfTest(requireOrdinaryToken: false);
         if (args.Length == 1 && args[0] == "--fixture-wire-selftest") return await SelfTest.WireFixture();
         if (args.Length != 5 || args[0] != "supervise" || !int.TryParse(args[4], out int timeout))
         {
@@ -133,9 +134,10 @@ internal static class Program
     private sealed record SentinelControlResult(string Status, string Reason, bool SameObject,
         AegisBrowser.P309G.TokenObservation? PositiveProcessToken);
 
-    private static async Task<int> SentinelSelfTest()
+    private static async Task<int> SentinelSelfTest(bool requireOrdinaryToken)
     {
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("SENTINEL_SELF_TEST: WINDOWS_REQUIRED"); return 2; }
+        string? unexpectedMove = null;
         try
         {
             string nonce = Guid.NewGuid().ToString("N");
@@ -144,10 +146,28 @@ internal static class Program
             using (var sentinel = RendererSentinel.Create(pipe))
             {
                 path = sentinel.Pathname;
+                string renamed = path + ".rename-" + Guid.NewGuid().ToString("N");
+                if (File.Exists(renamed)) throw new InvalidOperationException("SENTINEL_RENAME_TARGET_EXISTS");
+                try
+                {
+                    File.Move(path, renamed);
+                    unexpectedMove = renamed;
+                    throw new InvalidOperationException("SENTINEL_RENAME_UNEXPECTEDLY_SUCCEEDED");
+                }
+                catch (IOException ex) when ((ex.HResult & 0xffff) == 32) { }
+                try
+                {
+                    File.Delete(path);
+                    throw new InvalidOperationException("SENTINEL_DELETE_UNEXPECTEDLY_SUCCEEDED");
+                }
+                catch (IOException ex) when ((ex.HResult & 0xffff) == 32) { }
+                Console.WriteLine("PASS: held sentinel rejects ordinary rename and delete with sharing violation");
                 var positive = await RunSentinelControl(sentinel, pipe);
-                if (positive.Status != "PASS" || !positive.SameObject)
+                if (!positive.SameObject || (requireOrdinaryToken && positive.Status != "PASS"))
                     throw new InvalidOperationException("POSITIVE_CONTROL_" + positive.Reason);
                 Console.WriteLine("PASS: separate non-CEF positive reader opened the exact retained file identity");
+                if (positive.Status != "PASS")
+                    Console.WriteLine("INCONCLUSIVE: positive reader unrestricted token not established; no sandbox claim");
                 bool badPipe = false, badPath = false;
                 try { RendererSentinel.NameForPipe(pipe + "x"); } catch (InvalidDataException) { badPipe = true; }
                 try { RendererSentinel.ValidatePath(Path.Combine(Path.GetTempPath(), "not-an-aegis-sentinel.dat")); } catch (InvalidDataException) { badPath = true; }
@@ -162,6 +182,13 @@ internal static class Program
         {
             Console.Error.WriteLine("SENTINEL_SELF_TEST_FAILED: " + ex.GetType().Name + ": " + ex.Message);
             return 1;
+        }
+        finally
+        {
+            // Only an unexpectedly successful move can create this unique,
+            // test-owned destination. The retained file is closed before this
+            // cleanup runs; never delete unrelated files or directories.
+            if (unexpectedMove != null && File.Exists(unexpectedMove)) File.Delete(unexpectedMove);
         }
     }
 

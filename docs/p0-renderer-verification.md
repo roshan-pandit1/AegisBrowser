@@ -239,3 +239,19 @@ the tracker lock and inspects that duplicate's token without reopening by PID.
 Local synthetic tests cover live and stale handles, ownership and evidence
 schema. This new token observation still requires native CEF execution; it
 does not resolve frame-lifetime races or prove sandbox enforcement.
+
+On [native run 44314787972](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44314787972),
+commit `b1fb855`, the browser-authenticated trace named PID 5812 and the
+supervisor inspected a duplicate of its pre-trace retained handle. The
+candidate token snapshot showed integrity RID 0, one restricting SID,
+12 deny-only groups, no privileges, job membership and Win32k syscall
+mitigation. The managed HTTPS/JavaScript and shutdown fixture passed, but
+renderer identity and enforcement remained inconclusive and the security
+gate failed. The separate broker PID was 2308 and is not the same candidate.
+
+The held sentinel previously permitted delete sharing. It now omits that
+sharing permission, and synthetic Windows tests require ordinary file rename
+and delete to fail while the handle is held. The positive reader must still
+match the held file identity; the strict test continues to require its
+unrestricted-token control. This does not secure every parent path component,
+authenticate the earlier renderer denial, or establish sandbox enforcement.
