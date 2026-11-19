@@ -9,7 +9,7 @@
  
  #include "include\cef_client.h"
  #include "include\wrapper\cef_stream_resource_handler.h"
-@@ -1283,6 +1285,69 @@
+@@ -1283,6 +1285,93 @@
              auto name = message->GetName();
              auto argList = message->GetArgumentList();
  
@@ -33,8 +33,32 @@
 +                if (stage && value >= 0 && (name != "P309I_PID" || value > 0))
 +                {
 +                    static volatile LONG diagnosticCount = 0;
-+                    if (::InterlockedIncrement(&diagnosticCount) <= 32)
++                    const LONG diagnosticIndex = ::InterlockedIncrement(&diagnosticCount);
++                    if (diagnosticIndex > 0 && diagnosticIndex <= 32)
 +                    {
++                        if (name == "P309I_CONTEXT" || name == "P309I_PID")
++                        {
++                            // Browser-side CEF frame ID and QPC time are bounded
++                            // diagnostics, not authenticated renderer identity.
++                            const std::string frameId = frame->GetIdentifier().ToString();
++                            bool validFrame = !frameId.empty() && frameId.size() <= 80;
++                            unsigned int separators = 0;
++                            for (const char c : frameId)
++                            {
++                                if (c == '-') ++separators;
++                                else if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')))
++                                    validFrame = false;
++                            }
++                            validFrame = validFrame && separators == 1 && frameId.front() != '-' && frameId.back() != '-';
++                            LARGE_INTEGER ticks = {}, frequency = {};
++                            const bool clockOk = ::QueryPerformanceCounter(&ticks) &&
++                                ::QueryPerformanceFrequency(&frequency) && frequency.QuadPart > 0;
++                            std::printf("NATIVE_FRAME_EVENT: seq=%ld stage=%s claim=%d browser=%d frame=%s qpc=%lld frequency=%lld\n",
++                                diagnosticIndex, stage, value, browser ? browser->GetIdentifier() : 0,
++                                validFrame ? frameId.c_str() : "UNAVAILABLE",
++                                clockOk ? static_cast<long long>(ticks.QuadPart) : 0LL,
++                                clockOk ? static_cast<long long>(frequency.QuadPart) : 0LL);
++                        }
 +                        if (name == "P309I_PID")
 +                        {
 +                            std::printf("NATIVE_DIAGNOSTIC: P309I_RENDERER_PID=%d\n", value);

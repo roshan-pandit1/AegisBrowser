@@ -56,6 +56,26 @@ class PrototypeContract(unittest.TestCase):
                          'frame->SendProcessMessage(PID_BROWSER, notification)'):
             self.assertIn(required, MANAGED_NATIVE_HOST)
 
+    def test_browser_frame_diagnostics_are_bounded_and_marked_as_claims(self):
+        added = "\n".join(line[1:] for line in DIAGNOSTIC_PATCH.splitlines()
+                          if line.startswith("+") and not line.startswith("+++"))
+        for required in ('InterlockedIncrement(&diagnosticCount)',
+                         'if (diagnosticIndex > 0 && diagnosticIndex <= 32)',
+                         'name == "P309I_CONTEXT" || name == "P309I_PID"',
+                         'frame->GetIdentifier().ToString()',
+                         'frameId.size() <= 80', 'separators == 1',
+                         'browser->GetIdentifier()',
+                         'QueryPerformanceCounter(&ticks)',
+                         'QueryPerformanceFrequency(&frequency)',
+                         'NATIVE_FRAME_EVENT: seq=',
+                         'diagnostics, not authenticated renderer identity'):
+            self.assertIn(required, added)
+        self.assertNotIn('RendererIdentity=VERIFIED', added)
+        event_lines = [line for line in added.splitlines() if 'NATIVE_FRAME_EVENT:' in line]
+        self.assertEqual(len(event_lines), 1)
+        self.assertIn(r'\n"', event_lines[0])
+        self.assertNotIn(r'\\n"', event_lines[0])
+
 
 if __name__ == "__main__":
     unittest.main()
