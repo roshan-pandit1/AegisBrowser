@@ -26,7 +26,7 @@ function Get-P0TraceCorrelation {
     }
     $trace = $record.traceEvidence
     $names = @($trace.PSObject.Properties.Name)
-    $expected = @('Status','Reason','CandidatePid','CandidateCreationFileTimeUtc','Barrier','RendererIdentity','SandboxEnforcement','Token')
+    $expected = @('Status','Reason','CandidatePid','CandidateCreationFileTimeUtc','Barrier','RendererIdentity','SandboxEnforcement','Token','TokenAfter')
     if ($names.Count -ne $expected.Count) { throw 'Invalid trace-correlation evidence shape.' }
     foreach ($name in $expected) { if ($name -cnotin $names) { throw 'Invalid trace-correlation evidence shape.' } }
     if ($trace.Status -isnot [string] -or $trace.Status -cnotin @('OBSERVED','INCONCLUSIVE') -or
@@ -44,14 +44,15 @@ function Get-P0TraceCorrelation {
             $trace.CandidateCreationFileTimeUtc -le 0 -or $trace.Barrier -le 0) {
             throw 'Invalid observed trace-correlation identity.'
         }
-        $token = $trace.Token
+        foreach ($token in @($trace.Token, $trace.TokenAfter)) {
         if ($null -eq $token -or $token -isnot [System.Management.Automation.PSCustomObject]) {
             throw 'Missing trace-correlated token evidence.'
         }
         $tokenNames = @($token.PSObject.Properties.Name)
         $tokenExpected = @('Status','Reason','ProcessId','CreationFileTimeUtc','IntegrityRid','IsAppContainer',
             'DenyOnlyGroupCount','RestrictingSidCount','HasRestrictingSids','PrivilegeCount','EnabledPrivilegeCount',
-            'InAnyJob','Win32kSystemCallsDisabled','SystemCallMitigationFlags','ProcessRole','SandboxEnforcement')
+            'InAnyJob','Win32kSystemCallsDisabled','SystemCallMitigationFlags','ProcessRole','SandboxEnforcement',
+            'QpcStart','QpcEnd','QpcFrequency')
         if ($tokenNames.Count -ne $tokenExpected.Count) { throw 'Invalid trace-token evidence shape.' }
         foreach ($name in $tokenExpected) { if ($name -cnotin $tokenNames) { throw 'Invalid trace-token evidence shape.' } }
         if ($token.Status -isnot [string] -or $token.Status -cnotin @('OBSERVED','INCONCLUSIVE') -or
@@ -62,13 +63,19 @@ function Get-P0TraceCorrelation {
         }
         $dataNames = @('ProcessId','CreationFileTimeUtc','IntegrityRid','IsAppContainer','DenyOnlyGroupCount',
             'RestrictingSidCount','HasRestrictingSids','PrivilegeCount','EnabledPrivilegeCount','InAnyJob',
-            'Win32kSystemCallsDisabled','SystemCallMitigationFlags')
+            'Win32kSystemCallsDisabled','SystemCallMitigationFlags','QpcStart','QpcEnd','QpcFrequency')
         if ($token.Status -ceq 'OBSERVED') {
             if ($token.Reason -cne 'HANDLE_IDENTITY_AND_TOKEN_SNAPSHOT' -or
                 -not (Test-P0IntegralRange $token.ProcessId 1 ([int]::MaxValue)) -or $token.ProcessId -ne $trace.CandidatePid -or
                 -not (Test-P0IntegralRange $token.CreationFileTimeUtc 1 ([long]::MaxValue)) -or
                 $token.CreationFileTimeUtc -ne $trace.CandidateCreationFileTimeUtc) {
                 throw 'Trace-token process identity does not match retained candidate.'
+            }
+            if (-not (Test-P0IntegralRange $token.QpcStart 1 ([long]::MaxValue)) -or
+                -not (Test-P0IntegralRange $token.QpcEnd 1 ([long]::MaxValue)) -or
+                -not (Test-P0IntegralRange $token.QpcFrequency 1 ([long]::MaxValue)) -or
+                $token.QpcEnd -lt $token.QpcStart) {
+                throw 'Invalid monotonic trace-token observation interval.'
             }
             foreach ($name in @('IntegrityRid','DenyOnlyGroupCount','RestrictingSidCount','PrivilegeCount','EnabledPrivilegeCount')) {
                 if (-not (Test-P0IntegralRange $token.$name 0 ([uint32]::MaxValue))) { throw 'Invalid trace-token count.' }
@@ -85,8 +92,14 @@ function Get-P0TraceCorrelation {
             if ($token.Reason -ceq 'HANDLE_IDENTITY_AND_TOKEN_SNAPSHOT') { throw 'Inconclusive token has observed reason.' }
             foreach ($name in $dataNames) { if ($null -ne $token.$name) { throw 'Inconclusive token contains observation data.' } }
         }
+        }
+        if ($trace.Token.Status -ceq 'OBSERVED' -and $trace.TokenAfter.Status -ceq 'OBSERVED' -and
+            ($trace.Token.QpcFrequency -ne $trace.TokenAfter.QpcFrequency -or
+             $trace.TokenAfter.QpcStart -lt $trace.Token.QpcEnd)) {
+            throw 'Trace-token observations are not in monotonic order.'
+        }
     } elseif ($null -ne $trace.CandidatePid -or $null -ne $trace.CandidateCreationFileTimeUtc -or $trace.Barrier -ne 0 -or
-        $trace.Reason -ceq 'LIVE_HANDLE_RETAINED_BEFORE_TRACE' -or $null -ne $trace.Token) {
+        $trace.Reason -ceq 'LIVE_HANDLE_RETAINED_BEFORE_TRACE' -or $null -ne $trace.Token -or $null -ne $trace.TokenAfter) {
         throw 'Invalid inconclusive trace-correlation identity.'
     }
     return $trace

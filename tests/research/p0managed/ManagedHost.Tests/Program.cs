@@ -92,5 +92,73 @@ bool Reject(int pid, string frame)
 if (!Reject(0, validFrame) || !Reject(-1, validFrame) || !Reject(1, new string('A', 31)) ||
     !Reject(1, new string('a', 32)) || !Reject(1, new string('A', 31) + "\n"))
     throw new Exception("TRACE_ENCODER_INVALID_INPUT_ACCEPTED");
-Console.WriteLine("PASS: 6 synthetic trace message validation checks");
+var encodeRevalidation = senderType.GetMethod("EncodeRevalidation", BindingFlags.Static | BindingFlags.NonPublic)
+    ?? throw new Exception("TRACE_REVALIDATION_ENCODER_MISSING");
+string encodedAgain = System.Text.Encoding.ASCII.GetString((byte[])encodeRevalidation.Invoke(null, new object[] { 42, validFrame })!);
+if (encodedAgain != "P0TRACE2 42 " + validFrame + "\n") throw new Exception("TRACE_REVALIDATION_ENCODER_WRONG_FRAME");
+Console.WriteLine("PASS: 7 synthetic trace message validation checks");
+var encodeFinal = senderType.GetMethod("EncodeFinalization", BindingFlags.Static | BindingFlags.NonPublic)
+    ?? throw new Exception("TRACE_FINALIZATION_ENCODER_MISSING");
+var finalBytes = (byte[])encodeFinal.Invoke(null, null)!;
+if (System.Text.Encoding.ASCII.GetString(finalBytes) != "P0TRACE3 STABLE\n") throw new Exception("TRACE_FINALIZATION_INVALID");
+finalBytes[0] = 0;
+if (System.Text.Encoding.ASCII.GetString((byte[])encodeFinal.Invoke(null, null)!) != "P0TRACE3 STABLE\n")
+    throw new Exception("TRACE_FINALIZATION_MUTABLE");
+Console.WriteLine("PASS: synthetic finalization message is exact and independently copied");
+// The timeline contains only bounded test metadata, not URLs or security verdicts.
+var timelineType = typeof(ManagedEntry).Assembly.GetType("P0ManagedHost.ProbeTimeline") ?? throw new Exception("TIMELINE_MISSING");
+var stageType = timelineType.GetNestedType("Stage", BindingFlags.NonPublic) ?? throw new Exception("TIMELINE_STAGE_MISSING");
+var timelineRecord = timelineType.GetMethod("Record", BindingFlags.NonPublic | BindingFlags.Instance) ?? throw new Exception("TIMELINE_RECORD_MISSING");
+var timeline = Activator.CreateInstance(timelineType, true) ?? throw new Exception("TIMELINE_CREATE_FAILED");
+var oldOutput = Console.Out;
+using (var captured = new StringWriter())
+{
+    try
+    {
+        Console.SetOut(captured);
+        var stage = Enum.Parse(stageType, "FrameLoadStart");
+        for (int i = 0; i < 70; i++) timelineRecord.Invoke(timeline, new object?[] { stage, 7, i == 0 ? "bad\nframe" : "A1-B2" });
+    }
+    finally { Console.SetOut(oldOutput); }
+    var lines = captured.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+    if (lines.Length != 64 || !lines[0].Contains("frame=UNAVAILABLE", StringComparison.Ordinal) ||
+        !lines[1].Contains("frame=A1-B2", StringComparison.Ordinal) ||
+        lines.Any(line => !line.StartsWith("MANAGED_TIMELINE: ", StringComparison.Ordinal)))
+        throw new Exception("TIMELINE_BOUNDS_OR_SANITIZATION_FAILED");
+}
+Console.WriteLine("PASS: synthetic timeline bounds and frame sanitization");
+// These are synthetic event deliveries, not native CEF lifecycle evidence.
+var recordingField = probeType.GetField("recordingEvents", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new Exception("EVENT_RECORDING_FIELD_MISSING");
+var invalidField = probeType.GetField("navigationInvalidated", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new Exception("EVENT_INVALIDATION_FIELD_MISSING");
+var eventsLostField = probeType.GetField("eventsLost", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new Exception("EVENT_LOSS_FIELD_MISSING");
+var detachedField = probeType.GetField("detached", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new Exception("AGENT_DETACH_FIELD_MISSING");
+object FreshProbe()
+{
+    var p = Activator.CreateInstance(probeType, true) ?? throw new Exception("TRACE_PROBE_CREATE_FAILED");
+    recordingField.SetValue(p, true);
+    return p;
+}
+void Deliver(object p, string method, string payload)
+{
+    using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(payload));
+    eventMethod.Invoke(p, new object?[] { null, method, stream });
+}
+foreach (string method in new[] { "Page.frameNavigated", "Page.frameDetached", "Page.frameStartedNavigating", "Page.navigatedWithinDocument", "Inspector.targetCrashed" })
+{
+    var p = FreshProbe(); Deliver(p, method, "{}");
+    if (!(bool)invalidField.GetValue(p)!) throw new Exception("LIFECYCLE_EVENT_NOT_INVALIDATED_" + method);
+}
+var browserCommit = "{\"value\":[{\"name\":\"FrameCommittedInBrowser\",\"pid\":" + Environment.ProcessId + "}]}";
+var commitProbe = FreshProbe(); Deliver(commitProbe, "Tracing.dataCollected", browserCommit);
+if (!(bool)invalidField.GetValue(commitProbe)!) throw new Exception("BROWSER_PRECOMMIT_NOT_INVALIDATED");
+var wrongOrigin = FreshProbe();
+Deliver(wrongOrigin, "Tracing.dataCollected", browserCommit.Replace("\"pid\":" + Environment.ProcessId, "\"pid\":0", StringComparison.Ordinal));
+if ((bool)invalidField.GetValue(wrongOrigin)!) throw new Exception("WRONG_ORIGIN_COMMIT_ACCEPTED");
+var overflow = FreshProbe();
+for (int i = 0; i < 129; i++) Deliver(overflow, "Page.frameNavigated", "{}");
+if (!(bool)eventsLostField.GetValue(overflow)!) throw new Exception("EVENT_OVERFLOW_NOT_INVALIDATED");
+var disconnected = FreshProbe();
+(probeType.GetMethod("OnDevToolsAgentDetached") ?? throw new Exception("AGENT_DETACH_MISSING")).Invoke(disconnected, new object?[] { null });
+if (!(bool)detachedField.GetValue(disconnected)!) throw new Exception("AGENT_DETACH_NOT_INVALIDATED");
+Console.WriteLine("PASS: 9 synthetic frame, precommit, origin, overflow and detach checks");
 Console.WriteLine("PASS: 4 synthetic managed contracts; CEF and sandbox NOT_TESTED");

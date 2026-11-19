@@ -9,6 +9,7 @@ internal sealed class ProbeForm : Form
     private const string LocalUrl = "data:text/html,%3C!doctype%20html%3E%3Ctitle%3EAegis%20test%3C/title%3E%3Cp%3Econtrolled%20fixture%3C/p%3E";
     private readonly ProbeBrowser browser;
     private readonly ProbeLifetime lifetime;
+    private readonly ProbeTimeline timeline = new();
     private readonly TaskCompletionSource<bool> localLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<bool> httpsLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private volatile Uri? https;
@@ -24,9 +25,15 @@ internal sealed class ProbeForm : Form
         browser = new ProbeBrowser(LocalUrl) { Dock = DockStyle.Fill };
         lifetime = new ProbeLifetime();
         browser.LifeSpanHandler = lifetime;
+        browser.FrameLoadStart += (_, args) =>
+        {
+            if (args.Frame.IsMain)
+                timeline.Record(ProbeTimeline.Stage.FrameLoadStart, args.Browser.Identifier, args.Frame.Identifier);
+        };
         browser.FrameLoadEnd += (_, args) =>
         {
             if (!args.Frame.IsMain) return;
+            timeline.Record(ProbeTimeline.Stage.FrameLoadEnd, args.Browser.Identifier, args.Frame.Identifier);
             if (args.Url.StartsWith("data:text/html", StringComparison.OrdinalIgnoreCase))
                 localLoaded.TrySetResult(true);
             var expectedHttps = https;
@@ -35,7 +42,9 @@ internal sealed class ProbeForm : Form
         };
         browser.LoadError += (_, args) =>
         {
-            if (!args.Frame.IsMain || args.ErrorCode == CefErrorCode.Aborted) return;
+            if (!args.Frame.IsMain) return;
+            timeline.Record(ProbeTimeline.Stage.FrameLoadError, args.Browser.Identifier, args.Frame.Identifier);
+            if (args.ErrorCode == CefErrorCode.Aborted) return;
             localLoaded.TrySetException(new InvalidOperationException("LOCAL_OR_HTTPS_LOAD_ERROR_" + args.ErrorCode));
             httpsLoaded.TrySetException(new InvalidOperationException("HTTPS_LOAD_ERROR_" + args.ErrorCode));
         };
@@ -53,6 +62,7 @@ internal sealed class ProbeForm : Form
             Console.WriteLine("MANAGED_EVENT: LOCAL_PAGE_LOADED");
             https = ManagedEntry.ControlledHttpsUri()
                 ?? throw new InvalidOperationException("HTTPS_FIXTURE_UNAVAILABLE");
+            timeline.Record(ProbeTimeline.Stage.HttpsRequested, browser.GetBrowser().Identifier, null);
             browser.Load(https.AbsoluteUri);
             await httpsLoaded.Task.WaitAsync(TimeSpan.FromSeconds(20));
             Console.WriteLine("MANAGED_EVENT: HTTPS_NAVIGATION_COMPLETED");
@@ -71,7 +81,9 @@ internal sealed class ProbeForm : Form
             if (!body.Success || !string.Equals(body.Result as string, "AEGIS_P0_HTTPS_OK", StringComparison.Ordinal))
                 throw new InvalidOperationException("HTTPS_FIXTURE_CONTENT_MISMATCH");
             Console.WriteLine("MANAGED_EVENT: HTTPS_PAGE_VERIFIED");
+            timeline.Record(ProbeTimeline.Stage.TraceBegin, browser.GetBrowser().Identifier, frame.Identifier);
             await RendererTraceProbe.ObserveAsync(browser.GetBrowser());
+            timeline.Record(ProbeTimeline.Stage.TraceEnd, browser.GetBrowser().Identifier, frame.Identifier);
             Result = 0;
         }
         catch (Exception ex)

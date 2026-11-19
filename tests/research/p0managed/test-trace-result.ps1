@@ -9,6 +9,13 @@ function Assert-Rejected([scriptblock] $operation, [string] $name) {
 function Parse([string] $json) { return ($json | ConvertFrom-Json -ErrorAction Stop) }
 $observed = Parse '{"kind":"TRACE_PROCESS_CORRELATION","traceEvidence":{"Status":"OBSERVED","Reason":"LIVE_HANDLE_RETAINED_BEFORE_TRACE","CandidatePid":123,"CandidateCreationFileTimeUtc":134394786155818129,"Barrier":3,"RendererIdentity":"INCONCLUSIVE","SandboxEnforcement":"INCONCLUSIVE","Token":{"Status":"OBSERVED","Reason":"HANDLE_IDENTITY_AND_TOKEN_SNAPSHOT","ProcessId":123,"CreationFileTimeUtc":134394786155818129,"IntegrityRid":0,"IsAppContainer":false,"DenyOnlyGroupCount":12,"RestrictingSidCount":1,"HasRestrictingSids":true,"PrivilegeCount":0,"EnabledPrivilegeCount":0,"InAnyJob":true,"Win32kSystemCallsDisabled":true,"SystemCallMitigationFlags":1,"ProcessRole":"NOT_ESTABLISHED","SandboxEnforcement":"INCONCLUSIVE"}}}'
 $inconclusive = Parse '{"kind":"TRACE_PROCESS_CORRELATION","traceEvidence":{"Status":"INCONCLUSIVE","Reason":"CANDIDATE_NOT_RETAINED","CandidatePid":null,"CandidateCreationFileTimeUtc":null,"Barrier":0,"RendererIdentity":"INCONCLUSIVE","SandboxEnforcement":"INCONCLUSIVE","Token":null}}'
+$observed.traceEvidence.Token | Add-Member -NotePropertyName QpcStart -NotePropertyValue ([long]100)
+$observed.traceEvidence.Token | Add-Member -NotePropertyName QpcEnd -NotePropertyValue ([long]101)
+$observed.traceEvidence.Token | Add-Member -NotePropertyName QpcFrequency -NotePropertyValue ([long]10000000)
+$observed.traceEvidence | Add-Member -NotePropertyName TokenAfter -NotePropertyValue (Parse ($observed.traceEvidence.Token | ConvertTo-Json -Depth 4 -Compress))
+$observed.traceEvidence.TokenAfter.QpcStart = [long]102
+$observed.traceEvidence.TokenAfter.QpcEnd = [long]103
+$inconclusive.traceEvidence | Add-Member -NotePropertyName TokenAfter -NotePropertyValue $null
 $other = [pscustomobject]@{kind='PROCESS_RESULT'}
 if ((Get-P0TraceCorrelation -Decoded @($other,$observed)).Status -cne 'OBSERVED') { throw 'Observed record not accepted.' }
 $checks++; Write-Output 'PASS: bounded observed trace record accepted without identity promotion'
@@ -20,6 +27,7 @@ if ($null -ne (Get-P0TraceCorrelation -Decoded @($unknownRestriction)).Token.Has
 $checks++; Write-Output 'PASS: failed restricting-SID API query remains unknown'
 $inconclusiveToken = Parse ($observed | ConvertTo-Json -Depth 5 -Compress)
 $inconclusiveToken.traceEvidence.Token = Parse '{"Status":"INCONCLUSIVE","Reason":"WINDOWS_API_ERROR_5","ProcessId":null,"CreationFileTimeUtc":null,"IntegrityRid":null,"IsAppContainer":null,"DenyOnlyGroupCount":null,"RestrictingSidCount":null,"HasRestrictingSids":null,"PrivilegeCount":null,"EnabledPrivilegeCount":null,"InAnyJob":null,"Win32kSystemCallsDisabled":null,"SystemCallMitigationFlags":null,"ProcessRole":"NOT_ESTABLISHED","SandboxEnforcement":"INCONCLUSIVE"}'
+foreach ($field in @('QpcStart','QpcEnd','QpcFrequency')) { $inconclusiveToken.traceEvidence.Token | Add-Member -NotePropertyName $field -NotePropertyValue $null }
 if ((Get-P0TraceCorrelation -Decoded @($inconclusiveToken)).Token.Status -cne 'INCONCLUSIVE') { throw 'Inconclusive token not accepted.' }
 $checks++; Write-Output 'PASS: unavailable token remains inconclusive without observation data'
 foreach ($numericType in @([int], [long])) {
@@ -88,4 +96,47 @@ $fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress); $fake.traceEviden
 Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'extra token field rejected'
 $fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress); $fake.traceEvidence.Token.PSObject.Properties.Remove('IntegrityRid')
 Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'missing token field rejected'
+$fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress); $fake.traceEvidence.TokenAfter = $null
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'missing after-token evidence rejected'
+$fake = Parse ($inconclusive | ConvertTo-Json -Depth 5 -Compress); $fake.traceEvidence.TokenAfter = $observed.traceEvidence.TokenAfter
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'after-token on inconclusive candidate rejected'
+foreach ($field in @('ProcessRole','SandboxEnforcement')) {
+    $fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress); $fake.traceEvidence.TokenAfter.$field = 'VERIFIED'
+    Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } "after-token $field promotion rejected"
+}
+$fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress); $fake.traceEvidence.TokenAfter.ProcessId = 124
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'after-token PID mismatch rejected'
+$fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress); $fake.traceEvidence.TokenAfter.CreationFileTimeUtc = [long]134394786155818130
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'after-token creation time mismatch rejected'
+$fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress); $fake.traceEvidence.TokenAfter.IsAppContainer = 'false'
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'after-token Boolean coercion rejected'
+$inconclusiveAfter = Parse ($observed | ConvertTo-Json -Depth 5 -Compress)
+$inconclusiveAfter.traceEvidence.TokenAfter = Parse '{"Status":"INCONCLUSIVE","Reason":"WINDOWS_API_ERROR_5","ProcessId":null,"CreationFileTimeUtc":null,"IntegrityRid":null,"IsAppContainer":null,"DenyOnlyGroupCount":null,"RestrictingSidCount":null,"HasRestrictingSids":null,"PrivilegeCount":null,"EnabledPrivilegeCount":null,"InAnyJob":null,"Win32kSystemCallsDisabled":null,"SystemCallMitigationFlags":null,"ProcessRole":"NOT_ESTABLISHED","SandboxEnforcement":"INCONCLUSIVE"}'
+foreach ($field in @('QpcStart','QpcEnd','QpcFrequency')) { $inconclusiveAfter.traceEvidence.TokenAfter | Add-Member -NotePropertyName $field -NotePropertyValue $null }
+if ((Get-P0TraceCorrelation -Decoded @($inconclusiveAfter)).TokenAfter.Status -cne 'INCONCLUSIVE') { throw 'Inconclusive after-token not accepted.' }
+$checks++; Write-Output 'PASS: unavailable after-token remains inconclusive without observation data'
+foreach ($field in @('Token','TokenAfter')) {
+    foreach ($clock in @('QpcStart','QpcEnd','QpcFrequency')) {
+        foreach ($badValue in @([long]0, [long]-1, [double]1.0, [decimal]1, '1', $true, $null)) {
+            $fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress)
+            $fake.traceEvidence.$field.$clock = $badValue
+            Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } "$field $clock invalid value rejected"
+        }
+        $fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress)
+        $fake.traceEvidence.$field.PSObject.Properties.Remove($clock)
+        Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } "$field $clock missing field rejected"
+    }
+    $fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress)
+    $fake.traceEvidence.$field.QpcEnd = [long]1
+    Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } "$field reversed interval rejected"
+}
+$fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress)
+$fake.traceEvidence.TokenAfter.QpcFrequency = [long]9999999
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'different QPC frequencies rejected'
+$fake = Parse ($observed | ConvertTo-Json -Depth 5 -Compress)
+$fake.traceEvidence.TokenAfter.QpcStart = [long]100
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'overlapping token snapshots rejected'
+$fake = Parse ($inconclusiveAfter | ConvertTo-Json -Depth 5 -Compress)
+$fake.traceEvidence.TokenAfter.QpcStart = [long]1
+Assert-Rejected { Get-P0TraceCorrelation -Decoded @($fake) } 'inconclusive token timing rejected'
 Write-Output "PASS: $checks synthetic trace-result checks; renderer identity and sandbox remain inconclusive"

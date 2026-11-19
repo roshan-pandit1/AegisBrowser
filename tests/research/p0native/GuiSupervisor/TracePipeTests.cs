@@ -54,6 +54,7 @@ internal static class TracePipeTests
             string image = Environment.ProcessPath ?? throw new InvalidOperationException("IMAGE_UNAVAILABLE");
             var identity = new ProcessRunner.Identity(self.Id, created, image, "SYNTHETIC");
             using var child = StartChild();
+            using var childBetween = StartChild();
             try
             {
                 var tracker = PassiveTrackingSession.Start(self.SafeHandle, (uint)self.Id, created, image, 10000);
@@ -64,7 +65,9 @@ internal static class TracePipeTests
                     GetProcessId(duplicateHandle) == child.Id, "pre-barrier child handle duplicated without reopening PID");
                 var missing = tracker.DuplicateMatchBeforeBarrier((uint)child.Id, 0, out var missingHandle);
                 Check(missing.Status == "INCONCLUSIVE" && missingHandle == null, "invalid barrier cannot duplicate a handle");
-                async Task<TracePipeObserver.Evidence> Scenario(string payload, bool closeChild = false)
+                async Task<TracePipeObserver.Evidence> Scenario(string payload, bool closeChild = false,
+                    string? revalidation = null, bool omitRevalidation = false, bool closeBetween = false,
+                    bool omitFinalization = false, bool duplicateFinalization = false)
                 {
                     using var observer = TracePipeObserver.Create();
                     observer.Start(identity, self.SafeHandle, tracker);
@@ -86,7 +89,29 @@ internal static class TracePipeTests
                         }
                         await Write(client, payload);
                         if (payload.Contains(" 0123456789ABCDEF0123456789ABCDEF\n", StringComparison.Ordinal))
+                        {
                             Check(await Read(client) == "P0TRACE1 RECEIVED", "valid message receipt acknowledged");
+                            if (closeBetween)
+                            {
+                                await Release(childBetween);
+                                Check(WaitForSingleObject(childBetween.SafeHandle, 5000) == 0,
+                                    "candidate exit is signaled between observations");
+                            }
+                            if (!omitRevalidation && !payload.Contains("\nP0TRACE1", StringComparison.Ordinal))
+                            {
+                                await Write(client, revalidation ?? payload.Replace("P0TRACE1 ", "P0TRACE2 ", StringComparison.Ordinal));
+                                if (revalidation == null)
+                                {
+                                    Check(await Read(client) == "P0TRACE2 RECEIVED", "revalidation receipt acknowledged");
+                                    if (!omitFinalization)
+                                    {
+                                        await Write(client, "P0TRACE3 STABLE\n");
+                                        Check(await Read(client) == "P0TRACE3 RECEIVED", "final document receipt acknowledged");
+                                        if (duplicateFinalization) await Write(client, "P0TRACE3 STABLE\n");
+                                    }
+                                }
+                            }
+                        }
                     }
                     return await observer.FinishAsync();
                 }
@@ -97,8 +122,13 @@ internal static class TracePipeTests
                     "browser report binds a pre-barrier live handle without proving renderer role");
                 Check(ok.Token?.Status == "OBSERVED" && ok.Token.ProcessId == child.Id &&
                     ok.Token.CreationFileTimeUtc == ok.CandidateCreationFileTimeUtc &&
+                    ok.TokenAfter?.Status == "OBSERVED" && ok.TokenAfter.ProcessId == child.Id &&
+                    ok.TokenAfter.CreationFileTimeUtc == ok.CandidateCreationFileTimeUtc &&
+                    ok.Token.QpcFrequency == Stopwatch.Frequency && ok.TokenAfter.QpcFrequency == Stopwatch.Frequency &&
+                    ok.Token.QpcStart > 0 && ok.Token.QpcEnd >= ok.Token.QpcStart &&
+                    ok.TokenAfter.QpcStart >= ok.Token.QpcEnd && ok.TokenAfter.QpcEnd >= ok.TokenAfter.QpcStart &&
                     ok.Token.ProcessRole == "NOT_ESTABLISHED" && ok.Token.SandboxEnforcement == "INCONCLUSIVE",
-                    "actual retained-handle token snapshot matches the candidate without promoting role");
+                    "both ordered retained-handle token snapshots match without promoting role");
                 using (var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(ok)))
                 {
                     var tokenJson = json.RootElement.GetProperty("Token");
@@ -110,6 +140,18 @@ internal static class TracePipeTests
                 }
                 var duplicate = await Scenario(valid + valid);
                 Check(duplicate.Reason == "TRACE_DUPLICATE_MESSAGE", "duplicate trace messages rejected: " + duplicate.Reason);
+                var omitted = await Scenario(valid, omitRevalidation: true);
+                Check(omitted.Reason == "TRACE_REVALIDATION_MISSING", "missing revalidation rejected: " + omitted.Reason);
+                var noFinal = await Scenario(valid, omitFinalization: true);
+                Check(noFinal.Reason == "TRACE_FINALIZATION_MISSING", "missing final document check rejected: " + noFinal.Reason);
+                var duplicateFinal = await Scenario(valid, duplicateFinalization: true);
+                Check(duplicateFinal.Reason == "TRACE_DUPLICATE_MESSAGE", "duplicate final document check rejected: " + duplicateFinal.Reason);
+                var mismatch = await Scenario(valid, revalidation: "P0TRACE2 1 0123456789ABCDEF0123456789ABCDEF\n");
+                Check(mismatch.Reason == "TRACE_REVALIDATION_MISMATCH", "changed candidate rejected: " + mismatch.Reason);
+                string between = "P0TRACE1 " + childBetween.Id + " 0123456789ABCDEF0123456789ABCDEF\n";
+                var exitedBetween = await Scenario(between, closeBetween: true);
+                Check(exitedBetween.Status == "INCONCLUSIVE" && exitedBetween.Reason == "RETAINED_LIFETIME_NOT_LIVE",
+                    "candidate exit between observations rejected: " + exitedBetween.Reason);
                 var malformed = await Scenario("P0TRACE1 not-a-pid BAD\n");
                 Check(malformed.Reason == "TRACE_MESSAGE_INVALID", "malformed trace message rejected");
                 var stale = await Scenario(valid, true);
@@ -124,7 +166,7 @@ internal static class TracePipeTests
                 Check(duplicateHandle != null && !duplicateHandle.IsClosed && GetProcessId(duplicateHandle) == child.Id &&
                     WaitForSingleObject(duplicateHandle, 0) == 0, "owned duplicate outlives tracker and observes the same exited process");
             }
-            finally { await Release(child); }
+            finally { await Release(child); await Release(childBetween); }
 
             using var peer = StartChild();
             try

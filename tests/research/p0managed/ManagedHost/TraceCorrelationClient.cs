@@ -12,6 +12,8 @@ internal sealed class TraceCorrelationClient : IDisposable
     private static readonly byte[] Hello = Encoding.ASCII.GetBytes("P0TRACE1 HELLO\n");
     private static readonly byte[] Ack = Encoding.ASCII.GetBytes("P0TRACE1 ACK\n");
     private static readonly byte[] Received = Encoding.ASCII.GetBytes("P0TRACE1 RECEIVED\n");
+    private static readonly byte[] Finalization = Encoding.ASCII.GetBytes("P0TRACE3 STABLE\n");
+    private static readonly byte[] FinalizationReceived = Encoding.ASCII.GetBytes("P0TRACE3 RECEIVED\n");
     private readonly NamedPipeClientStream pipe;
     private TraceCorrelationClient(NamedPipeClientStream pipe) => this.pipe = pipe;
 
@@ -40,6 +42,33 @@ internal sealed class TraceCorrelationClient : IDisposable
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await pipe.WriteAsync(payload, timeout.Token);
         await ReadExpectedAsync(pipe, Received, timeout.Token);
+    }
+
+    // A receipt is not proof of renderer identity or sandbox policy. The
+    // supervisor separately rechecks its retained handle after this message.
+    internal async Task SendRevalidationAsync(int pid, string frame)
+    {
+        byte[] payload = EncodeRevalidation(pid, frame);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await pipe.WriteAsync(payload, timeout.Token);
+        await ReadExpectedAsync(pipe, Encoding.ASCII.GetBytes("P0TRACE2 RECEIVED\n"), timeout.Token);
+    }
+
+    // This is a browser-side continuity claim, not a sandbox verdict.
+    internal async Task SendFinalizationAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await pipe.WriteAsync(Finalization, timeout.Token);
+        await ReadExpectedAsync(pipe, FinalizationReceived, timeout.Token);
+    }
+
+    internal static byte[] EncodeFinalization() => (byte[])Finalization.Clone();
+
+    internal static byte[] EncodeRevalidation(int pid, string frame)
+    {
+        byte[] first = Encode(pid, frame);
+        first[7] = (byte)'2';
+        return first;
     }
 
     internal static byte[] Encode(int pid, string frame)

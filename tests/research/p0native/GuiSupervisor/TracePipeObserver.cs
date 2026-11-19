@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -15,13 +16,15 @@ internal sealed class TracePipeObserver : IDisposable
 {
     internal sealed record Evidence(string Status, string Reason, uint? CandidatePid = null,
         long? CandidateCreationFileTimeUtc = null, int Barrier = 0,
-        string RendererIdentity = "INCONCLUSIVE", string SandboxEnforcement = "INCONCLUSIVE", TraceTokenEvidence? Token = null);
+        string RendererIdentity = "INCONCLUSIVE", string SandboxEnforcement = "INCONCLUSIVE", TraceTokenEvidence? Token = null,
+        TraceTokenEvidence? TokenAfter = null);
     internal sealed record TraceTokenEvidence(string Status, string Reason, uint? ProcessId = null,
         long? CreationFileTimeUtc = null, uint? IntegrityRid = null, bool? IsAppContainer = null,
         uint? DenyOnlyGroupCount = null, uint? RestrictingSidCount = null, bool? HasRestrictingSids = null,
         uint? PrivilegeCount = null, uint? EnabledPrivilegeCount = null, bool? InAnyJob = null,
         bool? Win32kSystemCallsDisabled = null, uint? SystemCallMitigationFlags = null,
-        string ProcessRole = "NOT_ESTABLISHED", string SandboxEnforcement = "INCONCLUSIVE");
+        string ProcessRole = "NOT_ESTABLISHED", string SandboxEnforcement = "INCONCLUSIVE",
+        long? QpcStart = null, long? QpcEnd = null, long? QpcFrequency = null);
     private const string Prefix = "aegis-p0trace-";
     private readonly NamedPipeServerStream pipe;
     private readonly CancellationTokenSource stop = new();
@@ -99,27 +102,50 @@ internal sealed class TracePipeObserver : IDisposable
             using var candidateLifetime = candidate;
             TraceTokenEvidence? tokenEvidence = null;
             if (match.Status == "OBSERVED" && candidate != null && match.CreationFileTimeUtc is long candidateCreated)
-            {
-                // Read from the duplicated retained kernel handle, never reopen
-                // the PID. TokenObserver validates identity and liveness twice.
-                var token = TokenObserver.Observe(candidate, pid, candidateCreated, browser.ImagePath);
-                tokenEvidence = token.Status == "OBSERVED" && token.ProcessId == pid && token.CreationFileTimeUtc == candidateCreated
-                    ? new(token.Status, token.Reason, token.ProcessId, token.CreationFileTimeUtc, token.IntegrityRid,
-                        token.IsAppContainer, token.DenyOnlyGroupCount, token.RestrictingSidCount, token.HasRestrictingSids,
-                        token.PrivilegeCount, token.EnabledPrivilegeCount, token.InAnyJob, token.Win32kSystemCallsDisabled,
-                        token.SystemCallMitigationFlags)
-                    : new("INCONCLUSIVE", token.Status == "OBSERVED" ? "TOKEN_IDENTITY_MISMATCH" : token.Reason);
-            }
+                tokenEvidence = ObserveToken(candidate, pid, candidateCreated, browser.ImagePath);
             await pipe.WriteAsync(Encoding.ASCII.GetBytes("P0TRACE1 RECEIVED\n"), deadline.Token).ConfigureAwait(false);
             await pipe.FlushAsync(deadline.Token).ConfigureAwait(false);
+            string? second = await ReadLine(pipe, deadline.Token).ConfigureAwait(false);
+            if (second == null) return Failure("TRACE_REVALIDATION_MISSING");
+            if (second == line) return Failure("TRACE_DUPLICATE_MESSAGE");
+            if (!string.Equals(second, "P0TRACE2 " + fields[1] + " " + fields[2], StringComparison.Ordinal))
+                return Failure("TRACE_REVALIDATION_MISMATCH");
+            var after = tracking.MatchBeforeBarrier(pid, barrier);
+            TraceTokenEvidence? tokenAfter = null;
+            if (after.Status == "OBSERVED" && after.CreationFileTimeUtc == match.CreationFileTimeUtc &&
+                candidate != null && match.CreationFileTimeUtc is long afterCreated)
+                tokenAfter = ObserveToken(candidate, pid, afterCreated, browser.ImagePath);
+            await pipe.WriteAsync(Encoding.ASCII.GetBytes("P0TRACE2 RECEIVED\n"), deadline.Token).ConfigureAwait(false);
+            await pipe.FlushAsync(deadline.Token).ConfigureAwait(false);
+            string? final = await ReadLine(pipe, deadline.Token).ConfigureAwait(false);
+            if (final == null) return Failure("TRACE_FINALIZATION_MISSING");
+            if (final != "P0TRACE3 STABLE") return Failure("TRACE_FINALIZATION_INVALID");
+            await pipe.WriteAsync(Encoding.ASCII.GetBytes("P0TRACE3 RECEIVED\n"), deadline.Token).ConfigureAwait(false);
+            await pipe.FlushAsync(deadline.Token).ConfigureAwait(false);
             if (await ReadLine(pipe, deadline.Token).ConfigureAwait(false) != null) return Failure("TRACE_DUPLICATE_MESSAGE");
-            return match.Status == "OBSERVED" && tokenEvidence != null
-                ? new("OBSERVED", match.Reason, match.Pid, match.CreationFileTimeUtc, barrier, Token: tokenEvidence)
-                : Failure(match.Status == "OBSERVED" ? "TOKEN_HANDLE_UNAVAILABLE" : match.Reason);
+            if (match.Status != "OBSERVED") return Failure(match.Reason);
+            if (after.Status != "OBSERVED") return Failure(after.Reason);
+            return tokenEvidence != null && tokenAfter != null && after.CreationFileTimeUtc == match.CreationFileTimeUtc
+                ? new("OBSERVED", match.Reason, match.Pid, match.CreationFileTimeUtc, barrier, Token: tokenEvidence, TokenAfter: tokenAfter)
+                : Failure("TRACE_REVALIDATION_UNAVAILABLE");
         }
         catch (OperationCanceledException) { return Failure("TRACE_TIMEOUT_OR_PARENT_EXIT"); }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception)
         { return Failure("TRACE_OBSERVATION_FAILED_" + ex.GetType().Name); }
+    }
+
+    private static TraceTokenEvidence ObserveToken(SafeProcessHandle candidate, uint pid, long created, string image)
+    {
+        // This duplicates no PID lookup: the input is the held kernel object.
+        long start = Stopwatch.GetTimestamp();
+        var token = TokenObserver.Observe(candidate, pid, created, image);
+        long end = Stopwatch.GetTimestamp();
+        return token.Status == "OBSERVED" && token.ProcessId == pid && token.CreationFileTimeUtc == created
+            ? new(token.Status, token.Reason, token.ProcessId, token.CreationFileTimeUtc, token.IntegrityRid,
+                token.IsAppContainer, token.DenyOnlyGroupCount, token.RestrictingSidCount, token.HasRestrictingSids,
+                token.PrivilegeCount, token.EnabledPrivilegeCount, token.InAnyJob, token.Win32kSystemCallsDisabled,
+                token.SystemCallMitigationFlags, QpcStart: start, QpcEnd: end, QpcFrequency: Stopwatch.Frequency)
+            : new("INCONCLUSIVE", token.Status == "OBSERVED" ? "TOKEN_IDENTITY_MISMATCH" : token.Reason);
     }
 
     internal async Task<Evidence> FinishAsync()

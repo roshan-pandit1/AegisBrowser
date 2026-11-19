@@ -265,3 +265,36 @@ open or direct observation-pipe open during V8 context creation. Those
 attempts preceded independently verified renderer identity and lockdown
 timing and cannot serve as enforcement evidence. Historical output remains
 documented, and the positive control and browser-broker diagnostics remain.
+
+## Two-epoch frame and retained-handle observation
+
+In run 44452186353 the browser relay first reported PID 6552 after the
+controlled data-page load; a later renderer claim and the HTTPS trace named
+PID 1000. The output was buffered and reprinted after browser exit, so GitHub
+log timestamps do not establish when Chromium produced those events. The
+ordering is consistent with a navigation transition, but does not prove a
+renderer swap or identify the documents owned by those PIDs.
+
+The experiment now records bounded browser-side CEF frame IDs and monotonic
+QPC timestamps for frame-load and broker callbacks. It samples two independent
+browser-origin tracing epochs, each bracketed by CEF main-frame and CDP
+frame/loader/document checks. Navigation, detachment, trace loss, conflicting
+or missing records and changed frame, loader or PID invalidate the observation.
+Between epochs the supervisor snapshots the pre-trace retained process handle;
+after the second epoch it rechecks the same held object and snapshots its token
+again. A final document check follows the second receipt. Matching snapshots
+are labeled `CONSISTENT_UNVERIFIED`, not verified renderer identity.
+
+The original CEF frame ID and CDP frame token are different identifiers and
+are not equated. Sampling and event coverage do not prove continuous identity
+through process swaps, and this implementation invalidates rather than retries
+an observation after a change. In particular, the process primary token may
+already be restricted while the renderer's initial thread is still
+impersonating. Pinned Chromium's
+[Windows renderer delegate](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/content/renderer/renderer_main_platform_delegate_win.cc)
+calls `LowerToken()`, and the pinned
+[target-services implementation](https://github.com/chromium/chromium/blob/b859317bf11f6be47f9b7799ec690a0a42a1fb33/sandbox/win/src/target_services.cc)
+shows that primary-token observations alone do not prove its completion.
+Job membership alone also does not identify Chromium's job or its limits.
+Renderer identity, lockdown timing and exact-object enforcement remain
+inconclusive pending independent evidence.
