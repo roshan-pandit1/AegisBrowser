@@ -49,6 +49,7 @@ internal static partial class Program
                         "enabled viewport preference persisted");
                     Check(!new PrivacySettingsStore(disabledPath).Load().LetterboxWebContent,
                         "disabled viewport preference persisted");
+                    if (phase == "viewport-write") await ExerciseUnreadablePrivacySettings(root);
                     if (phase == "viewport-write") await MeasureMainForm(disabledPath, false);
                     await MeasureMainForm(enabledPath, true);
                     if (phase == "viewport-write") await ExerciseStalledZoomQuery(enabledPath);
@@ -67,6 +68,88 @@ internal static partial class Program
         }
         if (!failed && completed) Console.WriteLine($"PASS: viewport CEF shutdown completed ({phase})");
         return !failed && completed ? 0 : 1;
+    }
+
+    // The application must not open a Chromium tab using fallback defaults
+    // when an existing profile's privacy configuration cannot be loaded.
+    // All files below belong to this test's disposable CEF profile root.
+    private static async Task ExerciseUnreadablePrivacySettings(string root)
+    {
+        var badProfile = Path.Combine(root, "malformed-privacy-profile");
+        Directory.CreateDirectory(badProfile);
+        var settingsFile = Path.Combine(badProfile, "privacy.json");
+        const string malformed = "{ malformed privacy configuration";
+        File.WriteAllText(settingsFile, malformed);
+        var warnings = new List<string>();
+        var form = new MainForm("malformed-privacy", badProfile, null, warnings.Add);
+        try
+        {
+            form.Show();
+            var tabs = form.Controls.OfType<TabControl>().Single();
+            var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
+            var newTab = toolbar.Controls.OfType<Button>().Single(button => button.Text == "+");
+            var diagnostics = toolbar.Controls.OfType<Button>().Single(button => button.Text == "Diagnostics");
+            await Wait(() => warnings.Count > 0, "unreadable privacy configuration warning");
+            Check(warnings.Count == 1 && warnings[0].Contains("No browser tabs", StringComparison.OrdinalIgnoreCase),
+                "unreadable privacy configuration reports browsing is blocked");
+            Check(tabs.TabCount == 0,
+                "unreadable privacy configuration blocks initial browser tab");
+            newTab.PerformClick();
+            diagnostics.PerformClick();
+            newTab.PerformClick();
+            form.SubmitAddress(Origin + "privacy-load");
+            Check(tabs.TabCount == 0, "unreadable privacy configuration blocks repeated tab actions");
+            Check(File.ReadAllText(settingsFile) == malformed, "unreadable privacy configuration remains intact");
+
+            // Recovery is intentionally a restart boundary: do not silently
+            // start with different settings while the existing form is live.
+            File.WriteAllText(settingsFile, "{}");
+            newTab.PerformClick();
+            Check(tabs.TabCount == 0, "repair while running does not bypass restart requirement");
+        }
+        finally
+        {
+            if (!form.IsDisposed) { form.Close(); await Wait(() => form.IsDisposed, "malformed-privacy form close"); }
+        }
+
+        var missingWarnings = new List<string>();
+        var missingDirectory = Path.Combine(root, "unavailable-privacy-profile");
+        var unavailable = new MainForm("unavailable-privacy", missingDirectory, null, missingWarnings.Add);
+        try
+        {
+            unavailable.Show();
+            await Wait(() => missingWarnings.Count == 1, "unavailable profile privacy warning");
+            var missingTabs = unavailable.Controls.OfType<TabControl>().Single();
+            Check(missingTabs.TabCount == 0, "unavailable profile directory blocks browser tabs");
+        }
+        finally
+        {
+            if (!unavailable.IsDisposed) { unavailable.Close(); await Wait(() => unavailable.IsDisposed, "unavailable profile form close"); }
+        }
+
+        await ConfirmPrivacyProfileCanStart(badProfile, "repaired profile");
+        await ConfirmPrivacyProfileCanStart(Path.Combine(root, "missing-privacy-profile"), "new profile");
+    }
+
+    private static async Task ConfirmPrivacyProfileCanStart(string profilePath, string scenario)
+    {
+        Directory.CreateDirectory(profilePath);
+        var warnings = new List<string>();
+        var form = new MainForm(scenario, profilePath, null, warnings.Add);
+        try
+        {
+            form.Show();
+            var tabs = form.Controls.OfType<TabControl>().Single();
+            await Wait(() => tabs.TabCount == 1, scenario + " initial tab");
+            Check(warnings.Count == 0,
+                scenario + " privacy configuration permits browsing");
+            var browser = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+            await Ready(browser);
+        }
+        finally
+        {
+            if (!form.IsDisposed) { form.Close(); await Wait(() => form.IsDisposed, scenario + " native close"); }
+        }
     }
 
     private static async Task MeasureMainForm(string profilePath, bool enabled)
