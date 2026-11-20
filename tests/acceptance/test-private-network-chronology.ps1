@@ -62,4 +62,14 @@ try { $null = ConvertTo-EvidenceUtcInstant ([DateTime]::SpecifyKind($now.UtcDate
 catch { $unspecifiedRejected = $true }
 if (-not $unspecifiedRejected) { throw 'FAIL: unspecified time kind accepted' }
 $checks++; Write-Output 'PASS: unspecified time kind rejected'
+$localRejected = $false
+try { $null = ConvertTo-EvidenceUtcInstant ([DateTime]::SpecifyKind($now.UtcDateTime, [DateTimeKind]::Local)) }
+catch { $localRejected = $true }
+if (-not $localRejected) { throw 'FAIL: local time kind accepted' }
+$checks++; Write-Output 'PASS: local time kind rejected'
+# The receiver uses DateTime.UtcNow.ToString('O'), which ends in Z. Check the
+# actual ConvertFrom-Json representation on both supported PowerShell hosts.
+$roundtrip = (@{ observedUtc = $now.UtcDateTime.ToString('O') } | ConvertTo-Json -Compress | ConvertFrom-Json)
+if ((ConvertTo-EvidenceUtcInstant $roundtrip.observedUtc) -ne $now) { throw 'FAIL: UTC Z receiver JSON round trip' }
+$checks++; Write-Output 'PASS: UTC Z receiver JSON round trip'
 Write-Output ("PASS: $checks synthetic chronology checks; no sockets, WFP or CEF tests executed.")

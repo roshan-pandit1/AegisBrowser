@@ -19,7 +19,10 @@ $timeArgs = @{ OrdinaryRecord = @{ processCreatedUtc = $testNow.AddSeconds(-2).T
 $evidence = [ordered]@{
     formatVersion = 2; runId = $runId.ToString('N'); overallStatus = 'INCONCLUSIVE'; classification = 'ALLOWED_AND_INDEPENDENTLY_OBSERVED';
     transactionId = $ordinaryNonce.ToString('N'); receiverAddress = '10.9.8.2'; receiverPort = 47123;
-    remoteAddress = '10.9.8.1'; remotePort = 50000; observedUtc = $testNow.ToString('O');
+    # Match receive-private-network-control.ps1, which writes a UTC DateTime
+    # in round-trip format with a trailing Z. PowerShell 7 may deserialize an
+    # explicit +00:00 offset as Local and lose the original offset.
+    remoteAddress = '10.9.8.1'; remotePort = 50000; observedUtc = $testNow.UtcDateTime.ToString('O');
     transport = 'IPv4/TCP'; observedMatches = 1; duplicateObservationWindowSeconds = 2; duplicateCoverage = 'bounded-window-only';
     processAttribution = 'unverified'; wfpDecision = 'not-observed'
 }
