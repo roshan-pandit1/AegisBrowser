@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using AegisBrowser;
+using AegisBrowser.Core;
 using CefSharp;
 
 namespace AegisBrowser.BrowserTests;
@@ -42,7 +43,8 @@ internal static partial class Program
         var configured = await Cef.UIThreadTaskFactory.StartNew(() =>
         {
             if (!context.CanSetPreference("proxy")) return (false, "Proxy preference is read-only.");
-            var settings = new Dictionary<string, object> { ["mode"] = "fixed_servers", ["server"] = "http://127.0.0.1:" + proxy.Port };
+            var draft = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", proxy.Port, false, null, "", true);
+            var settings = ChromiumProxyPreference.Create(draft);
             var ok = context.SetPreference("proxy", settings, out var error); return (ok, error);
         });
         if (!configured.Item1) throw new IOException("CEF rejected the test proxy preference: " + configured.Item2);

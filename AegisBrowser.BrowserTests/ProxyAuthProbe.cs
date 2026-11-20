@@ -41,7 +41,8 @@ internal static partial class Program
                 {
                     async Task Configure(int port)
                     {
-                        var value = new Dictionary<string, object> { ["mode"] = "fixed_servers", ["server"] = "http://127.0.0.1:" + port };
+                        var draft = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", port, true, Guid.NewGuid(), "", true);
+                        var value = ChromiumProxyPreference.Create(draft);
                         var outcome = await Cef.UIThreadTaskFactory.StartNew(() =>
                         {
                             if (!context.CanSetPreference("proxy")) return (false, "Proxy preference is read-only.");

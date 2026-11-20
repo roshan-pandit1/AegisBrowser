@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using AegisBrowser;
+using AegisBrowser.Core;
 using CefSharp;
 using CefSharp.WinForms;
 
@@ -40,10 +41,8 @@ internal static partial class Program
                 {
                     async Task Configure(bool removeLoopbackBypass)
                     {
-                        var configuration = new Dictionary<string, object>
-                        {
-                            ["mode"] = "fixed_servers", ["server"] = "http://127.0.0.1:" + proxy.Port
-                        };
+                        var draft = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", proxy.Port, false, null, "", true);
+                        var configuration = ChromiumProxyPreference.Create(draft);
                         // Test only. Chromium documents security consequences of proxying localhost.
                         if (removeLoopbackBypass) configuration["bypass_list"] = "<-loopback>";
                         var outcome = await Cef.UIThreadTaskFactory.StartNew(() =>
