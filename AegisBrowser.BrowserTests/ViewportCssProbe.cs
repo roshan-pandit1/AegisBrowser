@@ -92,6 +92,8 @@ internal static partial class Program
             await Wait(() => warnings.Count > 0, "unreadable privacy configuration warning");
             Check(warnings.Count == 1 && warnings[0].Contains("No browser tabs", StringComparison.OrdinalIgnoreCase),
                 "unreadable privacy configuration reports browsing is blocked");
+            Check(warnings[0].Contains("default privacy settings", StringComparison.OrdinalIgnoreCase),
+                "privacy warning explains that renaming restores defaults");
             Check(tabs.TabCount == 0,
                 "unreadable privacy configuration blocks initial browser tab");
             newTab.PerformClick();

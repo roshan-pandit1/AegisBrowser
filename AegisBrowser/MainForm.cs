@@ -65,7 +65,8 @@ public sealed class MainForm : Form
         webRtcPolicyBlocksTabs = WebRtcPrivacyPolicy.PreventBrowsing(configuration.RestrictWebRtcNonProxiedUdp, webRtcPolicy);
         if (privacyWarning is not null) Shown += (_, _) =>
         {
-            var message = privacyWarning + "\n\nNo browser tabs will open until the settings are repaired or renamed and this profile is restarted.";
+            var message = privacyWarning + "\n\nNo browser tabs will open until the settings are repaired or renamed and this profile is restarted. " +
+                "Renaming the file starts the profile with default privacy settings; review the privacy controls before browsing.";
             if (privacyLoadWarning is null) MessageBox.Show(this, message, "Privacy settings unavailable");
             else privacyLoadWarning(message);
         };
