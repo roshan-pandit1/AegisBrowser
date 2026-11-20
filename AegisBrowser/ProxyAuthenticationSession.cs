@@ -7,17 +7,18 @@ namespace AegisBrowser;
 /// Experimental, profile-bound Basic HTTP proxy authentication. This does not
 /// configure Chromium, establish network containment, or permit profile startup.
 /// Basic authentication to an HTTP proxy is not encrypted by this component.
-/// The conservative two-challenge budget is per session, not per request; it
-/// can reject legitimate later or concurrent challenges and must be redesigned
-/// before protected browsing is enabled.
+/// CEF supplies no request or connection identity in this callback. This
+/// session supports one explicitly isolated authentication attempt and makes
+/// credentials available for at most one matching challenge. It cannot safely
+/// attribute later challenges to a retry or to an unrelated request. General
+/// concurrent or long-lived protected browsing remains unsupported.
 /// </summary>
 internal sealed class ProxyAuthenticationSession : IDisposable
 {
-    private const int MaxChallenges = 2;
     private readonly object sync = new();
     private readonly ProxyDraft settings;
     private ProxyCredentials? credentials;
-    private int issued;
+    private bool credentialIssued;
 
     private ProxyAuthenticationSession(ProxyDraft settings, ProxyCredentials credentials)
     {
@@ -51,7 +52,7 @@ internal sealed class ProxyAuthenticationSession : IDisposable
     // Used only by the disposable CEF fixture with synthetic credentials.
     internal static ProxyAuthenticationSession ForFixture(ProxyDraft draft, ProxyCredentials credentials) => new(draft, credentials);
 
-    internal int Issued { get { lock (sync) return issued; } }
+    internal int Issued { get { lock (sync) return credentialIssued ? 1 : 0; } }
 
     // The callback is supplied on CEF's IO thread. It is completed and disposed
     // exactly once. Locking prevents Dispose from racing a successful response.
@@ -64,14 +65,18 @@ internal sealed class ProxyAuthenticationSession : IDisposable
                 try
                 {
                     if (callback.IsDisposed) return true;
-                    if (credentials is null || issued >= MaxChallenges ||
+                    if (credentials is null ||
                         !ProxyAuthenticationScope.Allows(settings, isProxy, host, port, scheme))
                     {
                         callback.Cancel();
                         return true;
                     }
-                    issued++;
-                    callback.Continue(credentials.Username, credentials.Password);
+                    // Consume this isolated attempt before invoking CEF. A
+                    // disposed callback or exception cannot renew the lease.
+                    var oneShot = credentials!;
+                    credentials = null;
+                    credentialIssued = true;
+                    callback.Continue(oneShot.Username, oneShot.Password);
                     return true;
                 }
                 catch (ObjectDisposedException) { return true; }

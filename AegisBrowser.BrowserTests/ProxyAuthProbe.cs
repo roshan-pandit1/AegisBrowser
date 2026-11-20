@@ -62,7 +62,7 @@ internal static partial class Program
                     using var allowed = new ProxyChallengeHandler(goodProxy.Port, FixturePassword);
                     browser = Open(allowed); await Ready(browser);
                     await LoadReady(browser, AuthOrigin + "/allow");
-                    Check(await Js(browser, "document.title") == "authenticated" && goodProxy.Accepted > 0 && allowed.Issued is > 0 and <= 2,
+                    Check(await Js(browser, "document.title") == "authenticated" && goodProxy.Accepted > 0 && allowed.Issued == 1,
                         "CEF Basic proxy challenge reaches a scoped credential callback");
                     browser.Load(AuthOrigin + "/site-auth");
                     await Wait(() => allowed.SiteChallenges > 0 && goodProxy.SiteRequests > 0, "site authentication challenge");
@@ -92,9 +92,10 @@ internal static partial class Program
                     browser.Load(AuthOrigin + "/allow");
                     await Wait(() => badProxy.RejectedCredentials > 0, "incorrect proxy credentials");
                     await Task.Delay(750);
-                    Check(badProxy.Accepted == 0 && rejected.Issued <= 2,
-                        "incorrect fixture credentials are rejected and the test callback issues at most two attempts");
+                    Check(badProxy.Accepted == 0 && rejected.Issued == 1,
+                        "incorrect fixture credentials are rejected and the isolated attempt issues no retry");
                     await CloseWeb(browser); host.Controls.Remove(browser); browser = null;
+                    await ExerciseConcurrentIsolatedProxyAttempts(host, root);
                     Console.WriteLine($"PASS: {checks} CEF proxy authentication probe checks");
                 }
                 catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
@@ -114,6 +115,57 @@ internal static partial class Program
         finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
         if (result == 0) Console.WriteLine("PASS: CEF proxy authentication probe shutdown completed");
         return result;
+    }
+
+    // Two independent disposable request contexts each contain exactly one
+    // controlled operation and one one-shot auth session. This does not prove
+    // same-profile general concurrent authentication or identify retries.
+    private static async Task ExerciseConcurrentIsolatedProxyAttempts(Form host, string root)
+    {
+        using var proxy = new AuthProxyFixture(synchronizeChallenges: true);
+        var draft = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", proxy.Port, true, Guid.NewGuid(), "", true);
+        var firstReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        RequestContextHandler Handler(TaskCompletionSource<bool> ready) => new RequestContextHandler().OnInitialize(context =>
+        {
+            try
+            {
+                var value = ChromiumProxyPreference.Create(draft);
+                if (!context.CanSetPreference("proxy") || !context.SetPreference("proxy", value, out _))
+                    throw new IOException("Controlled proxy preference was rejected.");
+                ready.TrySetResult(true);
+            }
+            catch (Exception ex) { ready.TrySetException(ex); }
+        });
+        using var firstContext = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "auth-parallel-first") }, Handler(firstReady));
+        using var secondContext = new RequestContext(new RequestContextSettings { CachePath = Path.Combine(root, "auth-parallel-second") }, Handler(secondReady));
+        using var firstSession = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword));
+        using var secondSession = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword));
+        var first = new BrowserView("about:blank", requestContext: firstContext) { Dock = DockStyle.Left, Width = 300,
+            RequestHandler = new SafeRequests(_ => { }, proxyAuthentication: firstSession) };
+        var second = new BrowserView("about:blank", requestContext: secondContext) { Dock = DockStyle.Fill,
+            RequestHandler = new SafeRequests(_ => { }, proxyAuthentication: secondSession) };
+        try
+        {
+            Observe(first); Observe(second); host.Controls.Add(first); host.Controls.Add(second);
+            await Task.WhenAll(firstReady.Task, secondReady.Task).WaitAsync(TimeSpan.FromSeconds(15));
+            await Task.WhenAll(Ready(first), Ready(second));
+            await Task.WhenAll(LoadReady(first, AuthOrigin + "/allow?first"), LoadReady(second, AuthOrigin + "/allow?second"));
+            Check(await Js(first, "document.title") == "authenticated" && await Js(second, "document.title") == "authenticated" &&
+                firstSession.Issued == 1 && secondSession.Issued == 1 && proxy.Accepted >= 2 && proxy.UnauthenticatedRequests >= 2,
+                "two independent CEF contexts complete synchronized one-shot proxy authentication");
+        }
+        finally
+        {
+            Exception? closeFailure = null;
+            foreach (var view in new[] { first, second })
+            {
+                try { if (!view.IsDisposed && view.IsBrowserInitialized) await CloseWeb(view); }
+                catch (Exception ex) { closeFailure ??= ex; }
+                host.Controls.Remove(view);
+            }
+            if (closeFailure is not null) throw new IOException("Parallel proxy browser shutdown failed.", closeFailure);
+        }
     }
 
     private sealed class ProxyChallengeHandler : RequestHandler, IDisposable
@@ -154,14 +206,43 @@ internal static partial class Program
             session.Respond(false, "127.0.0.1", 8080, "basic", wrongOrigin);
             var wrongHost = new SyntheticAuthCallback();
             session.Respond(true, "other.invalid", 8080, "basic", wrongHost);
-            Check(wrongOrigin.Cancelled && wrongHost.Cancelled && wrongOrigin.IsDisposed && wrongHost.IsDisposed && session.Issued == 0,
-                "profile proxy session rejects origin and mismatched proxy challenges");
+            var wrongPort = new SyntheticAuthCallback();
+            session.Respond(true, "127.0.0.1", 8081, "basic", wrongPort);
+            var wrongScheme = new SyntheticAuthCallback();
+            session.Respond(true, "127.0.0.1", 8080, "digest", wrongScheme);
+            Check(wrongOrigin.Cancelled && wrongHost.Cancelled && wrongPort.Cancelled && wrongScheme.Cancelled &&
+                wrongOrigin.IsDisposed && wrongHost.IsDisposed && wrongPort.IsDisposed && wrongScheme.IsDisposed && session.Issued == 0,
+                "isolated proxy attempt rejects origin, host, port and scheme mismatches");
 
             var callbacks = Enumerable.Range(0, 8).Select(_ => new SyntheticAuthCallback()).ToArray();
             Parallel.ForEach(callbacks, callback => session.Respond(true, "127.0.0.1", 8080, "basic", callback));
-            Check(callbacks.Count(callback => callback.CorrectCredentials) == 2 &&
-                callbacks.Count(callback => callback.Cancelled) == 6 && callbacks.All(callback => callback.IsDisposed),
-                "proxy session enforces its bounded concurrent challenge budget");
+            Check(callbacks.Count(callback => callback.CorrectCredentials) == 1 &&
+                callbacks.Count(callback => callback.Cancelled) == 7 && callbacks.All(callback => callback.IsDisposed),
+                "isolated proxy attempt atomically permits only one matching challenge");
+            var later = new SyntheticAuthCallback();
+            session.Respond(true, "127.0.0.1", 8080, "basic", later);
+            Check(later.Cancelled && later.IsDisposed && !later.CorrectCredentials,
+                "isolated proxy attempt denies later challenges without recreating credentials");
+        }
+
+        // Synthetic independent attempts do not establish a mapping between
+        // a real CEF request and an attempt; the callback exposes no such ID.
+        using (var firstAttempt = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword)))
+        using (var secondAttempt = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword)))
+        {
+            var first = new SyntheticAuthCallback();
+            var second = new SyntheticAuthCallback();
+            Parallel.Invoke(
+                () => firstAttempt.Respond(true, "127.0.0.1", 8080, "basic", first),
+                () => secondAttempt.Respond(true, "127.0.0.1", 8080, "basic", second));
+            Check(first.CorrectCredentials && second.CorrectCredentials && first.IsDisposed && second.IsDisposed,
+                "two explicitly independent synthetic proxy attempts may each respond once");
+            var retryA = new SyntheticAuthCallback();
+            var retryB = new SyntheticAuthCallback();
+            firstAttempt.Respond(true, "127.0.0.1", 8080, "basic", retryA);
+            secondAttempt.Respond(true, "127.0.0.1", 8080, "basic", retryB);
+            Check(retryA.Cancelled && retryB.Cancelled && retryA.IsDisposed && retryB.IsDisposed,
+                "independent synthetic proxy attempts each deny a later challenge");
         }
 
         var disposed = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword));
@@ -177,6 +258,15 @@ internal static partial class Program
             live.Respond(true, "127.0.0.1", 8080, "basic", closedCallback);
             Check(!closedCallback.CorrectCredentials && live.Issued == 0,
                 "closed CEF authentication callback cannot receive credentials");
+        }
+        using (var failedAttempt = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword)))
+        {
+            var closingCallback = new SyntheticAuthCallback(throwOnContinue: true);
+            failedAttempt.Respond(true, "127.0.0.1", 8080, "basic", closingCallback);
+            var retry = new SyntheticAuthCallback();
+            failedAttempt.Respond(true, "127.0.0.1", 8080, "basic", retry);
+            Check(closingCallback.IsDisposed && failedAttempt.Issued == 1 && retry.Cancelled && !retry.CorrectCredentials,
+                "callback closure during credential delivery cannot renew the isolated attempt");
         }
 
         var profileRoot = Path.Combine(root, "synthetic-proxy-auth-profiles");
@@ -210,13 +300,16 @@ internal static partial class Program
         Check(missing, "proxy auth session fails when the profile credential is missing");
     }
 
-    private sealed class SyntheticAuthCallback : IAuthCallback
+    private sealed class SyntheticAuthCallback(bool throwOnContinue = false) : IAuthCallback
     {
         public bool IsDisposed { get; private set; }
         public bool Cancelled { get; private set; }
         public bool CorrectCredentials { get; private set; }
-        public void Continue(string username, string password) =>
+        public void Continue(string username, string password)
+        {
+            if (throwOnContinue) throw new ObjectDisposedException(nameof(SyntheticAuthCallback));
             CorrectCredentials = username == FixtureUser && password == FixturePassword;
+        }
         public void Cancel() => Cancelled = true;
         public void Dispose() => IsDisposed = true;
     }
@@ -228,16 +321,20 @@ internal static partial class Program
         private readonly CancellationTokenSource cancellation = new();
         private readonly System.Collections.Concurrent.ConcurrentBag<Task> clients = new();
         private readonly Task loop;
+        private readonly bool synchronizeChallenges;
+        private readonly TaskCompletionSource<bool> challengeBarrier = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly string expected = "Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes(FixtureUser + ":" + FixturePassword));
-        private int accepted, rejectedCredentials, siteRequests, siteAuthorizationHeaders;
+        private int accepted, rejectedCredentials, siteRequests, siteAuthorizationHeaders, unauthenticatedRequests;
         public int Port { get; }
         public int Accepted => Volatile.Read(ref accepted);
         public int RejectedCredentials => Volatile.Read(ref rejectedCredentials);
         public int SiteRequests => Volatile.Read(ref siteRequests);
         public int SiteAuthorizationHeaders => Volatile.Read(ref siteAuthorizationHeaders);
+        public int UnauthenticatedRequests => Volatile.Read(ref unauthenticatedRequests);
 
-        public AuthProxyFixture()
+        public AuthProxyFixture(bool synchronizeChallenges = false)
         {
+            this.synchronizeChallenges = synchronizeChallenges;
             listener.Start(); Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             loop = Task.Run(AcceptLoop);
         }
@@ -286,6 +383,11 @@ internal static partial class Program
                     if (!validProxyHeader)
                     {
                         if (hasProxyHeader) Interlocked.Increment(ref rejectedCredentials);
+                        if (synchronizeChallenges && !hasProxyHeader)
+                        {
+                            if (Interlocked.Increment(ref unauthenticatedRequests) >= 2) challengeBarrier.TrySetResult(true);
+                            await challengeBarrier.Task.WaitAsync(TimeSpan.FromSeconds(15), token);
+                        }
                         status = "407 Proxy Authentication Required"; challenge = "Proxy-Authenticate: Basic realm=\"AegisProxyTest\"\r\n"; body = "";
                     }
                     else if (target.AbsolutePath == "/site-auth")
