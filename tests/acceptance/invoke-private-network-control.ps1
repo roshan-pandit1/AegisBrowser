@@ -10,6 +10,8 @@ param(
     [Parameter(Mandatory = $true)][string] $ParentDirectory,
     [string] $BrowserTestsExe,
     [string] $OrdinaryObservation,
+    [int] $MaxClockSkewSeconds = -1,
+    [int] $MaxEvidenceAgeSeconds = -1,
     [switch] $AcknowledgeDisposableIsolatedNetwork
 )
 $ErrorActionPreference = 'Stop'
@@ -108,10 +110,13 @@ $runFile = Join-Path $root 'run.json'
 Assert-NoLink $runFile
 if ((Get-Item -LiteralPath $runFile).Length -gt 4096 -or [IO.File]::ReadAllText($runFile) -cne $expectedRun) { throw 'Run configuration differs from the ordinary stage.' }
 if ([string]::IsNullOrWhiteSpace($OrdinaryObservation)) { throw 'Independent ordinary-observation.json is required before this stage.' }
+if ($MaxClockSkewSeconds -lt 0 -or $MaxClockSkewSeconds -gt 300 -or
+    $MaxEvidenceAgeSeconds -lt 1 -or $MaxEvidenceAgeSeconds -gt 3600) {
+    throw 'AppContainer stage requires explicit MaxClockSkewSeconds (0..300) and MaxEvidenceAgeSeconds (1..3600).'
+}
 Assert-NoLink $OrdinaryObservation
 if ((Get-Item -LiteralPath $OrdinaryObservation).Length -gt 4096) { throw 'Receiver evidence is oversized.' }
 $observation = Get-Content -LiteralPath $OrdinaryObservation -Raw | ConvertFrom-Json
-Assert-OrdinaryReceiverEvidence -Evidence $observation -RunId $RunId -Nonce $NormalNonce -ReceiverAddress $ReceiverAddress -ClientAddress $ClientAddress -Port $Port
 $ordinaryClient = Join-Path $root 'ordinary-client.json'
 Assert-NoLink $ordinaryClient
 if ((Get-Item -LiteralPath $ordinaryClient).Length -gt 4096) { throw 'Ordinary client evidence is oversized.' }
@@ -121,6 +126,8 @@ if (-not (Test-JsonInteger $ordinaryRecord.formatVersion) -or $ordinaryRecord.fo
     -not (Test-JsonInteger $ordinaryRecord.exitCode) -or $ordinaryRecord.exitCode -ne 0 -or $ordinaryRecord.clientResult -cne 'sent' -or $ordinaryRecord.timedOut -isnot [bool] -or $ordinaryRecord.timedOut) {
     throw 'Ordinary client did not complete successfully for this run.'
 }
+Assert-OrdinaryReceiverEvidence -Evidence $observation -RunId $RunId -Nonce $NormalNonce -ReceiverAddress $ReceiverAddress -ClientAddress $ClientAddress -Port $Port `
+    -OrdinaryRecord $ordinaryRecord -NowUtc ([DateTimeOffset]::UtcNow) -MaxClockSkewSeconds $MaxClockSkewSeconds -MaxEvidenceAgeSeconds $MaxEvidenceAgeSeconds
 Write-NewFile (Join-Path $clientRoot 'private-network-control.txt') ($ReceiverAddress + "`n" + $Port + "`n" + $ContainedNonce.ToString('N') + "`n")
 Add-Type -Path (Join-Path $PSScriptRoot '../../scripts/containment/AppContainerLaunchResearch.cs')
 Add-Type -Path (Join-Path $PSScriptRoot '../../scripts/containment/ContainedCefLauncher.cs')
@@ -152,6 +159,9 @@ try {
         receiverAddress = $ReceiverAddress; receiverPort = $Port; clientAddress = $ClientAddress; processId = $child.Id;
         processCreatedUtc = $created; completedUtc = [DateTime]::UtcNow.ToString('O'); exitCode = $exitCode;
         timedOut = $timedOut; clientResult = (Get-SyntheticClientResult $clientRoot); packageSid = $token; capabilitySid = $child.ExpectedCapabilitySid;
+        ordinaryReceiverObservedUtc = $observation.observedUtc; ordinaryProcessCreatedUtc = $ordinaryRecord.processCreatedUtc;
+        ordinaryProcessCompletedUtc = $ordinaryRecord.completedUtc; ordinaryClockSkewBoundSeconds = $MaxClockSkewSeconds;
+        ordinaryEvidenceMaxAgeSeconds = $MaxEvidenceAgeSeconds;
         tokenVerifiedBeforeResume = $true; receiverObservation = 'not-evaluated'; processAttribution = 'unverified'; wfpDecision = 'not-observed' }
     Write-NewFile (Join-Path $root 'appcontainer-client.json') ($clientRecord | ConvertTo-Json -Compress)
     if ($timedOut) { throw 'AppContainer client timed out; receiver absence is inconclusive.' }
