@@ -23,6 +23,7 @@ internal static partial class Program
         var initialized = false; var result = 0;
         try
         {
+            ExerciseProxyAuthenticationSession(root);
             Cef.EnableWaitForBrowsersToClose();
             initialized = Cef.Initialize(new CefSettings
             {
@@ -33,6 +34,7 @@ internal static partial class Program
             using var context = Cef.GetGlobalRequestContext();
             using var goodProxy = new AuthProxyFixture();
             using var badProxy = new AuthProxyFixture();
+            using var handlerProxy = new AuthProxyFixture();
             using var host = new Form { Width = 800, Height = 600, Text = "Local CEF proxy authentication probe" };
             host.Shown += async (_, _) =>
             {
@@ -57,7 +59,7 @@ internal static partial class Program
                     }
 
                     await Configure(goodProxy.Port);
-                    var allowed = new ProxyChallengeHandler(goodProxy.Port, FixturePassword);
+                    using var allowed = new ProxyChallengeHandler(goodProxy.Port, FixturePassword);
                     browser = Open(allowed); await Ready(browser);
                     await LoadReady(browser, AuthOrigin + "/allow");
                     Check(await Js(browser, "document.title") == "authenticated" && goodProxy.Accepted > 0 && allowed.Issued is > 0 and <= 2,
@@ -69,8 +71,23 @@ internal static partial class Program
                         "test callback denies destination-site authentication and sends no origin Authorization header");
                     await CloseWeb(browser); host.Controls.Remove(browser); browser = null;
 
+                    // Exercise the actual application request handler with a
+                    // disposable session, while production startup remains blocked.
+                    await Configure(handlerProxy.Port);
+                    var handlerDraft = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", handlerProxy.Port, true, Guid.NewGuid(), "", true);
+                    using (var handlerSession = ProxyAuthenticationSession.ForFixture(handlerDraft, new ProxyCredentials(FixtureUser, FixturePassword)))
+                    {
+                        browser = new BrowserView("about:blank") { Dock = DockStyle.Fill,
+                            RequestHandler = new SafeRequests(_ => { }, proxyAuthentication: handlerSession) };
+                        Observe(browser); host.Controls.Add(browser); await Ready(browser);
+                        await LoadReady(browser, AuthOrigin + "/allow");
+                        Check(await Js(browser, "document.title") == "authenticated" && handlerProxy.Accepted > 0 && handlerSession.Issued > 0,
+                            "application request handler responds to a scoped test proxy challenge");
+                        await CloseWeb(browser); host.Controls.Remove(browser); browser = null;
+                    }
+
                     await Configure(badProxy.Port);
-                    var rejected = new ProxyChallengeHandler(badProxy.Port, "incorrect-fixture-password");
+                    using var rejected = new ProxyChallengeHandler(badProxy.Port, "incorrect-fixture-password");
                     browser = Open(rejected); await Ready(browser);
                     browser.Load(AuthOrigin + "/allow");
                     await Wait(() => badProxy.RejectedCredentials > 0, "incorrect proxy credentials");
@@ -99,31 +116,109 @@ internal static partial class Program
         return result;
     }
 
-    private sealed class ProxyChallengeHandler : RequestHandler
+    private sealed class ProxyChallengeHandler : RequestHandler, IDisposable
     {
-        private readonly ProxyDraft settings;
-        private readonly string password;
-        private int issued, proxyChallenges, siteChallenges;
-        public int Issued => Volatile.Read(ref issued);
+        private readonly ProxyAuthenticationSession session;
+        private int siteChallenges;
+        public int Issued => session.Issued;
         public int SiteChallenges => Volatile.Read(ref siteChallenges);
         public ProxyChallengeHandler(int port, string password)
         {
-            settings = new(ProxyProtocol.Http, "127.0.0.1", port, true, Guid.NewGuid(), "", true);
-            this.password = password;
+            var settings = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", port, true, Guid.NewGuid(), "", true);
+            session = ProxyAuthenticationSession.ForFixture(settings, new ProxyCredentials(FixtureUser, password));
         }
 
         protected override bool GetAuthCredentials(IWebBrowser chromiumWebBrowser, IBrowser browser, string originUrl, bool isProxy,
             string host, int port, string realm, string scheme, IAuthCallback callback)
         {
-            using (callback)
+            if (!isProxy)
             {
-                if (!isProxy) Interlocked.Increment(ref siteChallenges);
-                if (ProxyAuthenticationScope.Allows(settings, isProxy, host, port, scheme) && Interlocked.Increment(ref proxyChallenges) <= 2)
-                { Interlocked.Increment(ref issued); callback.Continue(FixtureUser, password); }
-                else callback.Cancel();
+                Interlocked.Increment(ref siteChallenges);
+                using (callback) callback.Cancel();
+                return true;
             }
-            return true;
+            return session.Respond(true, host, port, scheme, callback);
         }
+
+        public void Dispose() => session.Dispose();
+    }
+
+    // Synthetic callbacks verify scope, disposal and concurrent challenge
+    // behavior without exposing credential values in output.
+    private static void ExerciseProxyAuthenticationSession(string root)
+    {
+        var draft = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", 8080, true, Guid.NewGuid(), "", true);
+        using (var session = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword)))
+        {
+            var wrongOrigin = new SyntheticAuthCallback();
+            session.Respond(false, "127.0.0.1", 8080, "basic", wrongOrigin);
+            var wrongHost = new SyntheticAuthCallback();
+            session.Respond(true, "other.invalid", 8080, "basic", wrongHost);
+            Check(wrongOrigin.Cancelled && wrongHost.Cancelled && wrongOrigin.IsDisposed && wrongHost.IsDisposed && session.Issued == 0,
+                "profile proxy session rejects origin and mismatched proxy challenges");
+
+            var callbacks = Enumerable.Range(0, 8).Select(_ => new SyntheticAuthCallback()).ToArray();
+            Parallel.ForEach(callbacks, callback => session.Respond(true, "127.0.0.1", 8080, "basic", callback));
+            Check(callbacks.Count(callback => callback.CorrectCredentials) == 2 &&
+                callbacks.Count(callback => callback.Cancelled) == 6 && callbacks.All(callback => callback.IsDisposed),
+                "proxy session enforces its bounded concurrent challenge budget");
+        }
+
+        var disposed = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword));
+        disposed.Dispose();
+        var late = new SyntheticAuthCallback();
+        disposed.Respond(true, "127.0.0.1", 8080, "basic", late);
+        Check(late.Cancelled && late.IsDisposed && !late.CorrectCredentials,
+            "disposed proxy session cancels a late challenge");
+        using (var live = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword)))
+        {
+            var closedCallback = new SyntheticAuthCallback();
+            closedCallback.Dispose();
+            live.Respond(true, "127.0.0.1", 8080, "basic", closedCallback);
+            Check(!closedCallback.CorrectCredentials && live.Issued == 0,
+                "closed CEF authentication callback cannot receive credentials");
+        }
+
+        var profileRoot = Path.Combine(root, "synthetic-proxy-auth-profiles");
+        var profiles = new ProfileRepository(profileRoot);
+        var profile = profiles.Create("auth-profile");
+        var unrelated = profiles.Create("other-profile");
+        using var lease = new ProfileLease(BrowserPolicy.ProfilePath(profileRoot, profile.Slug));
+        using var otherLease = new ProfileLease(BrowserPolicy.ProfilePath(profileRoot, unrelated.Slug));
+        var repository = new ProxyRepository(profileRoot);
+        var vault = new ProxyCredentialVault(profileRoot);
+        var credentialId = vault.Store(profile.Id, new ProxyCredentials(FixtureUser, FixturePassword));
+        repository.Save(profile, lease, draft with { CredentialId = credentialId }, 0);
+        using (var bound = ProxyAuthenticationSession.FromProfile(profile, lease, repository, vault))
+        {
+            var callback = new SyntheticAuthCallback();
+            bound.Respond(true, "127.0.0.1", 8080, "basic", callback);
+            Check(callback.CorrectCredentials && callback.IsDisposed,
+                "proxy session loads the selected profile's protected credential");
+        }
+        var blocked = false;
+        try { repository.EnsureRuntimeReady(profile, lease); } catch (IOException) { blocked = true; }
+        Check(blocked, "required-proxy startup remains blocked despite a valid auth session");
+        var wrongLease = false;
+        try { using var _ = ProxyAuthenticationSession.FromProfile(profile, otherLease, repository, vault); }
+        catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException) { wrongLease = true; }
+        Check(wrongLease, "proxy auth session rejects another profile's lease");
+        vault.Delete(profile.Id, credentialId);
+        var missing = false;
+        try { using var _ = ProxyAuthenticationSession.FromProfile(profile, lease, repository, vault); }
+        catch (IOException) { missing = true; }
+        Check(missing, "proxy auth session fails when the profile credential is missing");
+    }
+
+    private sealed class SyntheticAuthCallback : IAuthCallback
+    {
+        public bool IsDisposed { get; private set; }
+        public bool Cancelled { get; private set; }
+        public bool CorrectCredentials { get; private set; }
+        public void Continue(string username, string password) =>
+            CorrectCredentials = username == FixtureUser && password == FixturePassword;
+        public void Cancel() => Cancelled = true;
+        public void Dispose() => IsDisposed = true;
     }
 
     // This server responds only to a synthetic test origin and never forwards any request.

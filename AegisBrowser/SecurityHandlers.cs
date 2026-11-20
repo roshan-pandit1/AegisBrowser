@@ -44,11 +44,22 @@ internal sealed class OriginPermissions(Action<string> report) : PermissionHandl
     }
 }
 
-internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null, Action<NetworkRequest, FilterDecision>? observe = null) : RequestHandler
+internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null, Action<NetworkRequest, FilterDecision>? observe = null,
+    ProxyAuthenticationSession? proxyAuthentication = null) : RequestHandler
 {
     // During document replacement CEF can expose an empty MainFrame.Url to early
     // subresource callbacks. Keep only URL strings, never native frame wrappers.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> navigationSites = new();
+
+    protected override bool GetAuthCredentials(IWebBrowser control, IBrowser browser, string originUrl, bool isProxy,
+        string host, int port, string realm, string scheme, IAuthCallback callback)
+    {
+        // Preserve CEF's existing site-authentication behavior. A proxy
+        // credential is never supplied to a website authentication challenge.
+        if (proxyAuthentication is null || !isProxy)
+            return base.GetAuthCredentials(control, browser, originUrl, isProxy, host, port, realm, scheme, callback);
+        return proxyAuthentication.Respond(true, host, port, scheme, callback);
+    }
 
     protected override IResourceRequestHandler GetResourceRequestHandler(IWebBrowser control, IBrowser browser,
         IFrame frame, IRequest request, bool isNavigation, bool isDownload, string requestInitiator,
