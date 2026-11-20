@@ -66,6 +66,7 @@ ProfileTransferTests.Run();
 ProfileBackupTests.Run();
 ProfileSettingsTransactionTests.Run();
 ProxyTests.Run();
+ProxyStartupSafetyTests.Run();
 ProxyAuthenticationTests.Run();
 ProxyBulkTests.Run();
 ProxyPresetTests.Run();
