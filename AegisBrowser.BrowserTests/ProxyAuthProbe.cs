@@ -268,6 +268,26 @@ internal static partial class Program
             Check(closingCallback.IsDisposed && failedAttempt.Issued == 1 && retry.Cancelled && !retry.CorrectCredentials,
                 "callback closure during credential delivery cannot renew the isolated attempt");
         }
+        using (var closedDuringDispose = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword)))
+        {
+            var callback = new SyntheticAuthCallback(throwOnDispose: true);
+            var handled = closedDuringDispose.Respond(true, "127.0.0.1", 8080, "basic", callback);
+            var retry = new SyntheticAuthCallback();
+            closedDuringDispose.Respond(true, "127.0.0.1", 8080, "basic", retry);
+            Check(handled && callback.CorrectCredentials && closedDuringDispose.Issued == 1 && retry.Cancelled,
+                "callback closure during disposal does not escape or renew an issued credential");
+        }
+        using (var failedContinue = ProxyAuthenticationSession.ForFixture(draft, new ProxyCredentials(FixtureUser, FixturePassword)))
+        {
+            var callback = new SyntheticAuthCallback(throwOnDispose: true, throwUnexpectedOnContinue: true);
+            var surfaced = false;
+            try { failedContinue.Respond(true, "127.0.0.1", 8080, "basic", callback); }
+            catch (InvalidOperationException) { surfaced = true; }
+            var retry = new SyntheticAuthCallback();
+            failedContinue.Respond(true, "127.0.0.1", 8080, "basic", retry);
+            Check(surfaced && failedContinue.Issued == 1 && retry.Cancelled,
+                "callback disposal cannot mask an unrelated continuation failure or renew credentials");
+        }
 
         var profileRoot = Path.Combine(root, "synthetic-proxy-auth-profiles");
         var profiles = new ProfileRepository(profileRoot);
@@ -300,18 +320,24 @@ internal static partial class Program
         Check(missing, "proxy auth session fails when the profile credential is missing");
     }
 
-    private sealed class SyntheticAuthCallback(bool throwOnContinue = false) : IAuthCallback
+    private sealed class SyntheticAuthCallback(bool throwOnContinue = false, bool throwOnDispose = false,
+        bool throwUnexpectedOnContinue = false) : IAuthCallback
     {
         public bool IsDisposed { get; private set; }
         public bool Cancelled { get; private set; }
         public bool CorrectCredentials { get; private set; }
         public void Continue(string username, string password)
         {
+            if (throwUnexpectedOnContinue) throw new InvalidOperationException("Synthetic continuation failure.");
             if (throwOnContinue) throw new ObjectDisposedException(nameof(SyntheticAuthCallback));
             CorrectCredentials = username == FixtureUser && password == FixturePassword;
         }
         public void Cancel() => Cancelled = true;
-        public void Dispose() => IsDisposed = true;
+        public void Dispose()
+        {
+            IsDisposed = true;
+            if (throwOnDispose) throw new ObjectDisposedException(nameof(SyntheticAuthCallback));
+        }
     }
 
     // This server responds only to a synthetic test origin and never forwards any request.

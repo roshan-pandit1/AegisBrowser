@@ -58,29 +58,34 @@ internal sealed class ProxyAuthenticationSession : IDisposable
     // exactly once. Locking prevents Dispose from racing a successful response.
     internal bool Respond(bool isProxy, string? host, int port, string? scheme, IAuthCallback callback)
     {
-        using (callback)
+        try
         {
             lock (sync)
             {
-                try
+                if (callback.IsDisposed) return true;
+                if (credentials is null ||
+                    !ProxyAuthenticationScope.Allows(settings, isProxy, host, port, scheme))
                 {
-                    if (callback.IsDisposed) return true;
-                    if (credentials is null ||
-                        !ProxyAuthenticationScope.Allows(settings, isProxy, host, port, scheme))
-                    {
-                        callback.Cancel();
-                        return true;
-                    }
-                    // Consume this isolated attempt before invoking CEF. A
-                    // disposed callback or exception cannot renew the lease.
-                    var oneShot = credentials!;
-                    credentials = null;
-                    credentialIssued = true;
-                    callback.Continue(oneShot.Username, oneShot.Password);
+                    callback.Cancel();
                     return true;
                 }
-                catch (ObjectDisposedException) { return true; }
+                // Consume this isolated attempt before invoking CEF. A
+                // disposed callback or exception cannot renew the lease.
+                var oneShot = credentials!;
+                credentials = null;
+                credentialIssued = true;
+                callback.Continue(oneShot.Username, oneShot.Password);
+                return true;
             }
+        }
+        catch (ObjectDisposedException) { return true; }
+        finally
+        {
+            // CEF can invalidate the callback during browser shutdown.
+            // Keep cleanup separate so it cannot hide a different exception
+            // from Continue or Cancel.
+            try { callback.Dispose(); }
+            catch (ObjectDisposedException) { }
         }
     }
 
