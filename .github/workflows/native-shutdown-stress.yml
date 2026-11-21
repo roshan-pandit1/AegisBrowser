@@ -1,0 +1,37 @@
+name: Native CEF shutdown stress
+on:
+  push:
+    branches: [release/november-proxy-privacy]
+    paths:
+      - '.github/workflows/native-shutdown-stress.yml'
+      - 'tests/acceptance/stress-native-shutdown.ps1'
+      - 'AegisBrowser.BrowserTests/NativeWindowRepro.cs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-shutdown:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build the pinned native browser fixture
+        run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Run five independent processes without retries
+        shell: pwsh
+        run: |
+          ./tests/acceptance/stress-native-shutdown.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe -EvidenceDirectory "$env:RUNNER_TEMP/aegis-native-shutdown-stress"
+      - name: Preserve bounded failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-shutdown-stress-failure
+          path: |
+            ${{ runner.temp }}/aegis-native-shutdown-stress/results.json
+            ${{ runner.temp }}/aegis-native-shutdown-stress/sanitized-stdout-*.txt
+            ${{ runner.temp }}/aegis-native-shutdown-stress/sanitized-stderr-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
