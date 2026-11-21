@@ -11,10 +11,10 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
-      - name: Install .NET 8 SDK
+      - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.404'
       - name: Record SDK and source revision
         run: |
           dotnet --info
@@ -52,14 +52,14 @@ jobs:
         run: |
           ./tests/acceptance/test-private-network-preflight.ps1
           ./tests/acceptance/test-private-network-chronology.ps1
-          ./tests/acceptance/test-private-network-validation.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+          ./tests/acceptance/test-private-network-validation.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Browser storage, OAuth, tab and renderer tests
         timeout-minutes: 5
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-browser-tests-' + [guid]::NewGuid().ToString('N'))
           # Reopen the same persistent profiles repeatedly to expose close races.
           foreach ($phase in @('write', 'read', 'read', 'read')) {
-            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
             if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
@@ -76,7 +76,7 @@ jobs:
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-viewport-' + [guid]::NewGuid().ToString('N'))
           foreach ($phase in @('viewport-write', 'viewport-read')) {
-            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
             if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
@@ -93,7 +93,7 @@ jobs:
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-fingerprint-' + [guid]::NewGuid().ToString('N'))
           foreach ($phase in @('fingerprint-write', 'fingerprint-read')) {
-            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
             $body = $output | Out-String
@@ -124,7 +124,7 @@ jobs:
           $observations = @{}
           foreach ($mode in @('baseline', 'restricted', '3d')) {
             $root = Join-Path $env:RUNNER_TEMP ('aegis-webgl-process-' + $mode + '-' + [guid]::NewGuid().ToString('N'))
-            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webgl-process-$mode" $root 2>&1
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webgl-process-$mode" $root 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
             $body = $output | Out-String
@@ -160,7 +160,7 @@ jobs:
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-cookie-probe-' + [guid]::NewGuid().ToString('N'))
           foreach ($phase in @('storage-policy-write', 'storage-policy-read')) {
-            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
             if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
@@ -175,7 +175,7 @@ jobs:
         timeout-minutes: 3
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-p404-input-' + [guid]::NewGuid().ToString('N'))
-          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe storage-policy-probe $profileRoot 2>&1
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe storage-policy-probe $profileRoot 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
           if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
@@ -201,7 +201,7 @@ jobs:
       - name: HTTPS fixture certificate preflight
         timeout-minutes: 2
         run: |
-          & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe https-privacy-preflight $env:RUNNER_TEMP
+          & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe https-privacy-preflight $env:RUNNER_TEMP
           if ($LASTEXITCODE -ne 0) { throw 'HTTPS certificate preflight failed' }
       - name: Prepare disposable HTTPS trust directory
         run: |
@@ -216,7 +216,7 @@ jobs:
         run: |
           foreach ($phase in @('https-privacy-write', 'https-privacy-read')) {
             $logFile = Join-Path $env:RUNNER_TEMP ($phase + '.log')
-            & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $env:P403_PROFILE_DIR $env:P403_TRUST_DIR 2>&1 | Tee-Object -FilePath $logFile
+            & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe $phase $env:P403_PROFILE_DIR $env:P403_TRUST_DIR 2>&1 | Tee-Object -FilePath $logFile
             $code = $LASTEXITCODE
             $output = Get-Content -LiteralPath $logFile -Raw
             if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
@@ -270,7 +270,7 @@ jobs:
         timeout-minutes: 3
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-proxy-probe-' + [guid]::NewGuid().ToString('N'))
-          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-probe $profileRoot 2>&1
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-probe $profileRoot 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
@@ -287,7 +287,7 @@ jobs:
         timeout-minutes: 3
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-proxy-auth-probe-' + [guid]::NewGuid().ToString('N'))
-          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-auth-probe $profileRoot 2>&1
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-auth-probe $profileRoot 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
@@ -300,7 +300,7 @@ jobs:
           $contexts = @{}
           foreach ($mode in @('baseline', 'restrict')) {
             $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-webrtc-' + $mode + '-' + [guid]::NewGuid().ToString('N'))
-            $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webrtc-$mode" $profileRoot 2>&1
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe "webrtc-$mode" $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
             $joined = $output -join "`n"
@@ -337,13 +337,13 @@ jobs:
         run: ./tests/acceptance/test-concurrent-proxy-cleanup.ps1
       - name: Concurrent independent CEF proxy probes
         timeout-minutes: 5
-        run: ./tests/acceptance/concurrent-proxy-probes.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+        run: ./tests/acceptance/concurrent-proxy-probes.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Observe synthetic CEF process identities
         timeout-minutes: 5
-        run: ./tests/acceptance/observe-cef-process-identity.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+        run: ./tests/acceptance/observe-cef-process-identity.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Observe CEF traffic from external loopback fixtures
         timeout-minutes: 5
-        run: ./tests/acceptance/observe-external-egress.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+        run: ./tests/acceptance/observe-external-egress.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Research suspended synthetic AppContainer identities
         timeout-minutes: 2
         run: ./tests/acceptance/research-appcontainer-launch.ps1 -RegisterOnDisposableRunner
@@ -351,7 +351,7 @@ jobs:
         timeout-minutes: 5
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-window-repro-' + [guid]::NewGuid().ToString('N'))
-          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe hwnd-repro $profileRoot 2>&1
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe hwnd-repro $profileRoot 2>&1
           $code = $LASTEXITCODE
           Write-Output ("WINDOW-LIFECYCLE processExitCode={0} hex=0x{1:x8}" -f $code, ([uint32]([int64]$code -band 0xffffffffL)))
           $output | Write-Output
@@ -367,7 +367,7 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: |
-          $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe 2>&1
+          $output = & ./AegisBrowser.FilteringTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.FilteringTests.exe 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
           if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
@@ -379,7 +379,7 @@ jobs:
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-settings-' + [guid]::NewGuid().ToString('N'))
           foreach ($phase in @('write', 'read')) {
-            $output = & ./AegisBrowser.FilteringTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.FilteringTests.exe $phase $profileRoot 2>&1
+            $output = & ./AegisBrowser.FilteringTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.FilteringTests.exe $phase $profileRoot 2>&1
             $code = $LASTEXITCODE
             $output | Write-Output
             if (($output -join "`n") -match 'Check failed:') { throw "Native Chromium assertion detected" }
@@ -392,10 +392,11 @@ jobs:
           foreach ($file in @('AegisBrowser.exe', 'CefSharp.BrowserSubprocess.exe', 'libcef.dll', 'coreclr.dll')) {
             if (!(Get-ChildItem artifacts/win-x64 -Recurse -Filter $file)) { throw "Missing $file" }
           }
+          ./tests/acceptance/verify-published-runtime.ps1 -PublishDirectory artifacts/win-x64 -ExpectedRuntimeVersion '10.0.15'
       - name: Dashboard launches and reopens published browser
         timeout-minutes: 3
         run: |
-          $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe dashboard-launch ./artifacts/win-x64/AegisBrowser.exe 2>&1
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe dashboard-launch ./artifacts/win-x64/AegisBrowser.exe 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }

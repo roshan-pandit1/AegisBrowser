@@ -53,6 +53,15 @@ if (args.Length == 2 && args[0] == "--hold-metadata-transaction")
     return;
 }
 
+// Verify the actual executing runtime and process architecture, rather than
+// inferring either from the project target or installed SDK. This core test
+// does not prove which runtime the separately published browser includes.
+if (Environment.Version.Major != 10 || Environment.Version < new Version(10, 0, 15))
+    throw new Exception($"FAIL: Expected patched .NET 10.0.15 or later; running {Environment.Version}.");
+if (OperatingSystem.IsWindows() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture != System.Runtime.InteropServices.Architecture.X64)
+    throw new Exception("FAIL: Windows regression tests must run as an x64 process.");
+Console.WriteLine($"PASS: core tests run on .NET {Environment.Version}, process architecture {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}.");
+
 PrivacyTests.Run();
 ViewportLetterboxingTests.Run();
 ViewportZoomQueryTests.Run();
