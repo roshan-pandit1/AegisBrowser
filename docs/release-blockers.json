@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "evidenceThroughCommit": "21ff2ca43bf566a4e339462d8492782e0774a997",
+  "evidenceThroughCommit": "086100c95b4d308af7701158103b70b296411284",
   "note": "Evidence applies to the named commit, not future changes. Passing fixture tests do not establish production sandboxing or proxy containment.",
   "releases": {
     "A_core": { "decision": "NO_GO", "requiredProxyProfiles": "BLOCKED" },
@@ -10,7 +10,10 @@
     {
       "id": "A-VIEWPORT-01", "release": "A_core", "severity": "P0", "ownerRole": "Viewport lifecycle engineer",
       "rootCauseStatus": "INCONCLUSIVE",
-      "evidence": ["https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44928277213"],
+      "evidence": ["https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44928277213", "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44931390765", "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44931675457", "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44931669842"],
+      "historicalFailure": "viewport-read initial bounds were X=30,Y=29,Width=960,Height=600; expected X=10,Y=29,Width=1000,Height=600 at independently reported zoom 0. The log does not establish the ordering of the pending app zoom query.",
+      "implementedEvidence": "At 086100c, the focused write/read and final-head Windows runs passed a controlled stale-completion regression and exact geometry/CSS assertions. Controlled reset invalidates the old request; assertions wait for an applied current-generation measurement and capture bounds after awaiting zoom. Later passes do not prove which race caused the historical failure.",
+      "remainingLimitation": "The binding has no general zoom-changed event. Changes not explicitly invalidated can temporarily use an older polling result; full application-wide stale-zoom prevention remains unverified.",
       "nextDiscriminatingTest": "Run real viewport-write and viewport-read with current-generation zoom and layout tracing, plus a controlled stale-query completion test.",
       "environment": "Windows x64 CEF fixture with a disposable restarted profile",
       "implementationTask": "Prevent pre-reset zoom measurements from being accepted after explicit invalidation, and compare bounds with a current confirmed zoom without yielding between geometry capture and assertion.",
