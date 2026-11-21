@@ -21,7 +21,7 @@ internal sealed class SocksNavigationObserver(string expectedUrl)
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private SocksNavigationOutcome outcome;
     private CefErrorCode error;
-    private bool cancellationRequested, contradictorySuccess;
+    private bool cancellationRequested, contradictorySuccess, browserClosed;
     private int wrongNavigationEvents, duplicateEvents, lateEvents;
 
     internal Task<SocksNavigationOutcome> Completion => completion.Task;
@@ -43,7 +43,14 @@ internal sealed class SocksNavigationObserver(string expectedUrl)
             completion.TrySetResult(SocksNavigationOutcome.TimedOut);
         }
     }
-    internal void MarkBrowserClosed() { lock (gate) Finish(SocksNavigationOutcome.BrowserClosed); }
+    internal void MarkBrowserClosed()
+    {
+        lock (gate)
+        {
+            browserClosed = true;
+            Finish(SocksNavigationOutcome.BrowserClosed);
+        }
+    }
 
     internal void ObserveError(bool isMainFrame, string? url, CefErrorCode code)
     {
@@ -93,7 +100,7 @@ internal sealed class SocksNavigationObserver(string expectedUrl)
 
     private void RecordLate()
     {
-        if (outcome is SocksNavigationOutcome.TimedOut or SocksNavigationOutcome.BrowserClosed) lateEvents++;
+        if (browserClosed || outcome is (SocksNavigationOutcome.TimedOut or SocksNavigationOutcome.BrowserClosed)) lateEvents++;
         else duplicateEvents++;
     }
 }

@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace AegisBrowser.Core;
 
 /// <summary>Profile-local persistence. Corrupt input is preserved for manual repair.</summary>
-public sealed class PrivacySettingsStore(string profileDirectory)
+public sealed class PrivacySettingsStore(string profileDirectory, bool requireExistingDirectory = false)
 {
     private readonly string path = Path.Combine(profileDirectory, "privacy.json");
     private bool loadFailed;
@@ -11,18 +11,30 @@ public sealed class PrivacySettingsStore(string profileDirectory)
     {
         try
         {
-            if (!File.Exists(path)) return new();
-            if (new FileInfo(path).Length > 64_000_000) throw new InvalidDataException("Privacy settings exceed 64 MB.");
-            var configuration = JsonSerializer.Deserialize<PrivacyConfiguration>(File.ReadAllText(path))
-                ?? throw new InvalidDataException("Privacy settings are empty.");
-            Validate(configuration);
-            _ = new RequestFilter(configuration);
-            return configuration;
+            FileStream stream;
+            try { stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read); }
+            catch (FileNotFoundException)
+            {
+                if (requireExistingDirectory && !Directory.Exists(profileDirectory))
+                    throw new IOException("The profile directory is unavailable.");
+                return new();
+            }
+            catch (DirectoryNotFoundException) when (!requireExistingDirectory) { return new(); }
+            using (stream)
+            {
+                if (stream.Length > 64_000_000) throw new InvalidDataException("Privacy settings exceed 64 MB.");
+                using var reader = new StreamReader(stream);
+                var configuration = JsonSerializer.Deserialize<PrivacyConfiguration>(reader.ReadToEnd())
+                    ?? throw new InvalidDataException("Privacy settings are empty.");
+                Validate(configuration);
+                _ = new RequestFilter(configuration);
+                return configuration;
+            }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException)
         {
             loadFailed = true;
-            throw new IOException($"Could not load {path}. Defaults are active. The original file is preserved; repair or rename it and restart before saving settings.", ex);
+            throw new IOException($"Could not load {path}. The original file is preserved; repair or rename it and restart before using this profile.", ex);
         }
     }
     internal static void Validate(PrivacyConfiguration configuration)

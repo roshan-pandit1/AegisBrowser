@@ -59,6 +59,10 @@ public sealed class ProfileLease : IDisposable
 {
     private readonly FileStream stream;
     private readonly string profilePath;
+    private readonly object sync = new();
+    private readonly List<Action> revocations = [];
+    private Action[]? deferredRevocations;
+    private int handoffDepth;
     private bool disposed;
     public ProfileLease(string path)
     {
@@ -89,7 +93,92 @@ public sealed class ProfileLease : IDisposable
         catch (FileNotFoundException) { }
         catch (DirectoryNotFoundException) { }
     }
-    internal bool IsHeldFor(string path) => !disposed &&
-        string.Equals(profilePath, Path.GetFullPath(path), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-    public void Dispose() { stream.Dispose(); disposed = true; }
+    internal bool IsHeldFor(string path)
+    {
+        lock (sync) return !disposed && string.Equals(profilePath, Path.GetFullPath(path),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
+    // This is only used for the synchronous CEF auth handoff. The pinned CEF
+    // callback posts its continuation to the UI thread; it does not wait for it.
+    // It does not revoke credentials already queued or cached by Chromium.
+    internal bool TryInvokeWhileHeld(Action action)
+    {
+        Action[]? deferred = null;
+        Exception? handoffFailure = null;
+        lock (sync)
+        {
+            if (disposed) return false;
+            handoffDepth++;
+            try { action(); }
+            catch (Exception ex) { handoffFailure = ex; }
+            finally
+            {
+                handoffDepth--;
+                if (handoffDepth == 0) { deferred = deferredRevocations; deferredRevocations = null; }
+            }
+        }
+        try { if (deferred is not null) NotifyRevocations(deferred); }
+        catch (Exception ex) when (handoffFailure is not null)
+        { throw new AggregateException("Credential handoff and profile revocation failed.", handoffFailure, ex); }
+        if (handoffFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(handoffFailure).Throw();
+        return true;
+    }
+
+    internal IDisposable RegisterRevocation(Action action)
+    {
+        lock (sync)
+        {
+            if (disposed) throw new ObjectDisposedException(nameof(ProfileLease));
+            revocations.Add(action);
+            return new Registration(this, action);
+        }
+    }
+
+    private sealed class Registration(ProfileLease owner, Action action) : IDisposable
+    {
+        private WeakReference<ProfileLease>? ownerReference = new(owner);
+        public void Dispose()
+        {
+            var reference = Interlocked.Exchange(ref ownerReference, null);
+            if (reference is null || !reference.TryGetTarget(out var owner)) return;
+            lock (owner.sync) owner.revocations.Remove(action);
+        }
+    }
+
+    public void Dispose()
+    {
+        Action[]? pending;
+        Exception? closeFailure = null;
+        lock (sync)
+        {
+            if (disposed) return;
+            disposed = true;
+            pending = revocations.ToArray();
+            revocations.Clear();
+            try { stream.Dispose(); }
+            catch (Exception ex) { closeFailure = ex; }
+            // Reentrant disposal can occur from a callback already executing
+            // under this gate. Defer session callbacks until the outermost
+            // handoff has released it; otherwise another session could invert
+            // the session/lease lock order.
+            if (handoffDepth != 0) { deferredRevocations = pending; pending = null; }
+        }
+        // Never wait for a session gate while holding the lease gate.
+        try { if (pending is not null) NotifyRevocations(pending); }
+        catch (Exception ex) when (closeFailure is not null)
+        { throw new AggregateException("Profile lease disposal failed.", closeFailure, ex); }
+        if (closeFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(closeFailure).Throw();
+    }
+
+    private static void NotifyRevocations(Action[] pending)
+    {
+        List<Exception>? failures = null;
+        foreach (var revoke in pending)
+        {
+            try { revoke(); }
+            catch (Exception ex) { (failures ??= []).Add(ex); }
+        }
+        if (failures is not null) throw new AggregateException("Profile lease disposal failed.", failures);
+    }
 }

@@ -16,6 +16,7 @@ public sealed class MainForm : Form
     private bool closeComplete;
     private readonly PrivacySession privacy;
     private readonly PrivacySettingsStore? privacyStore;
+    private readonly bool privacyLoadBlocksTabs;
     private readonly ThirdPartyCookiePolicy.Result cookiePolicy;
     private readonly bool cookiePolicyBlocksTabs;
     private readonly WebRtcPrivacyPolicy.Result webRtcPolicy;
@@ -26,7 +27,9 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer letterboxZoomTimer = new() { Interval = 250 };
     private readonly Dictionary<ChromiumWebBrowser, double> letterboxZoomLevels = new();
     private readonly Dictionary<ChromiumWebBrowser, ViewportZoomQuery> letterboxZoomQueries = new();
+    private readonly Dictionary<ChromiumWebBrowser, (long Generation, double Zoom)> letterboxZoomConfirmations = new();
     private readonly Func<ChromiumWebBrowser, Task<double>> letterboxZoomQuery;
+    internal Action<string>? ViewportZoomTrace { get; set; }
     private PrivacyForm? privacyWindow;
     private SearchSettings searchSettings = new();
     private readonly SearchSettingsStore? searchStore;
@@ -37,7 +40,8 @@ public sealed class MainForm : Form
 
     public MainForm(string profile, string? profilePath = null) : this(profile, profilePath, null) { }
 
-    internal MainForm(string profile, string? profilePath, Func<ChromiumWebBrowser, Task<double>>? zoomQuery)
+    internal MainForm(string profile, string? profilePath, Func<ChromiumWebBrowser, Task<double>>? zoomQuery,
+        Action<string>? privacyLoadWarning = null)
     {
         letterboxZoomQuery = zoomQuery ?? (browser =>
             (browser.GetBrowserHost() ?? throw new InvalidOperationException("CEF browser host unavailable.")).GetZoomLevelAsync());
@@ -48,10 +52,11 @@ public sealed class MainForm : Form
             searchStore = new(profilePath);
             try { searchSettings = searchStore.Load(); }
             catch (IOException ex) { Shown += (_, _) => MessageBox.Show(this, ex.Message, "Search settings warning"); }
-            privacyStore = new(profilePath);
+            privacyStore = new(profilePath, requireExistingDirectory: true);
             try { configuration = privacyStore.Load(); }
             catch (IOException ex) { privacyWarning = ex.Message; }
         }
+        privacyLoadBlocksTabs = privacyWarning is not null;
         privacy = new(configuration);
         letterboxingAtStartup = configuration.LetterboxWebContent;
         disableWebGlAtStartup = configuration.DisableWebGl;
@@ -60,7 +65,13 @@ public sealed class MainForm : Form
         cookiePolicyBlocksTabs = ThirdPartyCookiePolicy.PreventBrowsing(configuration.BlockThirdPartyCookies, cookiePolicy);
         webRtcPolicy = WebRtcPrivacyPolicy.ApplyAtStartup(configuration.RestrictWebRtcNonProxiedUdp);
         webRtcPolicyBlocksTabs = WebRtcPrivacyPolicy.PreventBrowsing(configuration.RestrictWebRtcNonProxiedUdp, webRtcPolicy);
-        if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
+        if (privacyWarning is not null) Shown += (_, _) =>
+        {
+            var message = privacyWarning + "\n\nNo browser tabs will open until the settings are repaired or renamed and this profile is restarted. " +
+                "Renaming the file starts the profile with default privacy settings; review the privacy controls before browsing.";
+            if (privacyLoadWarning is null) MessageBox.Show(this, message, "Privacy settings unavailable");
+            else privacyLoadWarning(message);
+        };
         if (!cookiePolicy.Succeeded) Shown += (_, _) => MessageBox.Show(this,
             cookiePolicy.Error + (cookiePolicyBlocksTabs
                 ? "\n\nNo browser tabs will open. Disable the setting in Privacy and restart this profile."
@@ -153,6 +164,7 @@ public sealed class MainForm : Form
             letterboxZoomTimer.Dispose();
             foreach (var query in letterboxZoomQueries.Values) query.Retire();
             letterboxZoomQueries.Clear();
+            letterboxZoomConfirmations.Clear();
         };
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
         FormClosing += (_, e) =>
@@ -164,6 +176,7 @@ public sealed class MainForm : Form
             letterboxZoomTimer.Stop();
             foreach (var query in letterboxZoomQueries.Values) query.Retire();
             letterboxZoomQueries.Clear();
+            letterboxZoomConfirmations.Clear();
             foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
             {
                 retiring.Add(page);
@@ -224,7 +237,28 @@ public sealed class MainForm : Form
         var rect = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), zoom);
         var bounds = new Rectangle(area.X + rect.X, area.Y + rect.Y, rect.Width, rect.Height);
         if (browser.Bounds != bounds) browser.Bounds = bounds;
+        ViewportZoomTrace?.Invoke($"layout zoom={zoom:R} available={area} bounds={browser.Bounds}");
     }
+
+    // The CEF binding has no zoom-changed notification. This explicit
+    // invalidation is used when a caller controls and has confirmed a zoom
+    // change; ordinary Chromium-initiated changes remain eventually polled.
+    internal long InvalidateLetterboxZoom(ChromiumWebBrowser browser)
+    {
+        if (!letterboxingAtStartup || closing || IsDisposed || browser != Current || browser.IsDisposed)
+            throw new InvalidOperationException("A selected live letterboxed browser is required.");
+        if (!letterboxZoomQueries.TryGetValue(browser, out var query))
+            letterboxZoomQueries[browser] = query = new ViewportZoomQuery();
+        query.Invalidate();
+        letterboxZoomConfirmations.Remove(browser);
+        ViewportZoomTrace?.Invoke($"invalidate generation={query.Generation}");
+        return query.Generation;
+    }
+
+    internal bool IsLetterboxZoomConfirmed(ChromiumWebBrowser browser, long generation, double zoom) =>
+        letterboxZoomConfirmations.TryGetValue(browser, out var value) &&
+        letterboxZoomQueries.TryGetValue(browser, out var query) && query.IsCurrentGeneration(value.Generation) &&
+        value.Generation >= generation && value.Zoom == zoom;
 
     private void RefreshLetterboxZoom()
     {
@@ -245,16 +279,16 @@ public sealed class MainForm : Form
             // GetBrowserHost returns a browser-owned wrapper; it must not be
             // disposed by this poller. Poll never waits on an incomplete task.
             var result = query.Poll(() => letterboxZoomQuery(browser));
+            if (result.Status != ViewportZoomQueryStatus.Pending)
+                ViewportZoomTrace?.Invoke($"poll status={result.Status} requestGeneration={result.Generation} currentGeneration={query.Generation} zoom={result.Zoom:R}");
             if (result.Warn) status.Text = result.Status is ViewportZoomQueryStatus.TimedOut or ViewportZoomQueryStatus.Blocked
                 ? "Page zoom query timed out; close and reopen this tab to restore letterboxing."
                 : "Could not read page zoom; letterboxing will retry.";
             if (result.Status != ViewportZoomQueryStatus.Succeeded) return;
             var zoom = result.Zoom;
-            if (!letterboxZoomLevels.TryGetValue(browser, out var previous) || previous != zoom)
-            {
-                letterboxZoomLevels[browser] = zoom;
-                ResizeLetterboxedTab(page, browser);
-            }
+            letterboxZoomLevels[browser] = zoom;
+            ResizeLetterboxedTab(page, browser);
+            letterboxZoomConfirmations[browser] = (result.Generation, zoom);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or TaskCanceledException)
         {
@@ -271,6 +305,11 @@ public sealed class MainForm : Form
     private void NewTab(string url)
     {
         if (closing) return;
+        if (privacyLoadBlocksTabs)
+        {
+            status.Text = "Privacy settings unavailable; repair or rename privacy.json and restart this profile.";
+            return;
+        }
         if (cookiePolicyBlocksTabs)
         {
             status.Text = "Cookie protection unavailable; change the setting in Privacy and restart.";
@@ -298,6 +337,7 @@ public sealed class MainForm : Form
             page.Disposed += (_, _) =>
             {
                 letterboxZoomLevels.Remove(browser);
+                letterboxZoomConfirmations.Remove(browser);
                 if (letterboxZoomQueries.Remove(browser, out var query)) query.Retire();
             };
         }
@@ -387,6 +427,7 @@ public sealed class MainForm : Form
         if (!retiring.Add(page)) return;
         if (letterboxZoomQueries.Remove(browser, out var query)) query.Retire();
         letterboxZoomLevels.Remove(browser);
+        letterboxZoomConfirmations.Remove(browser);
         ((SafePopups)browser.LifeSpanHandler).ClosePopups();
         // Keep the TabPage parent HWND alive until CEF reports DoClose readiness; disposing during creation can destroy a window CEF still uses.
         if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);

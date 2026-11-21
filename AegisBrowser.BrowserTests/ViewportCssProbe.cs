@@ -49,8 +49,10 @@ internal static partial class Program
                         "enabled viewport preference persisted");
                     Check(!new PrivacySettingsStore(disabledPath).Load().LetterboxWebContent,
                         "disabled viewport preference persisted");
+                    if (phase == "viewport-write") await ExerciseUnreadablePrivacySettings(root);
                     if (phase == "viewport-write") await MeasureMainForm(disabledPath, false);
                     await MeasureMainForm(enabledPath, true);
+                    await ExerciseStaleZoomReset(enabledPath);
                     if (phase == "viewport-write") await ExerciseStalledZoomQuery(enabledPath);
                     completed = true;
                     Console.WriteLine($"PASS: {checks} CSS viewport checks ({phase})");
@@ -69,9 +71,94 @@ internal static partial class Program
         return !failed && completed ? 0 : 1;
     }
 
+    // The application must not open a Chromium tab using fallback defaults
+    // when an existing profile's privacy configuration cannot be loaded.
+    // All files below belong to this test's disposable CEF profile root.
+    private static async Task ExerciseUnreadablePrivacySettings(string root)
+    {
+        var badProfile = Path.Combine(root, "malformed-privacy-profile");
+        Directory.CreateDirectory(badProfile);
+        var settingsFile = Path.Combine(badProfile, "privacy.json");
+        const string malformed = "{ malformed privacy configuration";
+        File.WriteAllText(settingsFile, malformed);
+        var warnings = new List<string>();
+        var form = new MainForm("malformed-privacy", badProfile, null, warnings.Add);
+        try
+        {
+            form.Show();
+            var tabs = form.Controls.OfType<TabControl>().Single();
+            var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
+            var newTab = toolbar.Controls.OfType<Button>().Single(button => button.Text == "+");
+            var diagnostics = toolbar.Controls.OfType<Button>().Single(button => button.Text == "Diagnostics");
+            await Wait(() => warnings.Count > 0, "unreadable privacy configuration warning");
+            Check(warnings.Count == 1 && warnings[0].Contains("No browser tabs", StringComparison.OrdinalIgnoreCase),
+                "unreadable privacy configuration reports browsing is blocked");
+            Check(warnings[0].Contains("default privacy settings", StringComparison.OrdinalIgnoreCase),
+                "privacy warning explains that renaming restores defaults");
+            Check(tabs.TabCount == 0,
+                "unreadable privacy configuration blocks initial browser tab");
+            newTab.PerformClick();
+            diagnostics.PerformClick();
+            newTab.PerformClick();
+            form.SubmitAddress(Origin + "privacy-load");
+            Check(tabs.TabCount == 0, "unreadable privacy configuration blocks repeated tab actions");
+            Check(File.ReadAllText(settingsFile) == malformed, "unreadable privacy configuration remains intact");
+
+            // Recovery is intentionally a restart boundary: do not silently
+            // start with different settings while the existing form is live.
+            File.WriteAllText(settingsFile, "{}");
+            newTab.PerformClick();
+            Check(tabs.TabCount == 0, "repair while running does not bypass restart requirement");
+        }
+        finally
+        {
+            if (!form.IsDisposed) { form.Close(); await Wait(() => form.IsDisposed, "malformed-privacy form close"); }
+        }
+
+        var missingWarnings = new List<string>();
+        var missingDirectory = Path.Combine(root, "unavailable-privacy-profile");
+        var unavailable = new MainForm("unavailable-privacy", missingDirectory, null, missingWarnings.Add);
+        try
+        {
+            unavailable.Show();
+            await Wait(() => missingWarnings.Count == 1, "unavailable profile privacy warning");
+            var missingTabs = unavailable.Controls.OfType<TabControl>().Single();
+            Check(missingTabs.TabCount == 0, "unavailable profile directory blocks browser tabs");
+        }
+        finally
+        {
+            if (!unavailable.IsDisposed) { unavailable.Close(); await Wait(() => unavailable.IsDisposed, "unavailable profile form close"); }
+        }
+
+        await ConfirmPrivacyProfileCanStart(badProfile, "repaired profile");
+        await ConfirmPrivacyProfileCanStart(Path.Combine(root, "missing-privacy-profile"), "new profile");
+    }
+
+    private static async Task ConfirmPrivacyProfileCanStart(string profilePath, string scenario)
+    {
+        Directory.CreateDirectory(profilePath);
+        var warnings = new List<string>();
+        var form = new MainForm(scenario, profilePath, null, warnings.Add);
+        try
+        {
+            form.Show();
+            var tabs = form.Controls.OfType<TabControl>().Single();
+            await Wait(() => tabs.TabCount == 1, scenario + " initial tab");
+            Check(warnings.Count == 0,
+                scenario + " privacy configuration permits browsing");
+            var browser = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+            await Ready(browser);
+        }
+        finally
+        {
+            if (!form.IsDisposed) { form.Close(); await Wait(() => form.IsDisposed, scenario + " native close"); }
+        }
+    }
+
     private static async Task MeasureMainForm(string profilePath, bool enabled)
     {
         var form = new MainForm("viewport-test", profilePath);
+        if (enabled) TraceViewportZoom(form, "main");
         try
         {
             form.Show();
@@ -244,6 +331,70 @@ internal static partial class Program
         await Js(browser, "document.documentElement.style.overflowX='';document.documentElement.style.overflowY='';'restored'");
     }
 
+    // Deliberately hold an old response across a real CEF zoom reset. This is
+    // a synthetic scheduling control around a real MainForm/Chromium host;
+    // it does not claim to reproduce the historical timing on its own.
+    private static async Task ExerciseStaleZoomReset(string profilePath)
+    {
+        var stale = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fresh = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var capture = false;
+        var requests = 0;
+        Task<double> Query(ChromiumWebBrowser browser)
+        {
+            if (!capture) return browser.GetBrowserHost().GetZoomLevelAsync();
+            requests++;
+            return requests switch { 1 => stale.Task, 2 => fresh.Task, _ => browser.GetBrowserHost().GetZoomLevelAsync() };
+        }
+
+        var form = new MainForm("viewport-reset-stale-query", profilePath, Query);
+        TraceViewportZoom(form, "controlled-stale");
+        try
+        {
+            form.Show();
+            var tabs = form.Controls.OfType<TabControl>().Single();
+            await Wait(() => tabs.TabCount == 1, "stale zoom regression initial tab");
+            var browser = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+            await Ready(browser);
+            await LoadReady(browser, Origin + "viewport-stale-reset");
+            browser.GetBrowserHost().SetZoomLevel(0);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5))) < 0.01,
+                "stale zoom regression initial zero");
+            var baseline = form.InvalidateLetterboxZoom(browser);
+            await Wait(() => form.IsLetterboxZoomConfirmed(browser, baseline, 0), "initial zero layout confirmed");
+            Rectangle ExpectedZero()
+            {
+                var area = tabs.SelectedTab!.DisplayRectangle;
+                var target = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), 0);
+                return new Rectangle(area.X + target.X, area.Y + target.Y, target.Width, target.Height);
+            }
+            Check(browser.Bounds == ExpectedZero(), "confirmed zero zoom starts with exact centered layout");
+            capture = true;
+            await Wait(() => requests == 1, "old zoom query held before reset");
+            browser.GetBrowserHost().SetZoomLevel(1);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5)) - 1) < 0.01,
+                "stale zoom regression zoom changed");
+            browser.GetBrowserHost().SetZoomLevel(0);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5))) < 0.01,
+                "stale zoom regression zoom reset");
+            var reset = form.InvalidateLetterboxZoom(browser);
+            stale.SetResult(1);
+            await Wait(() => requests >= 2, "stale completion retired and fresh zoom requested");
+            Check(browser.Bounds == ExpectedZero() && !form.IsLetterboxZoomConfirmed(browser, reset, 1),
+                "old zoom completion cannot restore pre-reset geometry");
+            fresh.SetResult(0);
+            await Wait(() => form.IsLetterboxZoomConfirmed(browser, reset, 0), "post-reset zoom generation confirmed");
+            Check(browser.Bounds == ExpectedZero(), "confirmed post-reset zoom retains exact centered geometry");
+        }
+        finally
+        {
+            // Do not leave a synthetic CEF query pending during browser close.
+            stale.TrySetResult(1);
+            fresh.TrySetResult(0);
+            if (!form.IsDisposed) { form.Close(); await Wait(() => form.IsDisposed, "stale-query form native close"); }
+        }
+    }
+
     private static async Task ExerciseStalledZoomQuery(string profilePath)
     {
         var never = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -314,16 +465,34 @@ internal static partial class Program
                 "renderer viewport resize event");
     }
 
+    private static void TraceViewportZoom(MainForm form, string fixture)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var sequence = 0;
+        form.ViewportZoomTrace = value =>
+        {
+            if (++sequence <= 1000)
+                Console.WriteLine($"P4LB_ZOOM_TRACE: fixture={fixture} sequence={sequence} elapsedMs={watch.ElapsedMilliseconds} {value}");
+        };
+    }
+
     private static async Task ReportViewport(MainForm form, TabControl tabs, ChromiumWebBrowser browser, bool enabled, string scenario)
     {
         if (enabled)
         {
+            // The controlled test changes CEF zoom directly. The form cannot
+            // observe that API call, so invalidate measurements requested
+            // before the change and wait for a current-generation result.
+            var currentZoom = await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            var generation = form.InvalidateLetterboxZoom(browser);
+            Console.WriteLine($"P4LB_ZOOM_ASSERTION: scenario={scenario} resetGeneration={generation} actualZoom={currentZoom:R}");
             await WaitForAsync(async () =>
             {
                 var area = tabs.SelectedTab!.DisplayRectangle;
                 var level = await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 var target = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), level);
-                return browser.Bounds == new Rectangle(area.X + target.X, area.Y + target.Y, target.Width, target.Height);
+                return form.IsLetterboxZoomConfirmed(browser, generation, level) &&
+                    browser.Bounds == new Rectangle(area.X + target.X, area.Y + target.Y, target.Width, target.Height);
             }, "zoom-aware layout " + scenario);
         }
         const string script = "JSON.stringify({innerWidth:window.innerWidth,innerHeight:window.innerHeight,clientWidth:document.documentElement.clientWidth,clientHeight:document.documentElement.clientHeight,dpr:window.devicePixelRatio,outerWidth:window.outerWidth,outerHeight:window.outerHeight,screenWidth:screen.width,screenHeight:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight,visualWidth:window.visualViewport?.width??null,visualHeight:window.visualViewport?.height??null})";
@@ -347,9 +516,12 @@ internal static partial class Program
         Check(responsive == "True", "controlled responsive layout matches viewport (" + scenario + ")");
         Check(width > 0 && height > 0 && browser.Width > 0 && browser.Height > 0,
             "active viewport remains nonzero (" + scenario + ")");
+        var zoom = await browser.GetBrowserHost().GetZoomLevelAsync();
+        // Read bounds after the asynchronous zoom query, without yielding the
+        // UI thread between geometry capture and the equality assertion.
         var bounds = browser.Bounds;
         var available = tabs.SelectedTab!.DisplayRectangle;
-        var zoom = await browser.GetBrowserHost().GetZoomLevelAsync();
+        Console.WriteLine($"P4LB_ZOOM_ASSERTION: scenario={scenario} actualZoom={zoom:R} bounds={bounds} available={available}");
         var factor = Math.Pow(1.2, zoom);
         if (enabled)
         {

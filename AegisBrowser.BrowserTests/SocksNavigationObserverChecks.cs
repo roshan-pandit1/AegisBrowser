@@ -43,6 +43,12 @@ internal static partial class Program
             "duplicate failure cannot complete twice and HTTP zero is not success");
         network.ObserveEnd(true, expected, 200);
         Check(network.Snapshot.ContradictorySuccess, "success following a failure remains a violation");
+        var duplicatesBeforeClose = network.Snapshot.DuplicateEvents;
+        network.MarkBrowserClosed();
+        network.ObserveError(true, expected, CefErrorCode.Aborted);
+        Check(network.Snapshot.Outcome == SocksNavigationOutcome.NetworkFailure &&
+            network.Snapshot.DuplicateEvents == duplicatesBeforeClose && network.Snapshot.LateEvents == 1,
+            "callback after browser close is late even after an earlier terminal outcome");
 
         var cancellation = new SocksNavigationObserver(expected);
         cancellation.NoteCancellationRequested();

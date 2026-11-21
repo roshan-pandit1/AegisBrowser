@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "evidenceThroughCommit": "086100c95b4d308af7701158103b70b296411284",
+  "note": "Evidence applies to the named commit, not future changes. Passing fixture tests do not establish production sandboxing or proxy containment.",
+  "releases": {
+    "A_core": { "decision": "NO_GO", "requiredProxyProfiles": "BLOCKED" },
+    "B_protectedProxy": { "decision": "NO_GO", "dependsOn": "A_core" }
+  },
+  "blockers": [
+    {
+      "id": "A-VIEWPORT-01", "release": "A_core", "severity": "P0", "ownerRole": "Viewport lifecycle engineer",
+      "rootCauseStatus": "INCONCLUSIVE",
+      "evidence": ["https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44928277213", "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44931390765", "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44931675457", "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44931669842"],
+      "historicalFailure": "viewport-read initial bounds were X=30,Y=29,Width=960,Height=600; expected X=10,Y=29,Width=1000,Height=600 at independently reported zoom 0. The log does not establish the ordering of the pending app zoom query.",
+      "implementedEvidence": "At 086100c, the focused write/read and final-head Windows runs passed a controlled stale-completion regression and exact geometry/CSS assertions. Controlled reset invalidates the old request; assertions wait for an applied current-generation measurement and capture bounds after awaiting zoom. Later passes do not prove which race caused the historical failure.",
+      "remainingLimitation": "The binding has no general zoom-changed event. Changes not explicitly invalidated can temporarily use an older polling result; full application-wide stale-zoom prevention remains unverified.",
+      "nextDiscriminatingTest": "Run real viewport-write and viewport-read with current-generation zoom and layout tracing, plus a controlled stale-query completion test.",
+      "environment": "Windows x64 CEF fixture with a disposable restarted profile",
+      "implementationTask": "Prevent pre-reset zoom measurements from being accepted after explicit invalidation, and compare bounds with a current confirmed zoom without yielding between geometry capture and assertion.",
+      "done": "Focused write/read and final-head CI preserve and pass the exact geometry and CSS assertions; the observed historical cause remains separately classified unless proven."
+    },
+    {
+      "id": "A-SHUTDOWN-01", "release": "A_core", "severity": "P0", "ownerRole": "CEF lifecycle engineer",
+      "rootCauseStatus": "INCONCLUSIVE",
+      "evidence": ["https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44869020633", "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44924545135"],
+      "nextDiscriminatingTest": "Run a bounded fresh-process native window stress sample and retain exit codes and ordered lifecycle traces on any failure.",
+      "environment": "Windows x64 with CEF and disposable profiles",
+      "implementationTask": "Diagnose any observed crash using its exit code and trace; fix only a demonstrated cause.",
+      "done": "Strict native lifecycle checks pass in the accepted stress sample; any reproduced defect has a causal fix and regression test."
+    },
+    {
+      "id": "A-SANDBOX-01", "release": "A_core", "severity": "P0", "ownerRole": "CEF sandbox engineer",
+      "rootCauseStatus": "VERIFIED",
+      "evidence": ["https://github.com/roshan-pandit1/AegisBrowser/pull/77", "https://github.com/roshan-pandit1/AegisBrowser/pull/78", "https://github.com/roshan-pandit1/AegisBrowser/pull/81"],
+      "nextDiscriminatingTest": "Build and run the matching sandbox-capable host and establish renderer identity and effective policy with independent native evidence.",
+      "environment": "Qualified authorized Windows x64 builder and disposable Windows x64 acceptance host",
+      "implementationTask": "Complete source provenance/build prerequisites and integrate a verified sandbox-capable host without unsandboxed fallback.",
+      "done": "The actual core browser has independently verified renderer sandbox enforcement, child lifecycle and shutdown."
+    },
+    {
+      "id": "A-RUNTIME-01", "release": "A_core", "severity": "P0", "ownerRole": "Runtime and release engineer",
+      "rootCauseStatus": "VERIFIED",
+      "evidence": ["https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core"],
+      "nextDiscriminatingTest": "Build and run the complete native browser regression and packaging suite on a supported patched .NET runtime.",
+      "environment": "Windows x64 CI and disposable native desktop",
+      "implementationTask": "Migrate the application, tests, SDK pin and self-contained packaging from unsupported .NET 8 to supported patched .NET 10.",
+      "done": "A version-pinned supported runtime is shipped and the actual packaged browser passes final-head native acceptance."
+    },
+    {
+      "id": "A-ENGINE-01", "release": "A_core", "severity": "P0", "ownerRole": "Browser engine security engineer",
+      "rootCauseStatus": "INCONCLUSIVE",
+      "evidence": ["https://github.com/roshan-pandit1/AegisBrowser/pull/76"],
+      "nextDiscriminatingTest": "Map the exact shipped CEF/Chromium build to current vendor security fixes and run native regressions on a supported patched engine.",
+      "environment": "Windows x64 CI and disposable native desktop",
+      "implementationTask": "Upgrade the binding and CEF/Chromium together after supported sandbox lifecycle compatibility is established.",
+      "done": "The exact maintained engine and its security-fix coverage are independently verified on the final browser build."
+    },
+    {
+      "id": "A-RELEASE-01", "release": "A_core", "severity": "P0", "ownerRole": "Release QA",
+      "rootCauseStatus": "INCONCLUSIVE",
+      "evidence": ["https://github.com/roshan-pandit1/AegisBrowser/pull/82"],
+      "nextDiscriminatingTest": "Exercise the final extracted Windows x64 artifact with disposable profiles, upgrade/rollback, browser shutdown and profile locking.",
+      "environment": "Native Windows x64 desktop and final-head CI",
+      "implementationTask": "Verify package provenance, notices, integrity, user acceptance and release documentation after security blockers close.",
+      "done": "Final-head acceptance and package integrity pass for the exact artifact and source SHA."
+    },
+    {
+      "id": "B-CONTAINMENT-01", "release": "B_protectedProxy", "severity": "P0", "ownerRole": "Windows network security engineer",
+      "rootCauseStatus": "VERIFIED",
+      "evidence": ["docs/security/wfp-supervisor-test.md", "docs/security/cross-vm-network-test.md"],
+      "nextDiscriminatingTest": "Run ordinary and AppContainer positive controls, then an independently observed policy-attributed negative flow on the authorized isolated VM pair.",
+      "environment": "Two approved isolated disposable Windows x64 VMs, authorized WFP administration and independent receiver",
+      "implementationTask": "Establish policy-before-execution, process coverage, attributed flow evidence and durable failure handling without global workstation changes.",
+      "done": "Independently verified IPv4, IPv6, DNS and UDP containment covers network-capable Chromium subprocesses and policy-loss transitions."
+    },
+    {
+      "id": "B-ROUTING-01", "release": "B_protectedProxy", "severity": "P0", "ownerRole": "Chromium proxy engineer",
+      "rootCauseStatus": "VERIFIED",
+      "evidence": ["docs/proxy-configuration.md", "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44670344288"],
+      "nextDiscriminatingTest": "Once containment is verified, test actual protected profile routing, supported authentication and failure transitions with independent observers.",
+      "environment": "Authorized isolated Windows x64 VMs and actual browser profiles created for the test",
+      "implementationTask": "Integrate profile-specific routing and safe authentication after OS containment is verified; investigate SOCKS failures only with discriminating evidence.",
+      "done": "Production routing and supported authentication pass independent no-fallback and lifecycle acceptance while the guard remains fail closed."
+    }
+  ]
+}
