@@ -352,6 +352,7 @@ jobs:
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-window-repro-' + [guid]::NewGuid().ToString('N'))
           $output = & ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe hwnd-repro $profileRoot 2>&1
           $code = $LASTEXITCODE
+          Write-Output ("WINDOW-LIFECYCLE processExitCode={0} hex=0x{1:x8}" -f $code, ([uint32]([int64]$code -band 0xffffffffL)))
           $output | Write-Output
           if ($code -ne 0 -and (Test-Path (Join-Path $profileRoot 'cef-window-repro.log'))) {
             Get-Content (Join-Path $profileRoot 'cef-window-repro.log') | Write-Output
