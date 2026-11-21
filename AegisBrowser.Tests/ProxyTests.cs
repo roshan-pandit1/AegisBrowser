@@ -25,6 +25,25 @@ internal static class ProxyTests
             direct with { Host = "proxy.example" }, direct with { CredentialId = Guid.NewGuid() }, http with { Label = "x\ny" } })
             Reject(() => ProxyValidation.Validate(invalid), "invalid configuration");
 
+        var fixedHttp = ChromiumProxyPreference.Create(http);
+        Check(fixedHttp.Count == 2 && (string)fixedHttp["mode"] == "fixed_servers" &&
+            (string)fixedHttp["server"] == "http://proxy.example:8080", "Chromium HTTP fixed proxy preference");
+        var fixedV6 = ChromiumProxyPreference.Create(http with { Protocol = ProxyProtocol.Socks5, Host = "2001:db8::1", Port = 1080 });
+        Check(fixedV6.Count == 2 && !fixedV6.ContainsKey("bypass_list") &&
+            (string)fixedV6["server"] == "socks5://[2001:db8::1]:1080",
+            "Chromium SOCKS5 preference brackets IPv6 and leaves bypass defaults unchanged");
+        var id = Guid.NewGuid();
+        var fixedAuth = ChromiumProxyPreference.Create(http with { AuthenticationRequired = true, CredentialId = id });
+        Check(fixedAuth.Count == 2 && !string.Join("|", fixedAuth.Values).Contains(id.ToString(), StringComparison.OrdinalIgnoreCase),
+            "proxy credential reference is absent from Chromium preference");
+        foreach (var unsupported in new[] { direct, http with { Protocol = ProxyProtocol.Https },
+            http with { Protocol = ProxyProtocol.Socks5, AuthenticationRequired = true, CredentialId = id } })
+        {
+            try { ChromiumProxyPreference.Create(unsupported); throw new Exception("FAIL proxy: unsupported Chromium preference accepted"); }
+            catch (NotSupportedException) { count++; }
+        }
+        Reject(() => ChromiumProxyPreference.Create(http with { RequireProxy = false }), "Chromium preference rejects optional proxy");
+
         var testRoot = Path.Combine(Path.GetTempPath(), "aegis-proxy-tests-" + Guid.NewGuid().ToString("N"));
         var root = Path.Combine(testRoot, "profiles");
         try

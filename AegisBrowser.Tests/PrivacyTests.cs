@@ -113,6 +113,10 @@ internal static class PrivacyTests
             Check(restored.Mode == PrivacyMode.Strict && restored.ApplyThirdPartyRulesWhenSiteUnknown && restored.BlockThirdPartyCookies == true && restored.SiteExceptions.SequenceEqual(saved.SiteExceptions)
                 && restored.UserRules == saved.UserRules, "settings round trip");
             Check(new PrivacySettingsStore(Path.Combine(folder, "other")).Load() is { BlockThirdPartyCookies: null, SiteExceptions.Length: 0 }, "profile settings isolation");
+            var missingProfile = new PrivacySettingsStore(Path.Combine(folder, "other"), requireExistingDirectory: true);
+            var missingRejected = false;
+            try { missingProfile.Load(); } catch (IOException) { missingRejected = true; }
+            Check(missingRejected, "unavailable existing profile directory does not use defaults");
             Check(new PrivacySettingsStore(Path.Combine(folder, "other")).Load().RestrictWebRtcNonProxiedUdp is null, "other profile retains WebRTC preference");
             Check(!new PrivacySettingsStore(Path.Combine(folder, "other")).Load().LetterboxWebContent, "other profiles retain letterboxing default");
             Check(new PrivacySettingsStore(Path.Combine(folder, "other")).Load() is { DisableWebGl: false, DisableRemoteFonts: false },
@@ -150,6 +154,24 @@ internal static class PrivacyTests
             rejected = false;
             try { new PrivacySettingsStore(folder).Load(); } catch (IOException) { rejected = true; }
             Check(rejected, "null settings rejected safely");
+            File.WriteAllText(Path.Combine(folder, "privacy.json"), "null");
+            var empty = new PrivacySettingsStore(folder);
+            rejected = false;
+            try { empty.Load(); } catch (IOException) { rejected = true; }
+            Check(rejected && File.ReadAllText(Path.Combine(folder, "privacy.json")) == "null",
+                "JSON null reports a preserved settings failure");
+            File.WriteAllText(Path.Combine(folder, "privacy.json"), "{}");
+            var locked = new PrivacySettingsStore(folder);
+            using (var lockHandle = new FileStream(Path.Combine(folder, "privacy.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                rejected = false;
+                try { locked.Load(); } catch (IOException) { rejected = true; }
+                Check(rejected, "locked settings do not silently become defaults");
+            }
+            rejected = false;
+            try { locked.Save(config); } catch (IOException) { rejected = true; }
+            Check(rejected && File.ReadAllText(Path.Combine(folder, "privacy.json")) == "{}",
+                "failed read prevents overwriting original settings");
             Parallel.For(0, 1000, i => { if (i % 50 == 0) fresh.Apply(config); fresh.Evaluate(cdn); });
             Check(fresh.Snapshot().Allowed + fresh.Snapshot().Blocked == 1000, "concurrent settings and request accounting");
         }

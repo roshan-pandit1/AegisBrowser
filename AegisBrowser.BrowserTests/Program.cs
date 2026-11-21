@@ -50,6 +50,7 @@ internal static partial class Program
         ProfileLease? leaseA = null, leaseB = null;
         try
         {
+            if (args[0] == "write") CheckPrivacyStartupBeforeChromium(root);
             if (args[0] == "read")
             {
                 // The write process created these CEF profiles without metadata. Adopt them

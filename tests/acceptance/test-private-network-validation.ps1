@@ -13,27 +13,33 @@ foreach ($file in $files) {
 . (Join-Path $PSScriptRoot 'private-network-evidence.ps1')
 $runId = [guid]::NewGuid()
 $ordinaryNonce = [guid]::NewGuid()
+$testNow = [DateTimeOffset]::UtcNow
+$timeArgs = @{ OrdinaryRecord = @{ processCreatedUtc = $testNow.AddSeconds(-2).ToString('O'); completedUtc = $testNow.ToString('O') };
+    NowUtc = $testNow; MaxClockSkewSeconds = 1; MaxEvidenceAgeSeconds = 60 }
 $evidence = [ordered]@{
     formatVersion = 2; runId = $runId.ToString('N'); overallStatus = 'INCONCLUSIVE'; classification = 'ALLOWED_AND_INDEPENDENTLY_OBSERVED';
     transactionId = $ordinaryNonce.ToString('N'); receiverAddress = '10.9.8.2'; receiverPort = 47123;
-    remoteAddress = '10.9.8.1'; remotePort = 50000; observedUtc = [DateTime]::UtcNow.ToString('O');
+    # Match receive-private-network-control.ps1, which writes a UTC DateTime
+    # in round-trip format with a trailing Z. PowerShell 7 may deserialize an
+    # explicit +00:00 offset as Local and lose the original offset.
+    remoteAddress = '10.9.8.1'; remotePort = 50000; observedUtc = $testNow.UtcDateTime.ToString('O');
     transport = 'IPv4/TCP'; observedMatches = 1; duplicateObservationWindowSeconds = 2; duplicateCoverage = 'bounded-window-only';
     processAttribution = 'unverified'; wfpDecision = 'not-observed'
 }
 $valid = ($evidence | ConvertTo-Json -Compress | ConvertFrom-Json)
-Assert-OrdinaryReceiverEvidence -Evidence $valid -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123
+Assert-OrdinaryReceiverEvidence -Evidence $valid -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123 @timeArgs
 # Exercise the JSON integral representations used by both Windows PowerShell
 # and PowerShell 7 regardless of which runtime runs this suite.
 $int64Evidence = ($evidence | ConvertTo-Json -Compress | ConvertFrom-Json)
 foreach ($field in @('formatVersion', 'receiverPort', 'remotePort', 'observedMatches', 'duplicateObservationWindowSeconds')) {
     $int64Evidence.$field = [long] $int64Evidence.$field
 }
-Assert-OrdinaryReceiverEvidence -Evidence $int64Evidence -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123
+Assert-OrdinaryReceiverEvidence -Evidence $int64Evidence -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123 @timeArgs
 $int32Evidence = ($evidence | ConvertTo-Json -Compress | ConvertFrom-Json)
 foreach ($field in @('formatVersion', 'receiverPort', 'remotePort', 'observedMatches', 'duplicateObservationWindowSeconds')) {
     $int32Evidence.$field = [int] $int32Evidence.$field
 }
-Assert-OrdinaryReceiverEvidence -Evidence $int32Evidence -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123
+Assert-OrdinaryReceiverEvidence -Evidence $int32Evidence -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123 @timeArgs
 foreach ($validInteger in @([int] 0, [long] 0, [int] 47123, [long] 47123)) {
     if (-not (Test-JsonInteger $validInteger)) { throw 'Valid JSON integer representation rejected.' }
 }
@@ -59,7 +65,7 @@ foreach ($case in $badCases) {
     $copy = ($evidence | ConvertTo-Json -Compress | ConvertFrom-Json)
     $copy.($case.field) = $case.value
     $rejected = $false
-    try { Assert-OrdinaryReceiverEvidence -Evidence $copy -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123 }
+    try { Assert-OrdinaryReceiverEvidence -Evidence $copy -RunId $runId -Nonce $ordinaryNonce -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123 @timeArgs }
     catch { if ($_.Exception.Message -ne 'Ordinary control evidence does not match this run.') { throw }; $rejected = $true }
     if (-not $rejected) { throw ('Bad evidence accepted: ' + $case.field) }
 }

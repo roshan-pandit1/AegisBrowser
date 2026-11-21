@@ -141,7 +141,7 @@ static bool ExactScope(const FWPM_FILTER0* filter, const GUID& provider, const G
         (filter->flags & ~static_cast<UINT32>(FWPM_FILTER_FLAG_INDEXED)) == 0 &&
         filter->providerKey && IsEqualGUID(*filter->providerKey, provider) &&
         IsEqualGUID(filter->subLayerKey, sublayer) && IsEqualGUID(filter->layerKey, FWPM_LAYER_ALE_AUTH_CONNECT_V4) &&
-        filter->action.type == FWP_ACTION_BLOCK && filter->numFilterConditions == 4;
+        filter->action.type == FWP_ACTION_BLOCK && filter->numFilterConditions == 4 && filter->filterCondition;
     if (header) for (UINT32 i = 0; i < filter->numFilterConditions; ++i) {
         const auto& c = filter->filterCondition[i];
         if (c.matchType != FWP_MATCH_EQUAL) { header = false; break; }
@@ -225,8 +225,141 @@ static void VerifyFilter(HANDLE engine, const GUID& provider, const GUID& sublay
     if (!valid) throw std::runtime_error("Returned filter scope does not exactly match owned fixture.");
 }
 
+// Test-only lifecycle controller for the exact synthetic scopes above. The
+// dynamic session vanishes if its owner exits, so this type must never be used
+// to authorize Chromium startup or described as fail-closed containment.
+enum class TestPolicyState { NotConfigured, Installing, ActiveUnverified, Failed, Lost };
+
+class ScopedTestPolicy
+{
+    Fixture& a;
+    Fixture& b;
+    Engine dynamic;
+    GUID providerKey = NewGuid();
+    GUID sublayerKey = NewGuid();
+    TestPolicyState state = TestPolicyState::NotConfigured;
+public:
+    ScopedTestPolicy(Fixture& first, Fixture& second) : a(first), b(second) {}
+    const GUID& ProviderKey() const { return providerKey; }
+    const GUID& SublayerKey() const { return sublayerKey; }
+    TestPolicyState State() const { return state; }
+
+    void Install()
+    {
+        if (state != TestPolicyState::NotConfigured) throw std::runtime_error("Policy installation was already attempted.");
+        state = TestPolicyState::Installing;
+        try {
+            dynamic.Open(true);
+            dynamic.Begin();
+            FWPM_PROVIDER0 provider{};
+            provider.providerKey = providerKey;
+            provider.displayData.name = const_cast<wchar_t*>(L"Aegis disposable WFP research provider");
+            Check(FwpmProviderAdd0(dynamic.handle, &provider, nullptr), "FwpmProviderAdd0");
+            FWPM_SUBLAYER0 sublayer{};
+            sublayer.subLayerKey = sublayerKey;
+            sublayer.providerKey = &providerKey;
+            sublayer.displayData.name = const_cast<wchar_t*>(L"Aegis disposable WFP research sublayer");
+            sublayer.weight = 0x100;
+            Check(FwpmSubLayerAdd0(dynamic.handle, &sublayer, nullptr), "FwpmSubLayerAdd0");
+            AddFilter(dynamic.handle, providerKey, sublayerKey, a);
+            AddFilter(dynamic.handle, providerKey, sublayerKey, b);
+            VerifyFilter(dynamic.handle, providerKey, sublayerKey, a);
+            VerifyFilter(dynamic.handle, providerKey, sublayerKey, b);
+            dynamic.Commit();
+            VerifyFilter(dynamic.handle, providerKey, sublayerKey, a);
+            VerifyFilter(dynamic.handle, providerKey, sublayerKey, b);
+            state = TestPolicyState::ActiveUnverified;
+        } catch (...) {
+            state = TestPolicyState::Failed;
+            throw;
+        }
+    }
+
+    void Revalidate()
+    {
+        if (state != TestPolicyState::ActiveUnverified) throw std::runtime_error("Policy is not active.");
+        try {
+            VerifyFilter(dynamic.handle, providerKey, sublayerKey, a);
+            VerifyFilter(dynamic.handle, providerKey, sublayerKey, b);
+        } catch (...) {
+            state = TestPolicyState::Lost;
+            throw;
+        }
+    }
+
+    void Close()
+    {
+        // Mark lost before closing: even an unsuccessful close does not leave
+        // a usable, independently verified policy lifetime.
+        state = TestPolicyState::Lost;
+        dynamic.Close();
+    }
+};
+
+// Pure in-memory scope checks. This does not open BFE, create a profile,
+// install policy, make a network request, or claim packet enforcement.
+static int RunScopeSelfTest()
+{
+    try {
+        Fixture a, b;
+        SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+        if (!AllocateAndInitializeSid(&authority, 1, 1234, 0, 0, 0, 0, 0, 0, 0, &a.sid))
+            Check(GetLastError(), "AllocateAndInitializeSid");
+        a.port = 43210;
+        const GUID provider = NewGuid(), sublayer = NewGuid();
+        FWPM_FILTER_CONDITION0 conditions[4]{};
+        conditions[0].fieldKey = FWPM_CONDITION_ALE_PACKAGE_ID;
+        conditions[0].matchType = FWP_MATCH_EQUAL;
+        conditions[0].conditionValue.type = FWP_SID;
+        conditions[0].conditionValue.sid = static_cast<SID*>(a.sid);
+        conditions[1].fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
+        conditions[1].matchType = FWP_MATCH_EQUAL;
+        conditions[1].conditionValue.type = FWP_UINT32;
+        conditions[1].conditionValue.uint32 = 0x7F000001;
+        conditions[2].fieldKey = FWPM_CONDITION_IP_REMOTE_PORT;
+        conditions[2].matchType = FWP_MATCH_EQUAL;
+        conditions[2].conditionValue.type = FWP_UINT16;
+        conditions[2].conditionValue.uint16 = a.port;
+        conditions[3].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+        conditions[3].matchType = FWP_MATCH_EQUAL;
+        conditions[3].conditionValue.type = FWP_UINT8;
+        conditions[3].conditionValue.uint8 = IPPROTO_TCP;
+        FWPM_FILTER0 filter{};
+        filter.filterKey = a.filter;
+        filter.providerKey = const_cast<GUID*>(&provider);
+        filter.subLayerKey = sublayer;
+        filter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
+        filter.action.type = FWP_ACTION_BLOCK;
+        filter.numFilterConditions = ARRAYSIZE(conditions);
+        filter.filterCondition = conditions;
+        if (!ExactScope(&filter, provider, sublayer, a)) throw std::runtime_error("Valid scope rejected.");
+        filter.filterCondition = nullptr;
+        if (ExactScope(&filter, provider, sublayer, a)) throw std::runtime_error("Missing conditions accepted.");
+        filter.filterCondition = conditions;
+        filter.action.type = FWP_ACTION_PERMIT;
+        if (ExactScope(&filter, provider, sublayer, a)) throw std::runtime_error("Permit action accepted.");
+        filter.action.type = FWP_ACTION_BLOCK;
+        conditions[2].conditionValue.uint16++;
+        if (ExactScope(&filter, provider, sublayer, a)) throw std::runtime_error("Wrong port accepted.");
+        conditions[2].conditionValue.uint16 = a.port;
+        conditions[3].fieldKey = conditions[2].fieldKey;
+        if (ExactScope(&filter, provider, sublayer, a)) throw std::runtime_error("Duplicate condition accepted.");
+        ScopedTestPolicy policy(a, b);
+        bool rejected = false;
+        try { policy.Revalidate(); } catch (const std::runtime_error&) { rejected = true; }
+        if (!rejected || policy.State() != TestPolicyState::NotConfigured)
+            throw std::runtime_error("Uninstalled policy revalidation accepted.");
+        std::puts("PASS: synthetic WFP scope and uninstalled lifecycle checks; no policy or network operations performed.");
+        return 0;
+    } catch (const std::exception& ex) {
+        std::fprintf(stderr, "FAIL: synthetic WFP scope checks: %s\n", ex.what());
+        return 1;
+    }
+}
+
 int wmain(int argc, wchar_t** argv)
 {
+    if (argc == 2 && std::wstring(argv[1]) == L"--self-test") return RunScopeSelfTest();
     wchar_t github[16]{}, environment[32]{};
     if (argc != 2 || std::wstring(argv[1]) != L"--disposable-runner" ||
         !GetEnvironmentVariableW(L"GITHUB_ACTIONS", github, ARRAYSIZE(github)) ||
@@ -242,34 +375,24 @@ int wmain(int argc, wchar_t** argv)
         Fixture a, b;
         a.Create(); b.Create();
         if (EqualSid(a.sid, b.sid) || a.port == b.port) throw std::runtime_error("Fixture identities or ports are not distinct.");
-        GUID providerKey = NewGuid(), sublayerKey = NewGuid();
+        ScopedTestPolicy policy(a, b);
+        GUID providerKey = policy.ProviderKey(), sublayerKey = policy.SublayerKey();
         PrintKey(L"owned-provider", providerKey);
         PrintKey(L"owned-sublayer", sublayerKey);
         PrintKey(L"owned-filter-A", a.filter);
         PrintKey(L"owned-filter-B", b.filter);
-        Engine dynamic, reader;
-        dynamic.Open(true);
-        dynamic.Begin();
-        FWPM_PROVIDER0 provider{};
-        provider.providerKey = providerKey;
-        provider.displayData.name = const_cast<wchar_t*>(L"Aegis disposable WFP research provider");
-        Check(FwpmProviderAdd0(dynamic.handle, &provider, nullptr), "FwpmProviderAdd0");
-        FWPM_SUBLAYER0 sublayer{};
-        sublayer.subLayerKey = sublayerKey;
-        sublayer.providerKey = &providerKey;
-        sublayer.displayData.name = const_cast<wchar_t*>(L"Aegis disposable WFP research sublayer");
-        sublayer.weight = 0x100;
-        Check(FwpmSubLayerAdd0(dynamic.handle, &sublayer, nullptr), "FwpmSubLayerAdd0");
-        AddFilter(dynamic.handle, providerKey, sublayerKey, a);
-        AddFilter(dynamic.handle, providerKey, sublayerKey, b);
-        VerifyFilter(dynamic.handle, providerKey, sublayerKey, a);
-        VerifyFilter(dynamic.handle, providerKey, sublayerKey, b);
-        dynamic.Commit();
-        VerifyFilter(dynamic.handle, providerKey, sublayerKey, a);
-        VerifyFilter(dynamic.handle, providerKey, sublayerKey, b);
+        Engine reader;
+        policy.Install();
+        if (policy.State() != TestPolicyState::ActiveUnverified) throw std::runtime_error("Unexpected policy state after installation.");
+        policy.Revalidate();
         std::puts("PASS: two dynamic WFP block objects read back with the exact owned SID, TCP and loopback endpoint conditions.");
         reader.Open(false);
-        dynamic.Close();
+        policy.Close();
+        if (policy.State() != TestPolicyState::Lost) throw std::runtime_error("Closed policy was not marked lost.");
+        bool rejected = false;
+        try { policy.Revalidate(); } catch (const std::runtime_error&) { rejected = true; }
+        if (!rejected) throw std::runtime_error("Closed policy could still be revalidated.");
+        std::puts("PASS: test-only policy lifecycle rejects revalidation after session closure.");
         for (const Fixture* f : { &a, &b }) {
             FWPM_FILTER0* found = nullptr;
             DWORD code = FwpmFilterGetByKey0(reader.handle, &f->filter, &found);

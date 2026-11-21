@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using AegisBrowser;
+using AegisBrowser.Core;
 using CefSharp;
 
 namespace AegisBrowser.BrowserTests;
@@ -14,13 +15,15 @@ internal static partial class Program
     private static async Task ObserveSocksThroughProxy(BrowserView browser, IRequestContext context, SocksTrace trace)
     {
         using var proxy = new SocksFixture(trace);
+        CheckProxyInstallerFailures();
+        var draft = new ProxyDraft(ProxyProtocol.Socks5, "127.0.0.1", proxy.Port, false, null, "", true);
+        Check(ChromiumProxyInstaller.ApplyOnUiThread(context, draft).Status == ChromiumProxyInstaller.Outcome.WrongThread,
+            "proxy installer rejects non-CEF UI thread before changing preferences");
         var configured = await Cef.UIThreadTaskFactory.StartNew(() =>
-        {
-            if (!context.CanSetPreference("proxy")) return (false, "Proxy preference is read-only.");
-            var settings = new Dictionary<string, object> { ["mode"] = "fixed_servers", ["server"] = "socks5://127.0.0.1:" + proxy.Port };
-            var ok = context.SetPreference("proxy", settings, out var error); return (ok, error);
-        });
-        if (!configured.Item1) throw new IOException("CEF rejected the test SOCKS5 preference: " + configured.Item2);
+            ChromiumProxyInstaller.ApplyOnUiThread(context, draft));
+        if (!configured.Succeeded) throw new IOException("CEF rejected the test SOCKS5 preference: " + configured.Status);
+        Check(configured.Status == ChromiumProxyInstaller.Outcome.Accepted,
+            "CEF UI-thread proxy preference installation accepted");
         trace.Add("PROXY_EVENT", "PREFERENCE_APPLIED");
 
         const string url = "http://aegis-socks.invalid/fixture";

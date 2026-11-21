@@ -16,6 +16,7 @@ public sealed class MainForm : Form
     private bool closeComplete;
     private readonly PrivacySession privacy;
     private readonly PrivacySettingsStore? privacyStore;
+    private readonly bool privacyLoadBlocksTabs;
     private readonly ThirdPartyCookiePolicy.Result cookiePolicy;
     private readonly bool cookiePolicyBlocksTabs;
     private readonly WebRtcPrivacyPolicy.Result webRtcPolicy;
@@ -37,7 +38,8 @@ public sealed class MainForm : Form
 
     public MainForm(string profile, string? profilePath = null) : this(profile, profilePath, null) { }
 
-    internal MainForm(string profile, string? profilePath, Func<ChromiumWebBrowser, Task<double>>? zoomQuery)
+    internal MainForm(string profile, string? profilePath, Func<ChromiumWebBrowser, Task<double>>? zoomQuery,
+        Action<string>? privacyLoadWarning = null)
     {
         letterboxZoomQuery = zoomQuery ?? (browser =>
             (browser.GetBrowserHost() ?? throw new InvalidOperationException("CEF browser host unavailable.")).GetZoomLevelAsync());
@@ -48,10 +50,11 @@ public sealed class MainForm : Form
             searchStore = new(profilePath);
             try { searchSettings = searchStore.Load(); }
             catch (IOException ex) { Shown += (_, _) => MessageBox.Show(this, ex.Message, "Search settings warning"); }
-            privacyStore = new(profilePath);
+            privacyStore = new(profilePath, requireExistingDirectory: true);
             try { configuration = privacyStore.Load(); }
             catch (IOException ex) { privacyWarning = ex.Message; }
         }
+        privacyLoadBlocksTabs = privacyWarning is not null;
         privacy = new(configuration);
         letterboxingAtStartup = configuration.LetterboxWebContent;
         disableWebGlAtStartup = configuration.DisableWebGl;
@@ -60,7 +63,13 @@ public sealed class MainForm : Form
         cookiePolicyBlocksTabs = ThirdPartyCookiePolicy.PreventBrowsing(configuration.BlockThirdPartyCookies, cookiePolicy);
         webRtcPolicy = WebRtcPrivacyPolicy.ApplyAtStartup(configuration.RestrictWebRtcNonProxiedUdp);
         webRtcPolicyBlocksTabs = WebRtcPrivacyPolicy.PreventBrowsing(configuration.RestrictWebRtcNonProxiedUdp, webRtcPolicy);
-        if (privacyWarning is not null) Shown += (_, _) => MessageBox.Show(this, privacyWarning, "Privacy settings warning");
+        if (privacyWarning is not null) Shown += (_, _) =>
+        {
+            var message = privacyWarning + "\n\nNo browser tabs will open until the settings are repaired or renamed and this profile is restarted. " +
+                "Renaming the file starts the profile with default privacy settings; review the privacy controls before browsing.";
+            if (privacyLoadWarning is null) MessageBox.Show(this, message, "Privacy settings unavailable");
+            else privacyLoadWarning(message);
+        };
         if (!cookiePolicy.Succeeded) Shown += (_, _) => MessageBox.Show(this,
             cookiePolicy.Error + (cookiePolicyBlocksTabs
                 ? "\n\nNo browser tabs will open. Disable the setting in Privacy and restart this profile."
@@ -271,6 +280,11 @@ public sealed class MainForm : Form
     private void NewTab(string url)
     {
         if (closing) return;
+        if (privacyLoadBlocksTabs)
+        {
+            status.Text = "Privacy settings unavailable; repair or rename privacy.json and restart this profile.";
+            return;
+        }
         if (cookiePolicyBlocksTabs)
         {
             status.Text = "Cookie protection unavailable; change the setting in Privacy and restart.";

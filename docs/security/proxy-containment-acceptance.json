@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "scope": "production-required-proxy-browsing",
+  "evidenceSourceCommit": "e98e3fd34e1c8d3dd7b6c7d99254c8a6424bdd82",
+  "evidenceLimitations": "Statuses describe the referenced evidence, not later revisions. Controlled fixtures do not establish production routing or network containment.",
+  "evidence": {
+    "windowsPush": "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44866255386",
+    "windowsPullRequest": "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44866260599",
+    "historicalSocksFailure": "https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44670344288"
+  },
+  "gates": {
+    "leaseBoundManagedCredentialHandoff": "PASS",
+    "cefCredentialLifecycle": "INCONCLUSIVE",
+    "wfpPolicyInstallation": "NOT_RUN",
+    "wfpFilterOwnership": "NOT_RUN",
+    "twoVmPositiveTcpControl": "NOT_RUN",
+    "processAttributedNegativeTcpControl": "NOT_RUN",
+    "independentWfpDecisionEvidence": "NOT_RUN",
+    "policyLossHandling": "BLOCKED",
+    "ipv4Containment": "NOT_RUN",
+    "ipv6Containment": "NOT_RUN",
+    "udpWebRtcContainment": "NOT_RUN",
+    "dnsProtection": "NOT_RUN",
+    "chromiumSubprocessCoverage": "BLOCKED",
+    "productionHttpHttpsRouting": "BLOCKED",
+    "productionSocks5Routing": "BLOCKED",
+    "productionProxyAuthentication": "BLOCKED",
+    "requiredProxyFailClosedStartup": "PASS",
+    "stoppedSocksFailureRootCause": "INCONCLUSIVE",
+    "chromiumRendererSandbox": "BLOCKED",
+    "supportedRuntimeAndEngine": "BLOCKED",
+    "windowsProductionAcceptance": "NOT_RUN",
+    "productionRelease": "NO_GO"
+  }
+}

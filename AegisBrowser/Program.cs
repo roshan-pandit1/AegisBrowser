@@ -38,8 +38,11 @@ internal static class Program
             };
             // Do not pass application command-line arguments through to Chromium.
             settings.CommandLineArgsDisabled = true;
-            Cef.EnableWaitForBrowsersToClose();
-            initialized = Cef.Initialize(settings);
+            initialized = InitializeChromiumAfterPrivacyCheck(path, () =>
+            {
+                Cef.EnableWaitForBrowsersToClose();
+                return Cef.Initialize(settings);
+            });
             if (!initialized) throw new InvalidOperationException("Chromium initialization failed.");
             using var context = Cef.GetGlobalRequestContext();
             if (!context.RegisterSchemeHandlerFactory("https", "aegis-diagnostics.invalid", new DiagnosticsFactory()))
@@ -58,5 +61,13 @@ internal static class Program
             if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); }
             lease?.Dispose();
         }
+    }
+
+    // Validate persisted privacy policy before starting the Chromium process tree.
+    // MainForm validates it again when it constructs its live privacy session.
+    internal static bool InitializeChromiumAfterPrivacyCheck(string profilePath, Func<bool> initialize)
+    {
+        _ = new PrivacySettingsStore(profilePath, requireExistingDirectory: true).Load();
+        return initialize();
     }
 }
