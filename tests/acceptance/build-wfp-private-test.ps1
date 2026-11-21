@@ -1,0 +1,19 @@
+param([switch] $BuildOnly, [switch] $SelfTest)
+$ErrorActionPreference = 'Stop'
+if ($BuildOnly -eq $SelfTest) { throw 'Choose exactly one of BuildOnly or SelfTest.' }
+if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'MSVC cl.exe and the Windows SDK are required.' }
+$base = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+if ([string]::IsNullOrWhiteSpace($base)) { throw 'A temporary build directory is required.' }
+$build = Join-Path $base ('aegis-wfp-private-build-' + [guid]::NewGuid().ToString('N'))
+if (Test-Path -LiteralPath $build) { throw 'Synthetic build directory already exists.' }
+$null = New-Item -ItemType Directory -Path $build
+$source = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../containment/WfpPrivateTestBlock.cpp'))
+$exe = Join-Path $build 'WfpPrivateTestBlock.exe'
+$object = Join-Path $build 'WfpPrivateTestBlock.obj'
+& cl.exe /nologo /EHsc /W4 /std:c++17 /D_WIN32_WINNT=0x0A00 "/Fe:$exe" "/Fo:$object" $source
+if ($LASTEXITCODE -ne 0) { throw "Private WFP test helper failed to compile: $LASTEXITCODE" }
+Write-Output ("OBSERVED: test-only executable built at {0}" -f $exe)
+if ($SelfTest) {
+    & $exe --self-test
+    if ($LASTEXITCODE -ne 0) { throw "Private WFP synthetic self-test failed: $LASTEXITCODE" }
+}

@@ -44,9 +44,12 @@ jobs:
             if ($position -gt 0) { [Environment]::SetEnvironmentVariable($line.Substring(0, $position), $line.Substring($position + 1), 'Process') }
           }
           ./tests/acceptance/research-wfp-scoped-objects.ps1 -SelfTest
+          ./tests/acceptance/build-wfp-private-test.ps1 -SelfTest
+          ./tests/acceptance/test-wfp-decision-observer.ps1 -SelfTest
       - name: Validate synthetic cross-VM evidence without network access
         timeout-minutes: 2
         run: |
+          ./tests/acceptance/test-private-network-preflight.ps1
           ./tests/acceptance/test-private-network-chronology.ps1
           ./tests/acceptance/test-private-network-validation.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe
       - name: Browser storage, OAuth, tab and renderer tests
