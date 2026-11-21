@@ -90,7 +90,7 @@ static int SelfTest()
     event.header.ipVersion = FWP_IP_VERSION_V4; event.header.ipProtocol = IPPROTO_TCP;
     event.header.remoteAddrV4 = expected.remoteAddress; event.header.remotePort = expected.remotePort;
     event.header.timeStamp.dwLowDateTime = 15;
-    event.header.appId = blob; event.header.packageSid = sid;
+    event.header.appId = blob; event.header.packageSid = static_cast<SID*>(sid);
     bool valid = Matches(&event, expected);
     Observe(&expected, &event); Observe(&expected, &event);
     bool duplicateRecorded = expected.matches.load() == 2 && expected.firstMatchFileTime.load() == 15;
