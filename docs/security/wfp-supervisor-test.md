@@ -1,0 +1,21 @@
+# Retained-child WFP test supervisor
+
+**Experimental and not production containment.** The supervisor and native child have not been exercised against an authorized two-VM network. A compiled binary or synthetic self-test is not a packet-enforcement result. Production required-proxy startup remains blocked.
+
+The same fixed native executable acts as supervisor and synthetic client. The supervisor holds its image and ancestor handles against replacement, verifies its x64 PE header and an operator-supplied SHA-256, creates a fresh AppContainer, then creates the client suspended in a single-process kill-on-close job. The caller must independently review the build and authenticate the hash: supplying a hash is an operator assertion, not proof of provenance. It verifies the retained process handle, creation time, image, package SID and exactly one enabled private-network capability. It writes and flushes a unique recovery ledger **before** adding any WFP object.
+
+The supervisor installs a test-owned persistent provider, sublayer and block filter for that package SID, a single canonical RFC1918 IPv4 destination, TCP and one port. It reads back the objects, arms a bounded read-only WFP event subscription, rechecks the filter and process, then resumes. If event collection is not already enabled or any prerequisite fails, the child is not intentionally resumed. The client independently attempts exact filter/provider/sublayer readback before creating a socket; BFE may deny that read, in which case no traffic is attempted. The implementation does not modify WFP event collection. A matching event is still **INCONCLUSIVE** about PID-to-flow attribution and packet enforcement.
+
+Policy deletion requires the retained child handle to be signaled and its job to report zero active processes; the transaction revalidates exact policy ownership and scope before deleting the test-owned keys. If child termination or cleanup cannot be confirmed, it retains the persistent objects and local ledger. Do not delete unrelated WFP objects or reuse a VM with unverified cleanup. The ledger contains the test endpoint, package SID, process creation time, image hash and object GUIDs; keep it private. Its hash and review status are operator-supplied, not independent build attestation.
+
+Persistence is used only to avoid intentionally deleting the filter as a consequence of session closure while the child might remain alive. It does **not** establish a fail-closed crash, BFE restart, reboot or boot-time guarantee: the test provider has no auto-start service and its filters can be disabled when BFE starts. Periodic observation, job-object termination and this test fixture do not close that gap. Provider/filter arbitration and any packet decision must be independently validated. Do not use this component for Chromium or a real profile.
+
+On a separately authorized disposable native Windows x64 VM, an operator can build in an x64 Visual Studio developer shell with `./tests/acceptance/build-wfp-supervisor.ps1 -BuildOnly`. `-SelfTest` compiles and runs only in-memory scope and sequencing checks; it creates no process, policy or socket. No build wrapper invokes the privileged mode.
+
+Only after independently verifying the isolated topology, a permitted receiver, reviewed executable/hash and administrator authorization, set `AEGIS_DISPOSABLE_VM_NETWORK_TEST=I_UNDERSTAND` and invoke the printed executable path with:
+
+```powershell
+& $testExe --execute $approvedPrivateIPv4 $approvedTcpPort $fresh32LowercaseHexNonce $reviewedSha256 --acknowledge-persistent-disposable-test-policy
+```
+
+Run the existing ordinary and AppContainer positive controls first and retain independent VM B observations. Never substitute the illustrated addresses from prior discussions as approved assignments. This supervisor emits `FAILED` on a client-confirmed send to the blocked endpoint and otherwise emits `INCONCLUSIVE`; neither an absent packet nor filter readback is a verified block. If event collection, child identity, BFE access, observer teardown, child exit, job emptiness or cleanup is unavailable, stop and retain the evidence/VM for operator review. The isolated VMs have not yet been provisioned or authorized.

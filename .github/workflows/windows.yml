@@ -46,6 +46,7 @@ jobs:
           ./tests/acceptance/research-wfp-scoped-objects.ps1 -SelfTest
           ./tests/acceptance/build-wfp-private-test.ps1 -SelfTest
           ./tests/acceptance/test-wfp-decision-observer.ps1 -SelfTest
+          ./tests/acceptance/build-wfp-supervisor.ps1 -SelfTest
       - name: Validate synthetic cross-VM evidence without network access
         timeout-minutes: 2
         run: |
