@@ -18,3 +18,5 @@ Microsoft lists .NET 8 as out of support and .NET 10 as LTS. SDK `10.0.404` incl
 | Artifact identity | Current payload verifies round-trip and smoke | Verify bundled runtime and x64 PE identities on the published and extracted files. |
 
 The local development host is Windows ARM64 without the SDK; native Windows x64 tests and final release acceptance must be performed by the Windows workflows. A green managed restore/build is not native CEF evidence. Source and runtime migration tests are recorded independently from final artifact/manual acceptance.
+
+The first [focused candidate](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44935349262) restored but failed compilation with `WFO1000` on `MainForm.ViewportZoomTrace`. The diagnostic callback is not designer state, so the migration explicitly marks that property `DesignerSerializationVisibility.Hidden`; no analyzer or security check is suppressed. Subsequent gates must be run on the corrected commit.

@@ -29,6 +29,7 @@ public sealed class MainForm : Form
     private readonly Dictionary<ChromiumWebBrowser, ViewportZoomQuery> letterboxZoomQueries = new();
     private readonly Dictionary<ChromiumWebBrowser, (long Generation, double Zoom)> letterboxZoomConfirmations = new();
     private readonly Func<ChromiumWebBrowser, Task<double>> letterboxZoomQuery;
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Action<string>? ViewportZoomTrace { get; set; }
     private PrivacyForm? privacyWindow;
     private SearchSettings searchSettings = new();
