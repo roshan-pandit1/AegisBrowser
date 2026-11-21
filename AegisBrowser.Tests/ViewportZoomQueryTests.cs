@@ -89,6 +89,21 @@ internal static class ViewportZoomQueryTests
         Check(stale.Poll(() => Task.FromResult(4d)).Status == ViewportZoomQueryStatus.Started &&
             stale.Poll(() => Task.FromResult(0d)).Zoom == 4, "fresh post-navigation result");
 
+        var reset = new ViewportZoomQuery(clock);
+        var beforeReset = Pending();
+        var first = reset.Poll(() => beforeReset.Task);
+        reset.Invalidate();
+        var resetGeneration = reset.Generation;
+        beforeReset.SetResult(1);
+        var staleReset = reset.Poll(() => Task.FromResult(0d));
+        Check(first.Generation < resetGeneration && staleReset.Status == ViewportZoomQueryStatus.Stale &&
+            staleReset.Generation == first.Generation, "pre-reset result retains its stale request generation");
+        var freshReset = reset.Poll(() => Task.FromResult(0d));
+        var confirmedReset = reset.Poll(() => Task.FromResult(1d));
+        Check(freshReset.Status == ViewportZoomQueryStatus.Started && freshReset.Generation == resetGeneration &&
+            confirmedReset.Status == ViewportZoomQueryStatus.Succeeded && confirmedReset.Generation == resetGeneration && confirmedReset.Zoom == 0,
+            "post-reset result confirms its current generation and zoom");
+
         var switched = new ViewportZoomQuery(clock);
         var oldSelection = Pending();
         switched.Poll(() => oldSelection.Task);

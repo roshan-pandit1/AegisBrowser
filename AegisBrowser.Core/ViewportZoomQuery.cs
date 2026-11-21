@@ -5,7 +5,7 @@ public enum ViewportZoomQueryStatus
     Started, Pending, Succeeded, Failed, RetryDelay, Stale, TimedOut, Blocked
 }
 
-public readonly record struct ViewportZoomQueryResult(ViewportZoomQueryStatus Status, double Zoom = 0, bool Warn = false);
+public readonly record struct ViewportZoomQueryResult(ViewportZoomQueryStatus Status, double Zoom = 0, bool Warn = false, long Generation = 0);
 
 /// <summary>
 /// UI-thread-owned state for one browser's zoom query. A CEF request cannot be
@@ -24,8 +24,11 @@ public sealed class ViewportZoomQuery(TimeProvider? clock = null)
     private bool timedOut;
     private bool stale;
     private bool warned;
+    private long generation;
+    private long pendingGeneration;
 
     public bool HasPendingRequest => pending is not null;
+    public long Generation => generation;
 
     // Retirement discards the application's task reference. It does not
     // assert that the underlying CEF operation was cancelled.
@@ -33,7 +36,7 @@ public sealed class ViewportZoomQuery(TimeProvider? clock = null)
 
     // Navigation invalidates a still-pending measurement. Do not replace it:
     // CEF can still complete it and cannot be assumed to support cancellation.
-    public void Invalidate() { if (pending is not null) stale = true; }
+    public void Invalidate() { generation++; if (pending is not null) stale = true; }
 
     // This can run for background tabs without starting a new CEF request.
     // A completion first observed after the deadline is conservatively stale:
@@ -69,26 +72,27 @@ public sealed class ViewportZoomQuery(TimeProvider? clock = null)
             try
             {
                 pending = request() ?? throw new InvalidOperationException("Zoom request returned no task.");
+                pendingGeneration = generation;
                 started = clock.GetTimestamp();
                 // Observe a fault even if timeout or tab closure removes our reference.
                 _ = pending.ContinueWith(t => { _ = t.Exception; }, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
                     TaskScheduler.Default);
-                return new(ViewportZoomQueryStatus.Started);
+                return new(ViewportZoomQueryStatus.Started, Generation: pendingGeneration);
             }
             catch (Exception) { return Failure(); }
         }
 
-        if (!pending.IsCompleted) return new(ViewportZoomQueryStatus.Pending);
+        if (!pending.IsCompleted) return new(ViewportZoomQueryStatus.Pending, Generation: pendingGeneration);
 
         var completed = pending;
         pending = null;
-        if (stale) { stale = false; return new(ViewportZoomQueryStatus.Stale); }
+        if (stale) { stale = false; return new(ViewportZoomQueryStatus.Stale, Generation: pendingGeneration); }
         if (!completed.IsCompletedSuccessfully) return Failure();
         var zoom = completed.GetAwaiter().GetResult(); // Already completed successfully; never blocks.
         if (!double.IsFinite(zoom)) return Failure();
         warned = false;
-        return new(ViewportZoomQueryStatus.Succeeded, zoom);
+        return new(ViewportZoomQueryStatus.Succeeded, zoom, Generation: pendingGeneration);
     }
 
     private ViewportZoomQueryResult Failure()

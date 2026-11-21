@@ -27,7 +27,9 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer letterboxZoomTimer = new() { Interval = 250 };
     private readonly Dictionary<ChromiumWebBrowser, double> letterboxZoomLevels = new();
     private readonly Dictionary<ChromiumWebBrowser, ViewportZoomQuery> letterboxZoomQueries = new();
+    private readonly Dictionary<ChromiumWebBrowser, (long Generation, double Zoom)> letterboxZoomConfirmations = new();
     private readonly Func<ChromiumWebBrowser, Task<double>> letterboxZoomQuery;
+    internal Action<string>? ViewportZoomTrace { get; set; }
     private PrivacyForm? privacyWindow;
     private SearchSettings searchSettings = new();
     private readonly SearchSettingsStore? searchStore;
@@ -162,6 +164,7 @@ public sealed class MainForm : Form
             letterboxZoomTimer.Dispose();
             foreach (var query in letterboxZoomQueries.Values) query.Retire();
             letterboxZoomQueries.Clear();
+            letterboxZoomConfirmations.Clear();
         };
         Shown += (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl);
         FormClosing += (_, e) =>
@@ -173,6 +176,7 @@ public sealed class MainForm : Form
             letterboxZoomTimer.Stop();
             foreach (var query in letterboxZoomQueries.Values) query.Retire();
             letterboxZoomQueries.Clear();
+            letterboxZoomConfirmations.Clear();
             foreach (var page in tabs.TabPages.Cast<TabPage>().Concat(retiring).Distinct().ToArray())
             {
                 retiring.Add(page);
@@ -233,7 +237,27 @@ public sealed class MainForm : Form
         var rect = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), zoom);
         var bounds = new Rectangle(area.X + rect.X, area.Y + rect.Y, rect.Width, rect.Height);
         if (browser.Bounds != bounds) browser.Bounds = bounds;
+        ViewportZoomTrace?.Invoke($"layout zoom={zoom:R} available={area} bounds={browser.Bounds}");
     }
+
+    // The CEF binding has no zoom-changed notification. This explicit
+    // invalidation is used when a caller controls and has confirmed a zoom
+    // change; ordinary Chromium-initiated changes remain eventually polled.
+    internal long InvalidateLetterboxZoom(ChromiumWebBrowser browser)
+    {
+        if (!letterboxingAtStartup || closing || IsDisposed || browser != Current || browser.IsDisposed)
+            throw new InvalidOperationException("A selected live letterboxed browser is required.");
+        if (!letterboxZoomQueries.TryGetValue(browser, out var query))
+            letterboxZoomQueries[browser] = query = new ViewportZoomQuery();
+        query.Invalidate();
+        letterboxZoomConfirmations.Remove(browser);
+        ViewportZoomTrace?.Invoke($"invalidate generation={query.Generation}");
+        return query.Generation;
+    }
+
+    internal bool IsLetterboxZoomConfirmed(ChromiumWebBrowser browser, long generation, double zoom) =>
+        letterboxZoomConfirmations.TryGetValue(browser, out var value) &&
+        value.Generation >= generation && value.Zoom == zoom;
 
     private void RefreshLetterboxZoom()
     {
@@ -254,16 +278,16 @@ public sealed class MainForm : Form
             // GetBrowserHost returns a browser-owned wrapper; it must not be
             // disposed by this poller. Poll never waits on an incomplete task.
             var result = query.Poll(() => letterboxZoomQuery(browser));
+            if (result.Status != ViewportZoomQueryStatus.Pending)
+                ViewportZoomTrace?.Invoke($"poll status={result.Status} requestGeneration={result.Generation} currentGeneration={query.Generation} zoom={result.Zoom:R}");
             if (result.Warn) status.Text = result.Status is ViewportZoomQueryStatus.TimedOut or ViewportZoomQueryStatus.Blocked
                 ? "Page zoom query timed out; close and reopen this tab to restore letterboxing."
                 : "Could not read page zoom; letterboxing will retry.";
             if (result.Status != ViewportZoomQueryStatus.Succeeded) return;
             var zoom = result.Zoom;
-            if (!letterboxZoomLevels.TryGetValue(browser, out var previous) || previous != zoom)
-            {
-                letterboxZoomLevels[browser] = zoom;
-                ResizeLetterboxedTab(page, browser);
-            }
+            letterboxZoomLevels[browser] = zoom;
+            ResizeLetterboxedTab(page, browser);
+            letterboxZoomConfirmations[browser] = (result.Generation, zoom);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or TaskCanceledException)
         {
@@ -312,6 +336,7 @@ public sealed class MainForm : Form
             page.Disposed += (_, _) =>
             {
                 letterboxZoomLevels.Remove(browser);
+                letterboxZoomConfirmations.Remove(browser);
                 if (letterboxZoomQueries.Remove(browser, out var query)) query.Retire();
             };
         }
@@ -401,6 +426,7 @@ public sealed class MainForm : Form
         if (!retiring.Add(page)) return;
         if (letterboxZoomQueries.Remove(browser, out var query)) query.Retire();
         letterboxZoomLevels.Remove(browser);
+        letterboxZoomConfirmations.Remove(browser);
         ((SafePopups)browser.LifeSpanHandler).ClosePopups();
         // Keep the TabPage parent HWND alive until CEF reports DoClose readiness; disposing during creation can destroy a window CEF still uses.
         if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);

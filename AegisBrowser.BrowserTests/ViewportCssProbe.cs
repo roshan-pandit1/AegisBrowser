@@ -52,6 +52,7 @@ internal static partial class Program
                     if (phase == "viewport-write") await ExerciseUnreadablePrivacySettings(root);
                     if (phase == "viewport-write") await MeasureMainForm(disabledPath, false);
                     await MeasureMainForm(enabledPath, true);
+                    await ExerciseStaleZoomReset(enabledPath);
                     if (phase == "viewport-write") await ExerciseStalledZoomQuery(enabledPath);
                     completed = true;
                     Console.WriteLine($"PASS: {checks} CSS viewport checks ({phase})");
@@ -157,6 +158,7 @@ internal static partial class Program
     private static async Task MeasureMainForm(string profilePath, bool enabled)
     {
         var form = new MainForm("viewport-test", profilePath);
+        if (enabled) TraceViewportZoom(form, "main");
         try
         {
             form.Show();
@@ -329,6 +331,70 @@ internal static partial class Program
         await Js(browser, "document.documentElement.style.overflowX='';document.documentElement.style.overflowY='';'restored'");
     }
 
+    // Deliberately hold an old response across a real CEF zoom reset. This is
+    // a synthetic scheduling control around a real MainForm/Chromium host;
+    // it does not claim to reproduce the historical timing on its own.
+    private static async Task ExerciseStaleZoomReset(string profilePath)
+    {
+        var stale = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fresh = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var capture = false;
+        var requests = 0;
+        Task<double> Query(ChromiumWebBrowser browser)
+        {
+            if (!capture) return browser.GetBrowserHost().GetZoomLevelAsync();
+            requests++;
+            return requests switch { 1 => stale.Task, 2 => fresh.Task, _ => browser.GetBrowserHost().GetZoomLevelAsync() };
+        }
+
+        var form = new MainForm("viewport-reset-stale-query", profilePath, Query);
+        TraceViewportZoom(form, "controlled-stale");
+        try
+        {
+            form.Show();
+            var tabs = form.Controls.OfType<TabControl>().Single();
+            await Wait(() => tabs.TabCount == 1, "stale zoom regression initial tab");
+            var browser = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+            await Ready(browser);
+            await LoadReady(browser, Origin + "viewport-stale-reset");
+            browser.GetBrowserHost().SetZoomLevel(0);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5))) < 0.01,
+                "stale zoom regression initial zero");
+            var baseline = form.InvalidateLetterboxZoom(browser);
+            await Wait(() => form.IsLetterboxZoomConfirmed(browser, baseline, 0), "initial zero layout confirmed");
+            Rectangle ExpectedZero()
+            {
+                var area = tabs.SelectedTab!.DisplayRectangle;
+                var target = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), 0);
+                return new Rectangle(area.X + target.X, area.Y + target.Y, target.Width, target.Height);
+            }
+            Check(browser.Bounds == ExpectedZero(), "confirmed zero zoom starts with exact centered layout");
+            capture = true;
+            await Wait(() => requests == 1, "old zoom query held before reset");
+            browser.GetBrowserHost().SetZoomLevel(1);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5)) - 1) < 0.01,
+                "stale zoom regression zoom changed");
+            browser.GetBrowserHost().SetZoomLevel(0);
+            await WaitForAsync(async () => Math.Abs(await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5))) < 0.01,
+                "stale zoom regression zoom reset");
+            var reset = form.InvalidateLetterboxZoom(browser);
+            stale.SetResult(1);
+            await Wait(() => requests >= 2, "stale completion retired and fresh zoom requested");
+            Check(browser.Bounds == ExpectedZero() && !form.IsLetterboxZoomConfirmed(browser, reset, 1),
+                "old zoom completion cannot restore pre-reset geometry");
+            fresh.SetResult(0);
+            await Wait(() => form.IsLetterboxZoomConfirmed(browser, reset, 0), "post-reset zoom generation confirmed");
+            Check(browser.Bounds == ExpectedZero(), "confirmed post-reset zoom retains exact centered geometry");
+        }
+        finally
+        {
+            // Do not leave a synthetic CEF query pending during browser close.
+            stale.TrySetResult(1);
+            fresh.TrySetResult(0);
+            if (!form.IsDisposed) { form.Close(); await Wait(() => form.IsDisposed, "stale-query form native close"); }
+        }
+    }
+
     private static async Task ExerciseStalledZoomQuery(string profilePath)
     {
         var never = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -399,16 +465,34 @@ internal static partial class Program
                 "renderer viewport resize event");
     }
 
+    private static void TraceViewportZoom(MainForm form, string fixture)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var sequence = 0;
+        form.ViewportZoomTrace = value =>
+        {
+            if (++sequence <= 1000)
+                Console.WriteLine($"P4LB_ZOOM_TRACE: fixture={fixture} sequence={sequence} elapsedMs={watch.ElapsedMilliseconds} {value}");
+        };
+    }
+
     private static async Task ReportViewport(MainForm form, TabControl tabs, ChromiumWebBrowser browser, bool enabled, string scenario)
     {
         if (enabled)
         {
+            // The controlled test changes CEF zoom directly. The form cannot
+            // observe that API call, so invalidate measurements requested
+            // before the change and wait for a current-generation result.
+            var currentZoom = await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            var generation = form.InvalidateLetterboxZoom(browser);
+            Console.WriteLine($"P4LB_ZOOM_ASSERTION: scenario={scenario} resetGeneration={generation} actualZoom={currentZoom:R}");
             await WaitForAsync(async () =>
             {
                 var area = tabs.SelectedTab!.DisplayRectangle;
                 var level = await browser.GetBrowserHost().GetZoomLevelAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 var target = ViewportLetterboxing.Calculate(Math.Max(0, area.Width), Math.Max(0, area.Height), level);
-                return browser.Bounds == new Rectangle(area.X + target.X, area.Y + target.Y, target.Width, target.Height);
+                return form.IsLetterboxZoomConfirmed(browser, generation, level) &&
+                    browser.Bounds == new Rectangle(area.X + target.X, area.Y + target.Y, target.Width, target.Height);
             }, "zoom-aware layout " + scenario);
         }
         const string script = "JSON.stringify({innerWidth:window.innerWidth,innerHeight:window.innerHeight,clientWidth:document.documentElement.clientWidth,clientHeight:document.documentElement.clientHeight,dpr:window.devicePixelRatio,outerWidth:window.outerWidth,outerHeight:window.outerHeight,screenWidth:screen.width,screenHeight:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight,visualWidth:window.visualViewport?.width??null,visualHeight:window.visualViewport?.height??null})";
@@ -432,9 +516,12 @@ internal static partial class Program
         Check(responsive == "True", "controlled responsive layout matches viewport (" + scenario + ")");
         Check(width > 0 && height > 0 && browser.Width > 0 && browser.Height > 0,
             "active viewport remains nonzero (" + scenario + ")");
+        var zoom = await browser.GetBrowserHost().GetZoomLevelAsync();
+        // Read bounds after the asynchronous zoom query, without yielding the
+        // UI thread between geometry capture and the equality assertion.
         var bounds = browser.Bounds;
         var available = tabs.SelectedTab!.DisplayRectangle;
-        var zoom = await browser.GetBrowserHost().GetZoomLevelAsync();
+        Console.WriteLine($"P4LB_ZOOM_ASSERTION: scenario={scenario} actualZoom={zoom:R} bounds={bounds} available={available}");
         var factor = Math.Pow(1.2, zoom);
         if (enabled)
         {
