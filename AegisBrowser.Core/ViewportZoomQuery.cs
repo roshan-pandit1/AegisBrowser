@@ -29,6 +29,7 @@ public sealed class ViewportZoomQuery(TimeProvider? clock = null)
 
     public bool HasPendingRequest => pending is not null;
     public long Generation => generation;
+    public bool IsCurrentGeneration(long candidate) => candidate == generation;
 
     // Retirement discards the application's task reference. It does not
     // assert that the underlying CEF operation was cancelled.

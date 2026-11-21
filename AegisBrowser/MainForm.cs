@@ -257,6 +257,7 @@ public sealed class MainForm : Form
 
     internal bool IsLetterboxZoomConfirmed(ChromiumWebBrowser browser, long generation, double zoom) =>
         letterboxZoomConfirmations.TryGetValue(browser, out var value) &&
+        letterboxZoomQueries.TryGetValue(browser, out var query) && query.IsCurrentGeneration(value.Generation) &&
         value.Generation >= generation && value.Zoom == zoom;
 
     private void RefreshLetterboxZoom()

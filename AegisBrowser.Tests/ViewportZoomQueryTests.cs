@@ -103,6 +103,9 @@ internal static class ViewportZoomQueryTests
         Check(freshReset.Status == ViewportZoomQueryStatus.Started && freshReset.Generation == resetGeneration &&
             confirmedReset.Status == ViewportZoomQueryStatus.Succeeded && confirmedReset.Generation == resetGeneration && confirmedReset.Zoom == 0,
             "post-reset result confirms its current generation and zoom");
+        Check(reset.IsCurrentGeneration(confirmedReset.Generation), "fresh confirmation belongs to current generation");
+        reset.Invalidate(); // e.g. a later navigation or tab switch
+        Check(!reset.IsCurrentGeneration(confirmedReset.Generation), "later invalidation revokes the old confirmation");
 
         var switched = new ViewportZoomQuery(clock);
         var oldSelection = Pending();
