@@ -4,7 +4,7 @@ A Windows x64 browser for ordinary browsing and local privacy diagnostics. Inclu
 
 ## Build on Windows
 
-Install Windows 10/11 x64, the .NET 8 SDK and the Microsoft Visual C++ 2015–2022 x64 Redistributable. Internet access is required for NuGet restore. Visual Studio 2022 with the .NET desktop workload is optional.
+Install Windows 10/11 x64, the .NET 10 SDK pinned in `global.json`, and the Microsoft Visual C++ 2015–2022 x64 Redistributable. Internet access is required for NuGet restore. Use an IDE that supports the pinned SDK, or build with the command-line SDK.
 
 Run from the repository root:
 
@@ -18,7 +18,7 @@ dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-con
 .\artifacts\win-x64\AegisBrowser.exe --profile=Personal
 ```
 
-Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore is pinned to 154.0.340; the original Framework package and wildcard reference have been replaced. Update the pinned engine regularly after reviewing upstream security fixes and compatibility changes. The Windows GitHub Actions workflow is configured to use `windows-latest` and `actions/setup-dotnet@v4` with SDK `8.0.x`. It explicitly restores and builds for `win-x64`, runs the console tests as Windows x64, publishes the same self-contained Release build without rebuilding, checks the native payload and bundled .NET runtime, and uploads the entire publish directory as `AegisBrowser-win-x64`. Later steps run only after earlier steps succeed. The workflow also runs actual CEF browser integration tests and a limited published-app window smoke test; these do not replace full manual GUI acceptance. The root `global.json` selects SDK 8.0.4xx (latest installed patch), so newer preinstalled major SDKs do not take precedence. See [actual verification status](../BUILD-STATUS.md).
+Distribute the entire publish directory, including the subprocess, native DLLs, locale and resource files. Trimming and single-file publishing are disabled. CefSharp.WinForms.NETCore remains pinned to 154.0.340. The Windows workflow uses `windows-latest` and the exact SDK `10.0.404` pinned in `global.json`, builds and publishes self-contained `win-x64`, and checks the native payload and bundled runtime. Actual CEF integration and published-app smoke tests are required; compilation alone does not establish native compatibility. Manual acceptance and the separately documented sandbox and engine security gates remain required. See [migration preflight](../docs/net10-migration.md) and historical [build status](../BUILD-STATUS.md).
 
 ## Profiles
 

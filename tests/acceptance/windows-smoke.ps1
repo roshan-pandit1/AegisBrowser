@@ -86,7 +86,7 @@ public static class AegisSmokeInput {
         }
         $httpsControl = Join-Path $env:RUNNER_TEMP ('aegis-rc1-https-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $httpsControl -ErrorAction Stop | Out-Null
-        $helperExe = (Resolve-Path './AegisBrowser.BrowserTests/bin/Release/net8.0-windows/win-x64/AegisBrowser.BrowserTests.exe').Path
+        $helperExe = (Resolve-Path './AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe').Path
         $helperOut = Join-Path $httpsControl 'helper.out.log'
         $helperErr = Join-Path $httpsControl 'helper.err.log'
         $httpsHelper = Start-Process -FilePath $helperExe -ArgumentList @('https-package-server', ('"' + $env:P403_PACKAGE_TRUST_DIR + '"'), ('"' + $httpsControl + '"')) -WindowStyle Hidden -RedirectStandardOutput $helperOut -RedirectStandardError $helperErr -PassThru
