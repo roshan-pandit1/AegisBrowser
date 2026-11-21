@@ -17,16 +17,29 @@ internal sealed class ProxyAuthenticationSession : IDisposable
 {
     private readonly object sync = new();
     private readonly ProxyDraft settings;
+    private readonly WeakReference<ProfileLease>? lease;
+    private IDisposable? revocation;
     private ProxyCredentials? credentials;
     private bool credentialIssued;
 
-    private ProxyAuthenticationSession(ProxyDraft settings, ProxyCredentials credentials)
+    private ProxyAuthenticationSession(ProxyDraft settings, ProxyCredentials credentials, ProfileLease? lease = null)
     {
         ProxyValidation.Validate(settings);
         if (settings.Protocol != ProxyProtocol.Http || !settings.AuthenticationRequired)
             throw new NotSupportedException("Only scoped Basic HTTP proxy authentication is supported in this experiment.");
         this.settings = settings;
         this.credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
+        if (lease is not null)
+        {
+            this.lease = new WeakReference<ProfileLease>(lease);
+            // The lease may revoke the session, but must not own it or be kept
+            // alive solely by it. A live owner remains responsible for disposal.
+            var weakSession = new WeakReference<ProxyAuthenticationSession>(this);
+            revocation = lease.RegisterRevocation(() =>
+            {
+                if (weakSession.TryGetTarget(out var session)) session.Dispose();
+            });
+        }
     }
 
     // The repository verifies that this lease belongs to the selected profile.
@@ -46,7 +59,7 @@ internal sealed class ProxyAuthenticationSession : IDisposable
         ProxyValidation.Validate(draft);
         if (draft.Protocol != ProxyProtocol.Http || !draft.AuthenticationRequired || draft.CredentialId is not Guid credentialId)
             throw new NotSupportedException("This profile does not have supported HTTP proxy authentication.");
-        return new ProxyAuthenticationSession(draft, vault.Read(profile.Id, credentialId));
+        return new ProxyAuthenticationSession(draft, vault.Read(profile.Id, credentialId), lease);
     }
 
     // Used only by the disposable CEF fixture with synthetic credentials.
@@ -69,12 +82,22 @@ internal sealed class ProxyAuthenticationSession : IDisposable
                     callback.Cancel();
                     return true;
                 }
-                // Consume this isolated attempt before invoking CEF. A
-                // disposed callback or exception cannot renew the lease.
-                var oneShot = credentials!;
-                credentials = null;
-                credentialIssued = true;
-                callback.Continue(oneShot.Username, oneShot.Password);
+                void ContinueOnce()
+                {
+                    var oneShot = credentials!;
+                    credentials = null;
+                    credentialIssued = true;
+                    callback.Continue(oneShot.Username, oneShot.Password);
+                }
+                // Keep the lease alive through the synchronous handoff and
+                // serialize with lease release. CEF may still queue or cache
+                // credentials after Continue; this cannot revoke that work.
+                if (lease is null) ContinueOnce();
+                else if (!lease.TryGetTarget(out var owner) || !owner.TryInvokeWhileHeld(ContinueOnce))
+                {
+                    credentials = null;
+                    callback.Cancel();
+                }
                 return true;
             }
         }
@@ -91,7 +114,14 @@ internal sealed class ProxyAuthenticationSession : IDisposable
 
     public void Dispose()
     {
-        lock (sync) credentials = null;
+        IDisposable? registration;
+        lock (sync)
+        {
+            credentials = null;
+            registration = revocation;
+            revocation = null;
+        }
+        registration?.Dispose();
         // ProxyCredentials contains managed strings: dropping references does
         // not guarantee the runtime has erased existing copies from memory.
     }

@@ -318,16 +318,188 @@ internal static partial class Program
         try { using var _ = ProxyAuthenticationSession.FromProfile(profile, lease, repository, vault); }
         catch (IOException) { missing = true; }
         Check(missing, "proxy auth session fails when the profile credential is missing");
+        ExerciseLeaseBoundProxyAuth(profiles, repository, vault, profileRoot, draft);
+    }
+
+    private static void ExerciseLeaseBoundProxyAuth(ProfileRepository profiles, ProxyRepository repository,
+        ProxyCredentialVault vault, string root, ProxyDraft draft)
+    {
+        (ProfileLease Lease, ProxyAuthenticationSession Session) Create(string name)
+        {
+            var profile = profiles.Create(name);
+            var profileLease = new ProfileLease(BrowserPolicy.ProfilePath(root, profile.Slug));
+            try
+            {
+                var id = vault.Store(profile.Id, new ProxyCredentials(FixtureUser, FixturePassword));
+                repository.Save(profile, profileLease, draft with { CredentialId = id }, 0);
+                return (profileLease, ProxyAuthenticationSession.FromProfile(profile, profileLease, repository, vault));
+            }
+            catch { profileLease.Dispose(); throw; }
+        }
+
+        var before = Create("lease-before");
+        before.Lease.Dispose();
+        using (before.Session)
+        {
+            using (var reopened = new ProfileLease(BrowserPolicy.ProfilePath(root, "lease-before")))
+                Check(true, "an idle revoked session does not retain the OS profile lock");
+            var denied = new SyntheticAuthCallback();
+            before.Session.Respond(true, "127.0.0.1", 8080, "basic", denied);
+            Check(denied.Cancelled && !denied.CorrectCredentials && before.Session.Issued == 0,
+                "released profile lease denies the first authentication challenge");
+        }
+
+        var preHandoff = Create("lease-before-handoff");
+        using (preHandoff.Session)
+        using (var entered = new ManualResetEventSlim())
+        using (var unblock = new ManualResetEventSlim())
+        {
+            var callback = new SyntheticAuthCallback(onIsDisposedCheck: () =>
+            {
+                entered.Set();
+                if (!unblock.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Pre-handoff barrier timed out.");
+            });
+            var operation = Task.Run(() => preHandoff.Session.Respond(true, "127.0.0.1", 8080, "basic", callback));
+            if (!entered.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Pre-handoff callback did not start.");
+            var release = Task.Run(preHandoff.Lease.Dispose);
+            try
+            {
+                // The callback is paused before acquiring the lease gate. Observe
+                // actual OS lock release before allowing the handoff to proceed.
+                var lockReleased = SpinWait.SpinUntil(() =>
+                {
+                    try
+                    {
+                        using var probe = new ProfileLease(BrowserPolicy.ProfilePath(root, "lease-before-handoff"));
+                        return true;
+                    }
+                    catch (IOException) { return false; }
+                }, TimeSpan.FromSeconds(5));
+                Check(lockReleased, "lease lock can be released before a paused callback enters the handoff");
+            }
+            finally { unblock.Set(); }
+            if (!Task.WaitAll([operation, release], TimeSpan.FromSeconds(10))) throw new TimeoutException("Pre-handoff shutdown did not finish.");
+            Check(callback.Cancelled && !callback.CorrectCredentials && preHandoff.Session.Issued == 0,
+                "a callback paused before handoff cannot issue credentials after lease release");
+        }
+
+        var concurrent = Create("lease-concurrent");
+        using (concurrent.Session)
+        using (var entered = new ManualResetEventSlim())
+        using (var unblock = new ManualResetEventSlim())
+        using (var closing = new ManualResetEventSlim())
+        using (var closed = new ManualResetEventSlim())
+        {
+            var callback = new SyntheticAuthCallback(onContinue: () =>
+            {
+                entered.Set();
+                if (!unblock.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Authentication barrier timed out.");
+            });
+            var operation = Task.Run(() => concurrent.Session.Respond(true, "127.0.0.1", 8080, "basic", callback));
+            if (!entered.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Authentication callback did not start.");
+            var release = Task.Run(() => { closing.Set(); concurrent.Lease.Dispose(); closed.Set(); });
+            try
+            {
+                if (!closing.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Lease disposal did not start.");
+                Check(!closed.Wait(TimeSpan.FromMilliseconds(200)), "lease release waits for an admitted credential handoff");
+            }
+            finally { unblock.Set(); }
+            if (!Task.WaitAll([operation, release], TimeSpan.FromSeconds(10))) throw new TimeoutException("Authentication shutdown did not finish.");
+            var late = new SyntheticAuthCallback();
+            concurrent.Session.Respond(true, "127.0.0.1", 8080, "basic", late);
+            Check(callback.CorrectCredentials && closed.IsSet && late.Cancelled && !late.CorrectCredentials,
+                "after lease disposal a consumed credential cannot be supplied again");
+        }
+
+        var sessionClose = Create("session-concurrent");
+        using (sessionClose.Lease)
+        using (var entered = new ManualResetEventSlim())
+        using (var unblock = new ManualResetEventSlim())
+        using (var closing = new ManualResetEventSlim())
+        using (var closed = new ManualResetEventSlim())
+        {
+            var callback = new SyntheticAuthCallback(onContinue: () =>
+            {
+                entered.Set();
+                if (!unblock.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Session close barrier timed out.");
+            });
+            var operation = Task.Run(() => sessionClose.Session.Respond(true, "127.0.0.1", 8080, "basic", callback));
+            if (!entered.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Session callback did not start.");
+            var close = Task.Run(() => { closing.Set(); sessionClose.Session.Dispose(); closed.Set(); });
+            try
+            {
+                if (!closing.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Session disposal did not start.");
+                Check(!closed.Wait(TimeSpan.FromMilliseconds(200)), "session disposal waits for an admitted handoff");
+            }
+            finally { unblock.Set(); }
+            if (!Task.WaitAll([operation, close], TimeSpan.FromSeconds(10))) throw new TimeoutException("Session disposal did not finish.");
+            var late = new SyntheticAuthCallback();
+            sessionClose.Session.Respond(true, "127.0.0.1", 8080, "basic", late);
+            Check(closed.IsSet && late.Cancelled && !late.CorrectCredentials,
+                "a disposed session cannot issue credentials after a concurrent handoff");
+        }
+
+        var reentrant = Create("lease-reentrant");
+        using (reentrant.Session)
+        {
+            var callback = new SyntheticAuthCallback(onContinue: reentrant.Lease.Dispose);
+            reentrant.Session.Respond(true, "127.0.0.1", 8080, "basic", callback);
+            var late = new SyntheticAuthCallback();
+            reentrant.Session.Respond(true, "127.0.0.1", 8080, "basic", late);
+            Check(callback.CorrectCredentials && late.Cancelled && reentrant.Session.Issued == 1,
+                "reentrant lease disposal during an admitted handoff is safe and denies later challenges");
+        }
+
+        var shared = Create("lease-reentrant-shared");
+        using (shared.Session)
+        using (var otherSession = ProxyAuthenticationSession.FromProfile(
+            profiles.GetBySlug("lease-reentrant-shared")!, shared.Lease, repository, vault))
+        using (var firstEntered = new ManualResetEventSlim())
+        using (var secondEntered = new ManualResetEventSlim())
+        {
+            var first = new SyntheticAuthCallback(onContinue: () =>
+            {
+                firstEntered.Set();
+                if (!secondEntered.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Second session did not start.");
+                shared.Lease.Dispose();
+            });
+            var second = new SyntheticAuthCallback(onIsDisposedCheck: secondEntered.Set);
+            var firstTask = Task.Run(() => shared.Session.Respond(true, "127.0.0.1", 8080, "basic", first));
+            if (!firstEntered.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("First session did not start.");
+            var secondTask = Task.Run(() => otherSession.Respond(true, "127.0.0.1", 8080, "basic", second));
+            if (!Task.WaitAll([firstTask, secondTask], TimeSpan.FromSeconds(10)))
+                throw new TimeoutException("Reentrant multi-session lease release deadlocked.");
+            Check(first.CorrectCredentials && second.Cancelled && !second.CorrectCredentials,
+                "reentrant lease release does not deadlock or issue a waiting session's credential");
+        }
+
+        var one = Create("lease-independent-one");
+        var two = Create("lease-independent-two");
+        using (one.Session)
+        using (two.Session)
+        using (two.Lease)
+        {
+            one.Lease.Dispose();
+            var first = new SyntheticAuthCallback();
+            var second = new SyntheticAuthCallback();
+            one.Session.Respond(true, "127.0.0.1", 8080, "basic", first);
+            two.Session.Respond(true, "127.0.0.1", 8080, "basic", second);
+            Check(first.Cancelled && second.CorrectCredentials,
+                "revoking one profile lease does not revoke an independent profile session");
+        }
     }
 
     private sealed class SyntheticAuthCallback(bool throwOnContinue = false, bool throwOnDispose = false,
-        bool throwUnexpectedOnContinue = false) : IAuthCallback
+        bool throwUnexpectedOnContinue = false, Action? onContinue = null, Action? onIsDisposedCheck = null) : IAuthCallback
     {
-        public bool IsDisposed { get; private set; }
+        private bool isDisposed;
+        private Action? onCheck = onIsDisposedCheck;
+        public bool IsDisposed { get { Interlocked.Exchange(ref onCheck, null)?.Invoke(); return isDisposed; } }
         public bool Cancelled { get; private set; }
         public bool CorrectCredentials { get; private set; }
         public void Continue(string username, string password)
         {
+            onContinue?.Invoke();
             if (throwUnexpectedOnContinue) throw new InvalidOperationException("Synthetic continuation failure.");
             if (throwOnContinue) throw new ObjectDisposedException(nameof(SyntheticAuthCallback));
             CorrectCredentials = username == FixtureUser && password == FixturePassword;
@@ -335,7 +507,7 @@ internal static partial class Program
         public void Cancel() => Cancelled = true;
         public void Dispose()
         {
-            IsDisposed = true;
+            isDisposed = true;
             if (throwOnDispose) throw new ObjectDisposedException(nameof(SyntheticAuthCallback));
         }
     }
