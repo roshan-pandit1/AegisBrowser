@@ -72,4 +72,42 @@ $checks++; Write-Output 'PASS: local time kind rejected'
 $roundtrip = (@{ observedUtc = $now.UtcDateTime.ToString('O') } | ConvertTo-Json -Compress | ConvertFrom-Json)
 if ((ConvertTo-EvidenceUtcInstant $roundtrip.observedUtc) -ne $now) { throw 'FAIL: UTC Z receiver JSON round trip' }
 $checks++; Write-Output 'PASS: UTC Z receiver JSON round trip'
+function Test-ClientRecord([string] $Name, $PidValue, [bool] $ShouldPass, [string] $Change = '') {
+    $record = [pscustomobject]@{
+        formatVersion = 2; runId = $runId.ToString('N'); overallStatus = 'INCONCLUSIVE'; stage = 'Ordinary';
+        transactionId = $nonce.ToString('N'); receiverAddress = '10.9.8.2'; receiverPort = 47123;
+        clientAddress = '10.9.8.1'; processId = $PidValue; exitCode = 0; timedOut = $false; clientResult = 'sent';
+        receiverObservation = 'not-evaluated'; processAttribution = 'unverified'; wfpDecision = 'not-observed'
+    }
+    switch ($Change) {
+        'missingPid' { $record.PSObject.Properties.Remove('processId') }
+        'wrongRun' { $record.runId = '00000000000000000000000000000000' }
+        'arrayStatus' { $record.overallStatus = @('INCONCLUSIVE') }
+        'wrongAttribution' { $record.processAttribution = 'verified' }
+        'wrongDecision' { $record.wfpDecision = 'allowed' }
+        'timeout' { $record.timedOut = $true }
+    }
+    $accepted = $false
+    try {
+        Assert-OrdinaryClientEvidence -Record $record -RunId $runId -Nonce $nonce `
+            -ReceiverAddress '10.9.8.2' -ClientAddress '10.9.8.1' -Port 47123
+        $accepted = $true
+    } catch {
+        if ($_.Exception.Message -ne 'Ordinary client did not complete successfully for this run.') { throw }
+    }
+    if ($accepted -ne $ShouldPass) { throw ('FAIL: ' + $Name) }
+    $script:checks++; Write-Output ('PASS: ' + $Name)
+}
+Test-ClientRecord 'ordinary client record accepted' 1234 $true
+Test-ClientRecord 'zero process ID rejected' 0 $false
+Test-ClientRecord 'negative process ID rejected' -1 $false
+Test-ClientRecord 'missing process ID rejected' 1 $false 'missingPid'
+Test-ClientRecord 'string process ID rejected' '1234' $false
+Test-ClientRecord 'fractional process ID rejected' 1.5 $false
+Test-ClientRecord 'out-of-range process ID rejected' 4294967296L $false
+Test-ClientRecord 'wrong run rejected' 1234 $false 'wrongRun'
+Test-ClientRecord 'array status rejected' 1234 $false 'arrayStatus'
+Test-ClientRecord 'unverified attribution cannot be promoted' 1234 $false 'wrongAttribution'
+Test-ClientRecord 'unobserved WFP decision cannot be promoted' 1234 $false 'wrongDecision'
+Test-ClientRecord 'timed-out client rejected' 1234 $false 'timeout'
 Write-Output ("PASS: $checks synthetic chronology checks; no sockets, WFP or CEF tests executed.")

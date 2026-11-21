@@ -6,6 +6,36 @@ function Test-JsonInteger($Value) {
     return ($Value -is [int] -or $Value -is [long])
 }
 
+# This verifies the shape and run binding of the ordinary client record only.
+# A syntactically valid PID does not establish process attribution of a flow.
+function Assert-OrdinaryClientEvidence {
+    param(
+        [Parameter(Mandatory = $true)] $Record,
+        [Parameter(Mandatory = $true)][guid] $RunId,
+        [Parameter(Mandatory = $true)][guid] $Nonce,
+        [Parameter(Mandatory = $true)][string] $ReceiverAddress,
+        [Parameter(Mandatory = $true)][string] $ClientAddress,
+        [Parameter(Mandatory = $true)][int] $Port
+    )
+    if (-not (Test-JsonInteger $Record.formatVersion) -or $Record.formatVersion -ne 2 -or
+        $Record.runId -isnot [string] -or $Record.runId -cne $RunId.ToString('N') -or
+        $Record.overallStatus -isnot [string] -or $Record.overallStatus -cne 'INCONCLUSIVE' -or
+        $Record.stage -isnot [string] -or $Record.stage -cne 'Ordinary' -or
+        $Record.transactionId -isnot [string] -or $Record.transactionId -cne $Nonce.ToString('N') -or
+        $Record.receiverAddress -isnot [string] -or $Record.receiverAddress -cne $ReceiverAddress -or
+        -not (Test-JsonInteger $Record.receiverPort) -or $Record.receiverPort -ne $Port -or
+        $Record.clientAddress -isnot [string] -or $Record.clientAddress -cne $ClientAddress -or
+        -not (Test-JsonInteger $Record.processId) -or $Record.processId -le 0 -or $Record.processId -gt [uint32]::MaxValue -or
+        -not (Test-JsonInteger $Record.exitCode) -or $Record.exitCode -ne 0 -or
+        $Record.clientResult -isnot [string] -or $Record.clientResult -cne 'sent' -or
+        $Record.timedOut -isnot [bool] -or $Record.timedOut -or
+        $Record.receiverObservation -isnot [string] -or $Record.receiverObservation -cne 'not-evaluated' -or
+        $Record.processAttribution -isnot [string] -or $Record.processAttribution -cne 'unverified' -or
+        $Record.wfpDecision -isnot [string] -or $Record.wfpDecision -cne 'not-observed') {
+        throw 'Ordinary client did not complete successfully for this run.'
+    }
+}
+
 function ConvertTo-EvidenceUtcInstant($Value) {
     $instant = [DateTimeOffset]::MinValue
     if ($Value -is [string]) {

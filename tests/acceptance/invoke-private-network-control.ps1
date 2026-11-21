@@ -121,11 +121,8 @@ $ordinaryClient = Join-Path $root 'ordinary-client.json'
 Assert-NoLink $ordinaryClient
 if ((Get-Item -LiteralPath $ordinaryClient).Length -gt 4096) { throw 'Ordinary client evidence is oversized.' }
 $ordinaryRecord = Get-Content -LiteralPath $ordinaryClient -Raw | ConvertFrom-Json
-if (-not (Test-JsonInteger $ordinaryRecord.formatVersion) -or $ordinaryRecord.formatVersion -ne 2 -or $ordinaryRecord.runId -cne $id -or $ordinaryRecord.overallStatus -cne 'INCONCLUSIVE' -or $ordinaryRecord.stage -cne 'Ordinary' -or $ordinaryRecord.transactionId -cne $NormalNonce.ToString('N') -or
-    $ordinaryRecord.receiverAddress -cne $ReceiverAddress -or -not (Test-JsonInteger $ordinaryRecord.receiverPort) -or $ordinaryRecord.receiverPort -ne $Port -or $ordinaryRecord.clientAddress -cne $ClientAddress -or
-    -not (Test-JsonInteger $ordinaryRecord.exitCode) -or $ordinaryRecord.exitCode -ne 0 -or $ordinaryRecord.clientResult -cne 'sent' -or $ordinaryRecord.timedOut -isnot [bool] -or $ordinaryRecord.timedOut) {
-    throw 'Ordinary client did not complete successfully for this run.'
-}
+Assert-OrdinaryClientEvidence -Record $ordinaryRecord -RunId $RunId -Nonce $NormalNonce `
+    -ReceiverAddress $ReceiverAddress -ClientAddress $ClientAddress -Port $Port
 Assert-OrdinaryReceiverEvidence -Evidence $observation -RunId $RunId -Nonce $NormalNonce -ReceiverAddress $ReceiverAddress -ClientAddress $ClientAddress -Port $Port `
     -OrdinaryRecord $ordinaryRecord -NowUtc ([DateTimeOffset]::UtcNow) -MaxClockSkewSeconds $MaxClockSkewSeconds -MaxEvidenceAgeSeconds $MaxEvidenceAgeSeconds
 Write-NewFile (Join-Path $clientRoot 'private-network-control.txt') ($ReceiverAddress + "`n" + $Port + "`n" + $ContainedNonce.ToString('N') + "`n")
