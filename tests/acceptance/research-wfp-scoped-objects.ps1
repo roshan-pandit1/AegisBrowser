@@ -1,7 +1,7 @@
-param([switch] $RunOnDisposableRunner, [switch] $BuildOnly)
+param([switch] $RunOnDisposableRunner, [switch] $BuildOnly, [switch] $SelfTest)
 $ErrorActionPreference = 'Stop'
-if ($RunOnDisposableRunner -and $BuildOnly) { throw 'Choose either BuildOnly or RunOnDisposableRunner.' }
-if (-not $BuildOnly -and (-not $RunOnDisposableRunner -or $env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted')) {
+if (($RunOnDisposableRunner -and ($BuildOnly -or $SelfTest)) -or ($BuildOnly -and $SelfTest)) { throw 'Choose one execution mode.' }
+if (-not $BuildOnly -and -not $SelfTest -and (-not $RunOnDisposableRunner -or $env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted')) {
     throw 'Explicit opt-in on a disposable GitHub-hosted runner is required to install test filters.'
 }
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'MSVC cl.exe and Windows SDK are required; use a Visual Studio developer shell.' }
@@ -17,5 +17,10 @@ $object = Join-Path $build 'WfpScopedObjects.obj'
 if ($LASTEXITCODE -ne 0) { throw "WFP research fixture failed to compile: $LASTEXITCODE" }
 Write-Output ("OBSERVED: test-only executable built at {0}" -f $exe)
 if ($BuildOnly) { return }
+if ($SelfTest) {
+    & $exe --self-test
+    if ($LASTEXITCODE -ne 0) { throw "Synthetic WFP scope test failed: $LASTEXITCODE" }
+    return
+}
 & $exe --disposable-runner
 if ($LASTEXITCODE -ne 0) { throw "WFP research fixture failed or could not verify cleanup: $LASTEXITCODE" }
