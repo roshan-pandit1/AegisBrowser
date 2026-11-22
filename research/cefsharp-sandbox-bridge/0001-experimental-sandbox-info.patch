@@ -1,0 +1,115 @@
+--- a/CefSharp.Core.Runtime/Cef.h
++++ b/CefSharp.Core.Runtime/Cef.h
+@@ -309,6 +309,21 @@
+             /// <returns>true if successful; otherwise, false.</returns>
+             static bool Initialize(CefSettingsBase^ cefSettings, bool performDependencyCheck, IApp^ cefApp)
+             {
++                throw gcnew InvalidOperationException("Experimental sandbox fork: use InitializeSandboxed from the bootstrap host.");
++            }
++
++            // Must be called synchronously from the bootstrap-owned RunWinMain lifetime.
++            static bool InitializeSandboxed(CefSettingsBase^ cefSettings, bool performDependencyCheck, IApp^ cefApp, IntPtr instance, IntPtr sandboxInfo)
++            {
++                if (instance == IntPtr::Zero || sandboxInfo == IntPtr::Zero)
++                    throw gcnew ArgumentException("Bootstrap instance and sandbox information are required.");
++                if (performDependencyCheck)
++                    throw gcnew ArgumentException("Experimental host requires its own explicit dependency validation.");
++                if (!String::IsNullOrEmpty(cefSettings->BrowserSubprocessPath))
++                    throw gcnew ArgumentException("Sandbox host requires the same executable for subprocesses.");
++                if (!cefSettings->CommandLineArgsDisabled || cefSettings->CefCommandLineArgs->Count != 0)
++                    throw gcnew ArgumentException("Experimental host requires disabled external and custom CEF arguments.");
++                cefSettings->_cefSettings->no_sandbox = false;
+                 if (_initialized.HasValue)
+                 {
+                     // NOTE: Can only initialize Cef once, to make this explicitly clear throw exception on subsiquent attempts
+@@ -344,7 +359,7 @@
+                 {
+                     DependencyChecker::AssertAllDependenciesPresent(cefSettings->Locale, cefSettings->LocalesDirPath, cefSettings->ResourcesDirPath, false, cefSettings->BrowserSubprocessPath);
+                 }
+-                else if (!File::Exists(cefSettings->BrowserSubprocessPath))
++                else if (!String::IsNullOrEmpty(cefSettings->BrowserSubprocessPath) && !File::Exists(cefSettings->BrowserSubprocessPath))
+                 {
+                     throw gcnew FileNotFoundException("CefSettings.BrowserSubprocessPath not found.", cefSettings->BrowserSubprocessPath);
+                 }
+@@ -364,10 +379,10 @@
+                                                            cefSettings->CefCommandLineArgs,
+                                                            cefSettings->CefCustomSchemes,
+                                                            cefApp));
+-                CefMainArgs main_args;
++                CefMainArgs main_args((HINSTANCE)instance.ToPointer());
+                 CefSettings settings = *(cefSettings->_cefSettings);
+ 
+-                auto success = CefInitialize(main_args, settings, app.get(), nullptr);
++                auto success = CefInitialize(main_args, settings, app.get(), sandboxInfo.ToPointer());
+ 
+                 if (!success)
+                 {
+@@ -437,13 +452,15 @@
+             /// </summary>
+             static int ExecuteProcess()
+             {
+-                auto hInstance = Process::GetCurrentProcess()->Handle;
+-
+-                CefMainArgs cefMainArgs((HINSTANCE)hInstance.ToPointer());
+-                //TODO: Look at ways to expose an instance of CefApp
+-                //CefRefPtr<CefSharpApp> app(new CefSharpApp(nullptr, nullptr));
+-
+-                return CefExecuteProcess(cefMainArgs, nullptr, nullptr);
++                throw gcnew InvalidOperationException("Experimental sandbox fork: use ExecuteProcessSandboxed from the bootstrap host.");
++            }
++
++            static int ExecuteProcessSandboxed(IntPtr instance, IntPtr sandboxInfo)
++            {
++                if (instance == IntPtr::Zero || sandboxInfo == IntPtr::Zero)
++                    throw gcnew ArgumentException("Bootstrap instance and sandbox information are required.");
++                CefMainArgs cefMainArgs((HINSTANCE)instance.ToPointer());
++                return CefExecuteProcess(cefMainArgs, nullptr, sandboxInfo.ToPointer());
+             }
+ 
+             /// <summary>Add an entry to the cross-origin whitelist.</summary>
+--- a/CefSharp.BrowserSubprocess.Core/SubProcess.h
++++ b/CefSharp.BrowserSubprocess.Core/SubProcess.h
+@@ -50,11 +50,15 @@
+ 
+             int Run()
+             {
+-                auto hInstance = Process::GetCurrentProcess()->Handle;
++                throw gcnew InvalidOperationException("Experimental sandbox fork: use RunSandboxed from the bootstrap host.");
++            }
+ 
+-                CefMainArgs cefMainArgs((HINSTANCE)hInstance.ToPointer());
+-
+-                return CefExecuteProcess(cefMainArgs, (CefApp*)_cefApp.get(), nullptr);
++            int RunSandboxed(IntPtr instance, IntPtr sandboxInfo)
++            {
++                if (instance == IntPtr::Zero || sandboxInfo == IntPtr::Zero)
++                    throw gcnew ArgumentException("Bootstrap instance and sandbox information are required.");
++                CefMainArgs cefMainArgs((HINSTANCE)instance.ToPointer());
++                return CefExecuteProcess(cefMainArgs, (CefApp*)_cefApp.get(), sandboxInfo.ToPointer());
+             }
+ 
+             virtual void OnBrowserCreated(CefBrowserWrapper^ cefBrowserWrapper)
+@@ -69,15 +73,20 @@
+ 
+             static int ExecuteProcess(IEnumerable<String^>^ args)
+             {
+-                auto hInstance = Process::GetCurrentProcess()->Handle;
++                throw gcnew InvalidOperationException("Experimental sandbox fork: use ExecuteProcessSandboxed from the bootstrap host.");
++            }
+ 
+-                CefMainArgs cefMainArgs((HINSTANCE)hInstance.ToPointer());
++            static int ExecuteProcessSandboxed(IEnumerable<String^>^ args, IntPtr instance, IntPtr sandboxInfo)
++            {
++                if (instance == IntPtr::Zero || sandboxInfo == IntPtr::Zero)
++                    throw gcnew ArgumentException("Bootstrap instance and sandbox information are required.");
++                CefMainArgs cefMainArgs((HINSTANCE)instance.ToPointer());
+ 
+                 auto schemes = CefCustomScheme::ParseCommandLineArguments(args);
+ 
+                 CefRefPtr<CefApp> app = new SubProcessApp(schemes);
+ 
+-                return CefExecuteProcess(cefMainArgs, app, nullptr);
++                return CefExecuteProcess(cefMainArgs, app, sandboxInfo.ToPointer());
+             }
+         };
+     }
