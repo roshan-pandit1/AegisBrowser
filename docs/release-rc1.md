@@ -1,5 +1,7 @@
 # AegisBrowser RC1
 
+> **Historical document for RC1 commit `e610ac5b837093975e54457b0808f561046302cb`.** Its .NET 8 build instructions, observations and acceptance claims do not describe a later candidate. For the current package, read `VERSION.txt` and `PORTABLE-CANDIDATE.md` and consult the matching build's evidence.
+
 RC1 is a Windows x64, .NET 8 and CefSharp 154 release candidate. It is not a claim of anonymity, complete fingerprint resistance or network containment.
 
 ## Included and deferred

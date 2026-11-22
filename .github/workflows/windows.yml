@@ -393,6 +393,11 @@ jobs:
             if (!(Get-ChildItem artifacts/win-x64 -Recurse -Filter $file)) { throw "Missing $file" }
           }
           ./tests/acceptance/verify-published-runtime.ps1 -PublishDirectory artifacts/win-x64 -ExpectedRuntimeVersion '10.0.15'
+          ./tests/acceptance/test-cef-notices.ps1 -PublishDirectory artifacts/win-x64
+          ./tests/acceptance/test-dotnet-notices.ps1 -PublishDirectory artifacts/win-x64
+      - name: Reject unverified and pre-existing portable outputs
+        timeout-minutes: 5
+        run: ./tests/acceptance/test-package-publication.ps1 -PublishDirectory artifacts/win-x64
       - name: Dashboard launches and reopens published browser
         timeout-minutes: 3
         run: |

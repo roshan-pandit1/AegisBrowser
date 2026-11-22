@@ -1,0 +1,26 @@
+name: Portable package publication controls
+on:
+  push:
+    branches: ['release/core-packaging-readiness']
+  pull_request:
+    branches: ['feature/net10-core-migration']
+permissions:
+  contents: read
+jobs:
+  publication-controls:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.404'
+      - name: Publish pinned application inputs
+        run: dotnet publish AegisBrowser/AegisBrowser.csproj -c Release -r win-x64 --self-contained true -o artifacts/win-x64
+      - name: Verify failed and pre-existing output handling
+        run: ./tests/acceptance/test-package-publication.ps1 -PublishDirectory artifacts/win-x64

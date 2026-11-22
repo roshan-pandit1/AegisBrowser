@@ -1,0 +1,24 @@
+name: Core dependency compatibility
+on:
+  push:
+    branches: ['release/core-packaging-readiness']
+  pull_request:
+    branches: ['feature/net10-core-migration']
+permissions:
+  contents: read
+jobs:
+  cross-version:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.404'
+      - name: Old and new profile metadata and DPAPI compatibility
+        run: ./tests/acceptance/dependency-compat.ps1
