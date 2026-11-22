@@ -62,6 +62,7 @@ if (OperatingSystem.IsWindows() && System.Runtime.InteropServices.RuntimeInforma
     throw new Exception("FAIL: Windows regression tests must run as an x64 process.");
 Console.WriteLine($"PASS: core tests run on .NET {Environment.Version}, process architecture {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}.");
 
+DependencyUpgradeTests.Run();
 PrivacyTests.Run();
 ViewportLetterboxingTests.Run();
 ViewportZoomQueryTests.Run();
