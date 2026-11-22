@@ -6,8 +6,25 @@ if ($env:GITHUB_ACTIONS -eq 'true' -and [string]::IsNullOrWhiteSpace($env:P403_P
 }
 $source = (Resolve-Path $PublishDirectory).Path
 ./tests/acceptance/verify-cef-notices.ps1 -PublishDirectory $source -CreditsFile 'third-party-licenses/CEF-CREDITS.html'
-New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
-$output = (Resolve-Path $OutputDirectory).Path
+$output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+$outputParent = [IO.Path]::GetDirectoryName($output)
+if ([string]::IsNullOrEmpty($outputParent) -or [string]::IsNullOrEmpty([IO.Path]::GetFileName($output))) {
+    throw 'PACKAGE_OUTPUT_INVALID: a new output directory is required.'
+}
+if (Test-Path -LiteralPath $output) { throw 'PACKAGE_OUTPUT_EXISTS: choose a new output directory; existing files are not overwritten.' }
+$sourceRoot = [IO.Path]::GetFullPath($source).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+if ($output.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase) -or
+    $output.StartsWith($sourceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'PACKAGE_OUTPUT_INVALID: output must be outside the publish directory.'
+}
+[IO.Directory]::CreateDirectory($outputParent) | Out-Null
+$pendingName = '.aegis-package-' + [guid]::NewGuid().ToString('N')
+$pending = Join-Path $outputParent $pendingName
+New-Item -ItemType Directory -Path $pending -ErrorAction Stop | Out-Null
+$zip = Join-Path $pending 'AegisBrowser-RC1-win-x64.zip'
+$sidecar = "$zip.sha256"
+$published = $false
+try {
 $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $stage = Join-Path $tempRoot ('aegis-portable-' + [guid]::NewGuid().ToString('N'))
 $bundle = Join-Path $stage 'AegisBrowser'
@@ -27,10 +44,8 @@ Copy-Item -LiteralPath 'third-party-licenses' -Destination (Join-Path $bundle 't
 $revision = git rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not record source revision' }
 @("Aegis Browser v0.1.0 experimental candidate - production NO_GO", "Source checkout commit: $revision", "Target: win-x64, self-contained .NET 10.0.15", "Read PORTABLE-CANDIDATE.md and the matching build's evidence. Manual release acceptance remains required.") | Set-Content (Join-Path $bundle 'VERSION.txt')
-$zip = Join-Path $output 'AegisBrowser-RC1-win-x64.zip'
-Compress-Archive -Path $bundle -DestinationPath $zip -CompressionLevel Optimal -Force
+Compress-Archive -Path $bundle -DestinationPath $zip -CompressionLevel Optimal
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-"$hash  $([IO.Path]::GetFileName($zip))" | Set-Content "$zip.sha256"
 $extract = Join-Path $stage 'extracted'
 Expand-Archive $zip -DestinationPath $extract
 $unpacked = Join-Path $extract 'AegisBrowser'
@@ -45,5 +60,27 @@ foreach ($file in $expected) {
 ./tests/acceptance/verify-published-runtime.ps1 -PublishDirectory $unpacked -ExpectedRuntimeVersion '10.0.15'
 ./tests/acceptance/verify-cef-notices.ps1 -PublishDirectory $unpacked -CreditsFile (Join-Path $unpacked 'third-party-licenses/CEF-CREDITS.html')
 ./tests/acceptance/windows-smoke.ps1 -PublishDirectory $unpacked
+"$hash  $([IO.Path]::GetFileName($zip))" | Set-Content -LiteralPath $sidecar -ErrorAction Stop
+# A same-parent directory rename publishes both validated files together. The
+# destination must still be absent: Directory.Move never overwrites an existing
+# directory or file, including one created after the initial check.
+[IO.Directory]::Move($pending, $output)
+$published = $true
 Write-Output "PASS: portable ZIP round trip verified ($($expected.Count) files), extracted application smoke passed"
 Write-Output "Portable ZIP SHA256: $hash"
+} finally {
+    if (-not $published -and (Test-Path -LiteralPath $pending -PathType Container)) {
+        # Delete only the two paths created by this run, and only under the
+        # exact unique sibling directory. Do not recursively remove anything.
+        $item = Get-Item -LiteralPath $pending -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            [IO.Path]::GetFileName($item.FullName) -cne $pendingName -or
+            -not [string]::Equals([IO.Path]::GetDirectoryName($item.FullName), $outputParent, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'PACKAGE_CLEANUP_FAILED: staged output identity changed.'
+        }
+        foreach ($file in @($zip, $sidecar)) {
+            if ([IO.File]::Exists($file)) { [IO.File]::Delete($file) }
+        }
+        [IO.Directory]::Delete($pending, $false)
+    }
+}
