@@ -1,2 +1,6 @@
 # Keep the audited upstream Chromium credits byte-for-byte across checkouts.
 third-party-licenses/CEF-CREDITS.html binary
+third-party-licenses/DOTNET-RUNTIME-LICENSE.TXT binary
+third-party-licenses/DOTNET-RUNTIME-THIRD-PARTY-NOTICES.TXT binary
+third-party-licenses/DOTNET-DESKTOP-LICENSE.TXT binary
+third-party-licenses/SQLITEPCLRAW-APACHE-2.0.txt binary

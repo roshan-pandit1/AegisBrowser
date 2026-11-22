@@ -6,6 +6,7 @@ if ($env:GITHUB_ACTIONS -eq 'true' -and [string]::IsNullOrWhiteSpace($env:P403_P
 }
 $source = (Resolve-Path $PublishDirectory).Path
 ./tests/acceptance/verify-cef-notices.ps1 -PublishDirectory $source -CreditsFile 'third-party-licenses/CEF-CREDITS.html'
+./tests/acceptance/verify-dotnet-notices.ps1 -PublishDirectory $source -NoticeDirectory 'third-party-licenses'
 $output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
 $outputParent = [IO.Path]::GetDirectoryName($output)
 if ([string]::IsNullOrEmpty($outputParent) -or [string]::IsNullOrEmpty([IO.Path]::GetFileName($output))) {
@@ -59,6 +60,7 @@ foreach ($file in $expected) {
 }
 ./tests/acceptance/verify-published-runtime.ps1 -PublishDirectory $unpacked -ExpectedRuntimeVersion '10.0.15'
 ./tests/acceptance/verify-cef-notices.ps1 -PublishDirectory $unpacked -CreditsFile (Join-Path $unpacked 'third-party-licenses/CEF-CREDITS.html')
+./tests/acceptance/verify-dotnet-notices.ps1 -PublishDirectory $unpacked -NoticeDirectory (Join-Path $unpacked 'third-party-licenses')
 ./tests/acceptance/windows-smoke.ps1 -PublishDirectory $unpacked
 "$hash  $([IO.Path]::GetFileName($zip))" | Set-Content -LiteralPath $sidecar -ErrorAction Stop
 # A same-parent directory rename publishes both validated files together. The

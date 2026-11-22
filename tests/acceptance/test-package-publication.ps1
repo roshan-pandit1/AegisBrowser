@@ -13,9 +13,11 @@ $originalTrust = $env:P403_PACKAGE_TRUST_DIR
 try {
     $source = Join-Path $root 'incomplete-publish'
     New-Item -ItemType Directory -Path $source -ErrorAction Stop | Out-Null
-    # Use the actual pinned binary, but omit AegisBrowser.exe. The package
-    # passes the CEF hash check and must fail only after ZIP extraction.
-    Copy-Item -LiteralPath (Join-Path $PublishDirectory 'libcef.dll') -Destination (Join-Path $source 'libcef.dll') -ErrorAction Stop
+    # Supply the genuine pinned CEF and runtime inputs, but omit the app exe.
+    # The package passes the preflight notice checks and must fail after extraction.
+    foreach ($name in @('libcef.dll', 'coreclr.dll', 'System.Private.CoreLib.dll', 'System.Windows.Forms.dll')) {
+        Copy-Item -LiteralPath (Join-Path $PublishDirectory $name) -Destination (Join-Path $source $name) -ErrorAction Stop
+    }
     $env:RUNNER_TEMP = $root
     if ($env:GITHUB_ACTIONS -eq 'true') { $env:P403_PACKAGE_TRUST_DIR = Join-Path $root 'unused-trust' }
     $output = Join-Path $root 'failed-output'
