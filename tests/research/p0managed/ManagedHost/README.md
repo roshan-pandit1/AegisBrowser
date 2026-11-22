@@ -1,8 +1,12 @@
 # Browser-process managed host experiment
 
-This test-only fixture is derived from PR #78 commit `51dcac57697f72a2693f35f0db8a852f6c78fc4d`. Its managed host is retargeted to .NET 10 and explicitly requires the browser-process runtime to be Windows x64 .NET 10.0.15. The CEF distribution remains pinned to CEF 154.0.34 / Chromium 154.0.8037.98 and the experimental binding to CefSharp 154.0.340. The first Windows execution of this port is required before claiming .NET 10 host compatibility.
+This test-only fixture is derived from PR #78 commit `51dcac57697f72a2693f35f0db8a852f6c78fc4d`. Its managed host is retargeted to .NET 10 and explicitly requires the browser-process runtime to be Windows x64 .NET 10.0.15. The CEF distribution remains pinned to CEF 154.0.34 / Chromium 154.0.8037.98 and the experimental binding to CefSharp 154.0.340.
 
 The [CEF Windows bootstrap](https://chromiumembedded.github.io/cef/sandbox_setup) is the shortest supported candidate for the lifecycle experiment, but this fixture's partial renderer protocol and lack of authoritative renderer identity, lockdown and exact-object enforcement evidence prevent production integration. The workflow preserves a separate fail-closed independent-security gate. The actual Aegis application is unchanged and production remains NO_GO.
+
+On commit `5bfa814e254e246680987cb4c2308c8e1a9cc31a`, [Windows run 44983459257](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44983459257) observed .NET 10.0.15 x64, the sandbox context passed to CEF initialization, a visible window, local and HTTPS content, primitive JavaScript, browser close, CEF shutdown and exit code zero. The test root was removed. The workflow failed its strict security gate: renderer identity, enforcement and complete subprocess cleanup were `INCONCLUSIVE`. These results establish only fixture lifecycle compatibility, not actual Aegis compatibility or sandbox enforcement. Bootstrap SHA-256 was `0B6C80B6C81615F8C2B6C051D698CB9FF93D626FB82016CE61EEFD62D8CC4FEC`.
+
+The earlier [run 44982771243](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44982771243) failed while decoding output because the port omitted a pinned result helper; that helper and an offline presence regression check were subsequently added. The run cannot establish the lifecycle result because decoding did not complete.
 
 This is a disposable research class library, not the Aegis application. A GUI
 bootstrap host must dispatch CEF subprocesses first, then invoke `ManagedEntry.Run`
