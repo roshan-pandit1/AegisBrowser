@@ -1,10 +1,12 @@
 # .NET 10 candidate: Windows manual acceptance
 
-**Status: NOT_RUN. Release A and Release B: NO_GO.** This is an operator procedure, not an acceptance result. The candidate's stock CefSharp path does not provide a verified Chromium renderer sandbox. Use only synthetic data on an authorized disposable Windows x64 machine and test account; do not enter real credentials or personal data. Required-proxy profiles must stay blocked.
+**Status: NOT_RUN. Release A and Release B: NO_GO.** This is an operator procedure, not an acceptance result. The candidate's stock CefSharp initialization disables the Chromium renderer sandbox; do not rely on renderer sandbox isolation. Use only synthetic data on an authorized disposable Windows x64 machine and test account; do not enter real credentials or personal data. Required-proxy profiles must stay blocked.
 
 ## Identify the artifact
 
 The existing PR #83 candidate was built from source commit `6329a0fffcd587ce9b076ac70afc3caa455670aa`. Its [Windows push run 44936547297](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44936547297) passed. Its portable CI artifact is `AegisBrowser-portable-win-x64`, [artifact 14720495335](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44936547297/artifacts/14720495335). The **inner** `AegisBrowser-RC1-win-x64.zip` SHA-256 printed by that job is `ae8274e9122244b4b6948e8f173166f71e01afe9ef995ab7ae2aeb499463cc3c`. The GitHub artifact download is a separate outer archive with a different digest. Artifacts can expire; if testing a new build, obtain and record that build's own source SHA, run, artifact ID and inner ZIP hash. A matching hash detects changes; it does not authenticate an unsigned publisher.
+
+The later PR #84 candidate at commit `e749ba55edbe160cd9f1be88ed4827fc4918368c` passed [Windows push run 44987442849](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44987442849). Its [portable CI artifact 14740965338](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/44987442849/artifacts/14740965338) contains an inner ZIP whose SHA-256 is `628c89cca047cd55018b83e605518aa3eeef70e950912fefdafc401efc50f825`. These identities do not apply to another commit or run. This remains a test artifact, not a production release.
 
 Record tester, UTC date, Windows edition/build and x64 architecture, artifact/run URL, source SHA, inner ZIP SHA-256, expected runtime and actual runtime identity, clean-install state, evidence location and a separate PASS, FAIL, BLOCKED or NOT_RUN for each case. Keep logs and screenshots free of secrets. Do not substitute the earlier .NET 8 RC1's hash or manual results for this candidate.
 
