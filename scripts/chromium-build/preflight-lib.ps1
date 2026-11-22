@@ -13,8 +13,10 @@ function Get-AegisChromiumChecks {
     }
     Add-Check 'windows_x64_os' $Observed.WindowsX64 'Native Windows x64 OS' $true
     Add-Check 'x64_process' $Observed.ProcessX64 'x64 PowerShell process' $true
-    Add-Check 'memory_minimum' $(if ($null -eq $Observed.MemoryBytes) { $null } else { $Observed.MemoryBytes -ge 8GB }) 'At least 8 GiB physical RAM' $true
-    Add-Check 'disk_minimum' $(if ($null -eq $Observed.FreeBytes) { $null } else { $Observed.FreeBytes -ge 100GB }) 'At least 100 GiB free' $true
+    # CEF's pinned automated-build instructions require at least 16 GB RAM
+    # and 200 GB free. Use conservative binary units for these safety checks.
+    Add-Check 'memory_minimum' $(if ($null -eq $Observed.MemoryBytes) { $null } else { $Observed.MemoryBytes -ge 16GB }) 'At least 16 GiB physical RAM' $true
+    Add-Check 'disk_minimum' $(if ($null -eq $Observed.FreeBytes) { $null } else { $Observed.FreeBytes -ge 200GB }) 'At least 200 GiB free' $true
     Add-Check 'local_ntfs' $Observed.LocalNtfs 'Existing local NTFS build root' $true
     Add-Check 'build_path_no_spaces' $Observed.PathHasNoSpaces 'Build root path contains no spaces' $true
     Add-Check 'visual_studio_components' $Observed.VsReady 'VS 2026 >=18.0 complete, launchable, x64 C++ desktop and ATL/MFC components' $true

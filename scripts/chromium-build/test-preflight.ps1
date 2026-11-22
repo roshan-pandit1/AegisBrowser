@@ -31,11 +31,11 @@ foreach ($field in @('WindowsX64','MemoryBytes','FreeBytes','VsReady','SdkReady'
     $s = New-Snapshot; $s[$field] = $null
     Assert-Check (-not (Qualified $s 'Host')) ("unknown required evidence fails closed: $field")
 }
-$s = New-Snapshot; $s.MemoryBytes = 8GB - 1
+$s = New-Snapshot; $s.MemoryBytes = 16GB - 1
 Assert-Check (-not (Qualified $s 'Host')) 'below minimum RAM rejected'
-$s = New-Snapshot; $s.FreeBytes = 100GB - 1
+$s = New-Snapshot; $s.FreeBytes = 200GB - 1
 Assert-Check (-not (Qualified $s 'Host')) 'below minimum disk rejected'
-$s = New-Snapshot; $s.MemoryBytes = 8GB; $s.FreeBytes = 100GB; $s.CpuCount = 2; $s.WindowsLongPaths = $null; $s.GitLongPaths = $false
+$s = New-Snapshot; $s.MemoryBytes = 16GB; $s.FreeBytes = 200GB; $s.CpuCount = 2; $s.WindowsLongPaths = $null; $s.GitLongPaths = $false
 Assert-Check (Qualified $s 'Host') 'minimum capacity qualifies despite advisory preferences'
 foreach ($field in @('PythonReady','DepotToolsFiles','DepotToolsOrigin','DepotToolsRevisionMatches','DepotToolsClean')) {
     $s = New-Snapshot; $s[$field] = $false

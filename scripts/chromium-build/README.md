@@ -34,9 +34,10 @@ Document its selection and the obtained dependency revisions for each attempt.
 Use an **explicitly authorized, disposable, native Windows x64 builder** with a
 dedicated local NTFS workspace, Visual Studio 2026 x64 C++ tools and ATL/MFC,
 the pinned instructions' serviced Windows SDK and debugger, Git, and Python 3.
-The checks require at least 8 GiB RAM and 100 GiB free NTFS space; these are
-minimum checks, not a sizing guarantee. The intended builder has at least 16
-logical CPUs, 64 GiB RAM and 500 GiB free SSD space. Baseline and instrumented
+The pinned CEF automated-build instructions specify at least 16 GB RAM and
+200 GB free disk. The checks conservatively require 16 GiB RAM and 200 GiB
+free NTFS space; these are minimum checks, not a sizing guarantee. The intended
+builder has at least 16 logical CPUs, 64 GiB RAM and 500 GiB free SSD space. Baseline and instrumented
 trees require additional space if kept simultaneously. Long-path settings are
 reported as advisory; obtain host-owner approval before changing them. These
 scripts do not install Visual Studio, configure system security, provision a VM,
@@ -64,6 +65,13 @@ must be verified by the owner before provisioning. No infrastructure was created
 or billed by these scripts.
 
 ## Procedure on an approved builder
+
+The dependency order is: owner authorization and a disposable host; Host
+qualification; pinned depot_tools acquisition; Toolchain qualification; pinned
+source acquisition and dependency snapshot; independently verified patch and
+post-hook compiler inputs; then a baseline build and native smoke test. A
+qualified builder alone does not authorize compilation: multi-repository
+provenance and post-hook compiler-input binding remain unimplemented blockers.
 
 Run the commands from this repository in an x64 PowerShell session. The example
 paths are disposable, local and space-free. The workspace must already exist;
@@ -155,11 +163,13 @@ implementation in this package. Do not publish output as a production runtime.
 The bounded `watch-space.ps1` monitor can be run in a separate operator session:
 
 ```powershell
-.\scripts\chromium-build\watch-space.ps1 -BuildRoot $workspace -MinimumFreeGiB 100 -IntervalSeconds 60 -Samples 120
+.\scripts\chromium-build\watch-space.ps1 -BuildRoot $workspace -MinimumFreeGiB 200 -IntervalSeconds 60 -Samples 120
 ```
 
 It reports available space and exits nonzero below the threshold; it does not
-stop the build. The operator must respond and manage the build process safely.
+stop the build. This conservative threshold can be reached during a legitimate
+build as disk space is consumed. The operator must respond and manage the build
+process safely.
 This monitor has not been exercised on a qualified builder.
 
 ## Manually dispatched workflow

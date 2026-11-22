@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$BuildRoot,
-    [ValidateRange(1, 4096)][int]$MinimumFreeGiB = 100,
+    [ValidateRange(1, 4096)][int]$MinimumFreeGiB = 200,
     [ValidateRange(1, 3600)][int]$IntervalSeconds = 60,
     [ValidateRange(1, 10000)][int]$Samples = 60
 )
