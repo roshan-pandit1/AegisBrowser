@@ -9,6 +9,12 @@ ADDED = "\n".join(line[1:] for line in PATCH.splitlines() if line.startswith("+"
 
 
 class PrototypeContract(unittest.TestCase):
+    def test_result_decoder_dependencies_are_present(self):
+        root = Path(__file__).resolve().parents[2]
+        for relative in ("tests/research/p309g/result-lib.ps1",
+                         "tests/research/p309f/run-result-lib.ps1"):
+            self.assertTrue((root / relative).is_file(), relative)
+
     def test_explicit_sandbox_is_passed_to_both_cef_entrypoints(self):
         self.assertIn("CefInitialize(main_args, settings, app.get(), sandboxInfo.ToPointer())", ADDED)
         self.assertEqual(ADDED.count("CefExecuteProcess(cefMainArgs,"), 3)
