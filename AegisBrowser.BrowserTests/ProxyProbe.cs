@@ -21,11 +21,24 @@ internal static partial class Program
         try
         {
             Cef.EnableWaitForBrowsersToClose();
-            initialized = Cef.Initialize(new CefSettings
+            var cefSettings = new CefSettings
             {
                 RootCachePath = root, CachePath = Path.Combine(root, "cache"),
                 CommandLineArgsDisabled = true, LogFile = Path.Combine(root, "cef-proxy-probe.log")
-            });
+            };
+            // Isolated test process only. Never accept a caller-supplied trace
+            // destination, and do not enable tracing in production startup.
+            if (Environment.GetEnvironmentVariable("AEGIS_TEST_PROXY_NETLOG") == "1")
+            {
+                var netLog = Path.Combine(root, "p410-netlog.json");
+                if (File.Exists(netLog)) throw new IOException("Disposable NetLog destination already exists.");
+                cefSettings.CefCommandLineArgs.Add("log-net-log", netLog);
+                cefSettings.CefCommandLineArgs.Add("net-log-capture-mode", "HeavilyRedacted");
+                cefSettings.CefCommandLineArgs.Add("net-log-max-size-mb", "8");
+                cefSettings.CefCommandLineArgs.Add("net-log-duration", "150");
+                Console.WriteLine("P410_NETLOG: requested=1 mode=HeavilyRedacted max_mb=8 duration_seconds=150");
+            }
+            initialized = Cef.Initialize(cefSettings);
             if (!initialized) throw new IOException("CEF initialization failed.");
             socksTrace.Add("CEF_LIFECYCLE_EVENT", "INITIALIZED");
             using var context = Cef.GetGlobalRequestContext();
@@ -36,6 +49,7 @@ internal static partial class Program
             host.Shown += async (_, _) =>
             {
                 BrowserView? browser = null;
+                SocksCdpNetworkObserver? cdp = null;
                 try
                 {
                     async Task Configure(bool removeLoopbackBypass)
@@ -59,6 +73,11 @@ internal static partial class Program
                     browser = new BrowserView("about:blank") { Dock = DockStyle.Fill };
                     browser.RequestHandler = new SafeRequests(Console.WriteLine);
                     Observe(browser); host.Controls.Add(browser); await Ready(browser);
+                    if (Environment.GetEnvironmentVariable("AEGIS_TEST_PROXY_CDP") == "1")
+                    {
+                        cdp = new SocksCdpNetworkObserver();
+                        await cdp.AttachAsync(browser);
+                    }
                     await VerifySocksOutcomeFailures();
                     VerifySocksNavigationObserver();
                     await AwaitConcurrentProxyProbe(root);
@@ -124,7 +143,14 @@ internal static partial class Program
                     await ObserveHttpsProxyCertificate(browser, context);
                     Console.WriteLine($"PASS: {checks} CEF proxy probe checks");
                 }
-                catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
+                catch (Exception ex)
+                {
+                    result = 1;
+                    Console.Error.WriteLine(ex);
+                    // Preserve bounded diagnostic observations before native
+                    // teardown can add its own cancellation events.
+                    cdp?.Print();
+                }
                 finally
                 {
                     if (browser is not null && browser.IsBrowserInitialized)
@@ -140,6 +166,11 @@ internal static partial class Program
                                 Console.Error.WriteLine("SOCKS-offline navigation had a contradictory successful response before teardown completed.");
                             }
                         }
+                    }
+                    if (cdp is not null)
+                    {
+                        try { await cdp.DetachAsync(); cdp.Print(); }
+                        catch (Exception ex) { result = 1; Console.Error.WriteLine("CDP diagnostic cleanup failed: " + ex.GetType().Name); }
                     }
                     host.Close();
                 }
