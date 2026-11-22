@@ -1,0 +1,59 @@
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'preflight-lib.ps1')
+$script:checksPassed = 0
+function Assert-Check([bool] $Condition, [string] $Name) {
+    if (-not $Condition) { throw ('FAIL: ' + $Name) }
+    $script:checksPassed++
+    Write-Output ('PASS: ' + $Name)
+}
+function New-Snapshot {
+    return @{
+        WindowsX64=$true; ProcessX64=$true; MemoryBytes=[long](64GB); CpuCount=16; FreeBytes=[long](500GB);
+        LocalNtfs=$true; PathHasNoSpaces=$true; VsReady=$true; SdkReady=$true; GitReady=$true;
+        WindowsLongPaths=$true; GitLongPaths=$true; PythonReady=$true; DepotToolsFiles=$true;
+        DepotToolsOrigin=$true; DepotToolsRevisionMatches=$true; DepotToolsClean=$true;
+        ChromiumRevisionMatches=$true; CefRevisionMatches=$true; ChromiumProvenance=$true; CefClean=$true
+    }
+}
+function Qualified($Snapshot, [string] $Stage) {
+    return Test-AegisChromiumQualification -Checks (Get-AegisChromiumChecks -Observed $Snapshot -Stage $Stage)
+}
+$s = New-Snapshot
+Assert-Check (Qualified $s 'Host') 'adequate synthetic host qualifies'
+Assert-Check (Qualified $s 'Toolchain') 'adequate synthetic toolchain qualifies'
+Assert-Check (Qualified $s 'Build') 'adequate synthetic verified checkout qualifies'
+foreach ($field in @('WindowsX64','ProcessX64','LocalNtfs','PathHasNoSpaces','VsReady','SdkReady','GitReady')) {
+    $s = New-Snapshot; $s[$field] = $false
+    Assert-Check (-not (Qualified $s 'Host')) ("host fails closed: $field")
+}
+foreach ($field in @('WindowsX64','MemoryBytes','FreeBytes','VsReady','SdkReady')) {
+    $s = New-Snapshot; $s[$field] = $null
+    Assert-Check (-not (Qualified $s 'Host')) ("unknown required evidence fails closed: $field")
+}
+$s = New-Snapshot; $s.MemoryBytes = 16GB - 1
+Assert-Check (-not (Qualified $s 'Host')) 'below minimum RAM rejected'
+$s = New-Snapshot; $s.FreeBytes = 200GB - 1
+Assert-Check (-not (Qualified $s 'Host')) 'below minimum disk rejected'
+$s = New-Snapshot; $s.MemoryBytes = 16GB; $s.FreeBytes = 200GB; $s.CpuCount = 2; $s.WindowsLongPaths = $null; $s.GitLongPaths = $false
+Assert-Check (Qualified $s 'Host') 'minimum capacity qualifies despite advisory preferences'
+foreach ($field in @('PythonReady','DepotToolsFiles','DepotToolsOrigin','DepotToolsRevisionMatches','DepotToolsClean')) {
+    $s = New-Snapshot; $s[$field] = $false
+    Assert-Check (-not (Qualified $s 'Toolchain')) ("toolchain fails closed: $field")
+}
+foreach ($field in @('ChromiumRevisionMatches','CefRevisionMatches','CefClean')) {
+    $s = New-Snapshot; $s[$field] = $false
+    Assert-Check (-not (Qualified $s 'Build')) ("build fails closed: $field")
+}
+$s = New-Snapshot; $s.ChromiumProvenance = $null
+$checks = @(Get-AegisChromiumChecks -Observed $s -Stage 'Build')
+$provenance = @($checks | Where-Object { $_.name -ceq 'chromium_checkout_provenance' })
+Assert-Check ($provenance.Count -eq 1 -and $provenance[0].status -ceq 'INCONCLUSIVE' -and -not (Test-AegisChromiumQualification -Checks $checks)) 'unverified CEF patch provenance is inconclusive and blocks build'
+$s = New-Snapshot; $s.ChromiumProvenance = $false
+Assert-Check (-not (Qualified $s 'Build')) 'failed CEF patch provenance blocks build'
+$postHookRejected = $false
+try { Assert-AegisPostHookCompilerInputBinding } catch {
+    $postHookRejected = $_.Exception.Message -ceq 'BUILD_NOT_STARTED: post-hook source provenance is not bound to compiler inputs.'
+}
+Assert-Check $postHookRejected 'pre-hook evidence cannot authorize post-hook compiler input'
+Write-Output ("PASS: $script:checksPassed synthetic preflight checks; no native build performed")
