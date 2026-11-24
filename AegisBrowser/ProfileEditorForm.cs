@@ -11,7 +11,7 @@ internal sealed class ProfileEditorForm : Form
     private readonly TextBox notes = new() { Name = "EditNotes", AccessibleName = "Profile notes", Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical };
     private readonly TextBox tags = new() { Name = "EditTags", AccessibleName = "Tags, one per line", Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical };
     private readonly TextBox folders = new() { Name = "EditFolders", AccessibleName = "Folders, one per line", Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical };
-    private readonly Label message = new() { Name = "EditorFeedback", AccessibleName = "Profile editor messages", Dock = DockStyle.Fill, AutoEllipsis = true };
+    private readonly Label message = new() { Name = "EditorFeedback", AccessibleName = "Profile editor messages", Dock = DockStyle.Fill, AutoSize = true };
     private readonly Button save = new() { Name = "SaveProfile", Text = "Save", AccessibleName = "Save profile", AutoSize = true };
     private readonly Button cancel = new() { Text = "Cancel", AccessibleName = "Cancel editing", DialogResult = DialogResult.Cancel, AutoSize = true };
     public string? SavedSlug { get; private set; }
@@ -20,14 +20,16 @@ internal sealed class ProfileEditorForm : Form
     {
         this.dashboard = dashboard; this.original = original;
         Text = original is null ? "Create profile" : "Edit profile metadata";
-        AutoScaleMode = AutoScaleMode.Dpi; StartPosition = FormStartPosition.CenterParent;
-        Width = 620; Height = 700; MinimumSize = new Size(460, 520);
+        DesktopStyle.Apply(this); StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new Size(560, 520); MinimumSize = new Size(410, 390);
+        DesktopStyle.Button(save, primary: true);
+        DesktopStyle.Button(cancel);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 8, Padding = new Padding(16) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 30)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 30));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         void Field(string title, Control control, int row)
         { layout.Controls.Add(new Label { Text = title, Dock = DockStyle.Top, AutoSize = true, Margin = new Padding(0, 8, 4, 4) }, 0, row); control.Margin = new Padding(0, 4, 0, 4); layout.Controls.Add(control, 1, row); }
         Field("Storage slug", slug, 0); Field("Display name", displayName, 1);
@@ -35,6 +37,7 @@ internal sealed class ProfileEditorForm : Form
             Text = original is null ? "A stable ID is assigned on creation." : $"ID: {original.Id:D}   Revision: {original.Revision}" };
         layout.Controls.Add(identity, 1, 2);
         Field("Notes", notes, 3); Field("Tags (one per line)", tags, 4); Field("Folders (one per line)", folders, 5);
+        layout.ClientSizeChanged += (_, _) => message.MaximumSize = new Size(Math.Max(1, layout.ClientSize.Width - layout.Padding.Horizontal), 0);
         layout.Controls.Add(message, 0, 6); layout.SetColumnSpan(message, 2);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
         buttons.Controls.AddRange([cancel, save]); layout.Controls.Add(buttons, 0, 7); layout.SetColumnSpan(buttons, 2); Controls.Add(layout);

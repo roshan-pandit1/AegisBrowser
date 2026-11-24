@@ -30,10 +30,14 @@ internal sealed class PrivacyForm : Form
         mode.Name = "PrivacyMode"; blocks.Name = "BlockedDomains"; allows.Name = "AllowedDomains";
         sites.Name = "SiteExceptions"; rules.Name = "UserRules"; list.Name = "TrackingList"; network.Name = "Requests";
         this.apply = apply ?? (configuration => session.Apply(configuration));
-        Text = "Aegis Privacy — profile settings and network inspector";
-        Width = 1100; Height = 760; MinimumSize = new(800, 550);
+        Text = "Privacy settings";
+        DesktopStyle.Apply(this);
+        StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new(900, 590);
+        MinimumSize = new(570, 370);
         var pages = new TabControl { Dock = DockStyle.Fill };
-        var settings = new TabPage("Settings and rules");
+        var settings = new TabPage("Settings") { BackColor = DesktopStyle.Surface };
+        var rulePage = new TabPage("Site rules") { Padding = new Padding(8) };
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4 };
         layout.ColumnStyles.Add(new(SizeType.Percent, 50)); layout.ColumnStyles.Add(new(SizeType.Percent, 50));
         for (var i = 0; i < 4; i++) layout.RowStyles.Add(new(SizeType.Percent, 25));
@@ -45,22 +49,35 @@ internal sealed class PrivacyForm : Form
         letterboxWebContent.Checked = session.Configuration.LetterboxWebContent;
         disableWebGl.Checked = session.Configuration.DisableWebGl;
         disableRemoteFonts.Checked = session.Configuration.DisableRemoteFonts;
-        var controls = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
+        var controls = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown,
+            WrapContents = false, Padding = new Padding(12)
+        };
+        mode.AccessibleName = "Filtering mode";
+        controls.Controls.Add(new Label { Text = "Filtering mode", AutoSize = true });
         controls.Controls.AddRange([mode, customList, unknownSiteRules, blockThirdPartyCookies, restrictWebRtcUdp, letterboxWebContent,
-            disableWebGl, disableRemoteFonts, Button("Apply settings", Apply)]);
-        controls.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(1000, 0),
+            disableWebGl, disableRemoteFonts]);
+        var policy = new Label { AutoSize = true,
             Text = "Current cookie policy: " + cookiePolicyStatus + ". Viewport letterboxing at startup: "
                 + (letterboxingActive ? "On" : "Off") + ". WebGL restriction at startup: "
                 + (webGlRestrictionActive ? "On" : "Off") + ". Remote web fonts restriction: "
                 + (remoteFontRestrictionActive ? "On" : "Off") + ". WebRTC setting: " + webRtcPolicyStatus + ". Changes apply after restarting this profile. "
                 + "Turning this off restores Chromium's default, which may still block some cookies. "
-                + "Blocking can affect embedded sign-in, payments and media. Restricting WebRTC UDP may break calls; TCP can still expose network addresses and this is not a firewall or proxy containment. Letterboxing adjusts the tab size for page zoom and may reduce available space. Display scaling and scrollbars can change the observed viewport; native popups are not letterboxed. It does not hide screen dimensions. WebGL restrictions can break 3D content and do not cover all OffscreenCanvas contexts in pages or workers. Disabling remote fonts does not conceal installed local fonts. None of these options hides your IP or prevents all fingerprinting." });
+                + "Blocking can affect embedded sign-in, payments and media. Restricting WebRTC UDP may break calls; TCP can still expose network addresses and this is not a firewall or proxy containment. Letterboxing adjusts the tab size for page zoom and may reduce available space. Display scaling and scrollbars can change the observed viewport; native popups are not letterboxed. It does not hide screen dimensions. WebGL restrictions can break 3D content and do not cover all OffscreenCanvas contexts in pages or workers. Disabling remote fonts does not conceal installed local fonts. None of these options hides your IP or prevents all fingerprinting." };
         var pause = new CheckBox { Text = "Pause filtering until resumed or browser exit", AutoSize = true, Checked = session.Paused };
         pause.CheckedChanged += (_, _) => session.Paused = pause.Checked;
         controls.Controls.Add(pause);
         var host = SiteClassifier.Host(currentUrl);
         if (host is not null && host != "aegis-diagnostics.invalid")
-            controls.Controls.Add(Button("Add site exception: " + host, () => AddLine(sites, host)));
+            controls.Controls.Add(ActionButton("Add site exception: " + host, () => AddLine(sites, host)));
+        controls.Controls.Add(policy);
+        controls.ClientSizeChanged += (_, _) =>
+        {
+            var width = Math.Max(1, controls.ClientSize.Width - controls.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - 8);
+            foreach (Control control in controls.Controls)
+                if (control is Label or CheckBox or Button) control.MaximumSize = new Size(width, 0);
+        };
         blocks.Text = string.Join(Environment.NewLine, session.Configuration.BlockedDomains);
         allows.Text = string.Join(Environment.NewLine, session.Configuration.AllowedDomains);
         sites.Text = string.Join(Environment.NewLine, session.Configuration.SiteExceptions);
@@ -69,32 +86,46 @@ internal sealed class PrivacyForm : Form
         AddEditor(layout, "Allowed resource domains (overrides blocks)", allows, 1, 0);
         AddEditor(layout, "Site exceptions (disable filtering on these sites)", sites, 0, 2);
         AddEditor(layout, "User network rules (delete lines to remove rules)", rules, 1, 2);
-        settings.Controls.Add(layout); settings.Controls.Add(controls);
+        rulePage.Controls.Add(layout);
+        settings.Controls.Add(controls);
         var lists = new TabPage("Tracking list");
         var listButtons = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
-        listButtons.Controls.AddRange([Button("Import UTF-8 list…", Import),
-            Button("Restore starter list", () => list.Text = PrivacyConfiguration.StarterList),
-            Button("Clear list", () => list.Clear()),
-            new Label { Text = "Edits take effect with Apply settings. No automatic downloads.", AutoSize = true }]);
+        listButtons.Controls.AddRange([ActionButton("Import UTF-8 list…", Import),
+            ActionButton("Restore starter list", () => list.Text = PrivacyConfiguration.StarterList),
+            ActionButton("Clear list", () => list.Clear()),
+            new Label { Text = "Edits take effect with Save settings. No automatic downloads.", AutoSize = true }]);
         lists.Controls.Add(list); lists.Controls.Add(listButtons);
         var requests = new TabPage("Network inspector");
         var inspectorBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
-        inspectorBar.Controls.AddRange([thirdParty, Button("Clear history and counts", session.ClearHistory),
-            Button("Block selected host", () => SelectedHost(blocks)), Button("Allow selected host", () => SelectedHost(allows)), summary]);
+        inspectorBar.Controls.AddRange([thirdParty, ActionButton("Clear history and counts", session.ClearHistory),
+            ActionButton("Block selected host", () => SelectedHost(blocks)), ActionButton("Allow selected host", () => SelectedHost(allows)), summary]);
         requests.Controls.Add(network); requests.Controls.Add(inspectorBar);
         requests.Controls.Add(new Label { Dock = DockStyle.Bottom, Height = 40,
-            Text = "Last 500 decisions across this profile's tabs. Origins only; paths, queries, headers and bodies are not recorded. Counts are decisions, not completed downloads. Host edits require Apply settings." });
+            Text = "Last 500 decisions across this profile's tabs. Origins only; paths, queries, headers and bodies are not recorded. Counts are decisions, not completed downloads. Host edits require Save settings." });
         var rejected = new TabPage("Unsupported list rules"); unsupported.ReadOnly = true; rejected.Controls.Add(unsupported);
-        pages.TabPages.AddRange([settings, lists, requests, rejected]); Controls.Add(pages);
+        pages.TabPages.AddRange([settings, rulePage, lists, requests, rejected]);
+        var save = ActionButton("Save settings", Apply);
+        DesktopStyle.Button(save, primary: true);
+        var cancel = ActionButton("Close", Close);
+        var footer = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft,
+            Padding = new Padding(8)
+        };
+        footer.Controls.AddRange([cancel, save]);
+        Controls.Add(pages);
+        Controls.Add(footer);
+        CancelButton = cancel;
         timer.Tick += (_, _) => RefreshInspector(); timer.Start();
         FormClosed += (_, _) => timer.Dispose();
         RefreshInspector();
     }
     private static TextBox Editor() => new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Both,
         WordWrap = false, MaxLength = 8_000_000, AcceptsReturn = true };
-    private static Button Button(string text, Action action)
+    private static Button ActionButton(string text, Action action)
     {
         var button = new Button { Text = text, AutoSize = true };
+        DesktopStyle.Button(button);
         button.Click += (_, _) => action(); return button;
     }
     private static void AddEditor(TableLayoutPanel layout, string label, TextBox editor, int col, int row)

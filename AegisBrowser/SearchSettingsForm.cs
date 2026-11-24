@@ -11,8 +11,10 @@ internal sealed class SearchSettingsForm : Form
     internal SearchSettingsForm(SearchSettings settings, Action<SearchSettings> save)
     {
         this.save = save;
-        Text = "Search Settings"; AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(480, 230); MinimumSize = new Size(400, 250);
+        Text = "Search settings";
+        DesktopStyle.Apply(this);
+        StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new Size(440, 225); MinimumSize = new Size(340, 240);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 5 };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -26,14 +28,30 @@ internal sealed class SearchSettingsForm : Form
         current.Text = "Current engine: " + SearchEngines.Get(settings.EngineId).Name;
         layout.Controls.Add(current, 0, 2);
         layout.Controls.Add(new Label { Text = "Searches are sent only when you press Enter.\nThis setting applies to this browser profile.", AutoSize = true }, 0, 3);
-        var button = new Button { Name = "SaveSearchSettings", Text = "Save settings", AutoSize = true };
+        var button = new Button { Name = "SaveSearchSettings", Text = "Save", AutoSize = true };
+        var cancel = new Button { Text = "Cancel", AutoSize = true };
+        cancel.Click += (_, _) => Close();
+        DesktopStyle.Button(button, primary: true);
+        DesktopStyle.Button(cancel);
+        var feedback = new Label { Dock = DockStyle.Fill, AutoSize = true, AccessibleName = "Search settings messages" };
+        var information = (Label)layout.GetControlFromPosition(0, 3)!;
+        layout.Controls.Remove(information);
+        var messages = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        messages.Controls.AddRange([information, feedback]);
+        messages.ClientSizeChanged += (_, _) => feedback.MaximumSize = new Size(Math.Max(1, messages.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 8), 0);
+        layout.Controls.Add(messages, 0, 3);
         button.Click += (_, _) =>
         {
-            try { SaveSelection(); }
+            try { SaveSelection(); feedback.Text = "Search settings saved."; }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            { MessageBox.Show(this, ex.Message, "Search settings could not be saved", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            { feedback.Text = "Could not save: " + ex.Message; }
         };
-        layout.Controls.Add(button, 0, 4); Controls.Add(layout); AcceptButton = button;
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
+        buttons.Controls.AddRange([cancel, button]);
+        layout.Controls.Add(buttons, 0, 4);
+        Controls.Add(layout);
+        AcceptButton = button;
+        CancelButton = cancel;
     }
     internal void SaveSelection()
     {
