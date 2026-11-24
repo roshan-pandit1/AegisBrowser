@@ -67,6 +67,43 @@ internal static partial class Program
         finally { browser.LoadError -= onError; }
     }
 
+    private static async Task ObserveTrustedProxyRoutes(BrowserView browser, IRequestContext context, PrivacyCertificates certificates)
+    {
+        var tlsOriginPorts = new ConcurrentQueue<int>();
+        using var tlsOrigin = new PrivacyHttpsServer(certificates.Server, onRequest: (path, port) =>
+        {
+            if (path != "/trusted-connect") return;
+            tlsOriginPorts.Enqueue(port);
+            Console.WriteLine($"PROXY_TLS_DESTINATION: mode=connect tls=completed request=received source_port={port} utc={DateTimeOffset.UtcNow:O}");
+        });
+        using var tunnel = new HttpsTunnelFixture(tlsOrigin.Port);
+        using var httpOrigin = new LocalHttpFixture("secure proxy origin", onRequest: () =>
+            Console.WriteLine($"PROXY_TLS_DESTINATION: mode=https_proxy request=received utc={DateTimeOffset.UtcNow:O}"));
+        using var secureProxy = new SecureProxyFixture(certificates.Server, httpOrigin.Port);
+
+        async Task Configure(string server)
+        {
+            var accepted = await Cef.UIThreadTaskFactory.StartNew(() => context.CanSetPreference("proxy") &&
+                context.SetPreference("proxy", new Dictionary<string, object>
+                {
+                    ["mode"] = "fixed_servers", ["server"] = server, ["bypass_list"] = "<-loopback>"
+                }, out _));
+            Check(accepted, "CEF accepted the trusted fixture proxy preference");
+        }
+
+        await Configure($"http://127.0.0.1:{tunnel.Port}");
+        await LoadReady(browser, tlsOrigin.TopA + "trusted-connect");
+        Check(tunnel.Tunnels > 0 && tlsOrigin.Take("/trusted-connect").Length > 0 &&
+            !tlsOriginPorts.IsEmpty && tlsOriginPorts.All(tunnel.UpstreamPorts.Contains),
+            "trusted HTTP CONNECT target reached independent TLS origin");
+
+        await Configure($"https://127.0.0.1:{secureProxy.Port}");
+        await LoadReady(browser, $"http://aegis-secure-proxy.invalid:{httpOrigin.Port}/trusted-proxy");
+        Check(secureProxy.ApplicationRequests > 0 && httpOrigin.SawViaProxy("/trusted-proxy") &&
+            httpOrigin.OnlyFrom(() => secureProxy.UpstreamPorts),
+            "trusted HTTPS proxy request reached independent HTTP origin");
+    }
+
     private sealed class HttpsTunnelFixture : IDisposable
     {
         private readonly TcpListener listener = new(IPAddress.Loopback, 0);
@@ -78,9 +115,15 @@ internal static partial class Program
         public int Tunnels => Volatile.Read(ref tunnels);
         public int ApplicationRequests => Volatile.Read(ref applicationRequests);
         public X509Certificate2 Certificate { get; }
+        private readonly int? forwardPort;
+        private readonly string expectedConnect;
+        private readonly ConcurrentQueue<int> upstreamPorts = new();
+        public int[] UpstreamPorts => upstreamPorts.ToArray();
 
-        public HttpsTunnelFixture()
+        public HttpsTunnelFixture(int? forwardPort = null)
         {
+            this.forwardPort = forwardPort;
+            expectedConnect = forwardPort is int port ? $"CONNECT 127.0.0.1:{port} HTTP/1.1" : "CONNECT aegis-tls.invalid:443 HTTP/1.1";
             using var key = RSA.Create(2048);
             var request = new CertificateRequest("CN=aegis-tls.invalid", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             var names = new SubjectAlternativeNameBuilder(); names.AddDnsName("aegis-tls.invalid");
@@ -116,7 +159,7 @@ internal static partial class Program
                     using (var reader = new StreamReader(network, Encoding.ASCII, false, 4096, leaveOpen: true))
                     {
                         var first = await reader.ReadLineAsync(token);
-                        if (first != "CONNECT aegis-tls.invalid:443 HTTP/1.1") return;
+                        if (first != expectedConnect) return;
                         for (var i = 0; i < 100; i++)
                         {
                             var line = await reader.ReadLineAsync(token); if (string.IsNullOrEmpty(line)) break;
@@ -124,6 +167,25 @@ internal static partial class Program
                         }
                     }
                     Interlocked.Increment(ref tunnels);
+                    if (forwardPort is int port)
+                    {
+                        using var upstream = new TcpClient(AddressFamily.InterNetwork);
+                        await ConnectObservedLoopback(upstream, port, upstreamPorts, token);
+                        using var upstreamStream = upstream.GetStream();
+                        Console.WriteLine($"PROXY_TLS_RECEIPT: {expectedConnect} utc={DateTimeOffset.UtcNow:O}");
+                        await network.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), token);
+                        using var relay = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        var requestCopy = network.CopyToAsync(upstreamStream, relay.Token);
+                        var responseCopy = upstreamStream.CopyToAsync(network, relay.Token);
+                        try { await await Task.WhenAny(requestCopy, responseCopy); }
+                        finally
+                        {
+                            relay.Cancel();
+                            try { await Task.WhenAll(requestCopy, responseCopy); }
+                            catch (OperationCanceledException) when (relay.IsCancellationRequested) { }
+                        }
+                        return;
+                    }
                     await network.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), token);
                     using var tls = new SslStream(network);
                     await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = Certificate }, token);

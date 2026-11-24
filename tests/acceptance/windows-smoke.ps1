@@ -10,6 +10,35 @@ $idlePeer = $null
 $httpsHelper = $null
 $httpsControl = $null
 $httpsUrl = $null
+$httpsComplete = $false
+$smokePassed = $false
+$trace = [Collections.Generic.List[string]]::new()
+function Add-PackageTrace([string]$Stage, [string]$Detail = 'none') {
+    $trace.Add("PACKAGE_HTTPS qpc=$([Diagnostics.Stopwatch]::GetTimestamp()) source=driver stage=$Stage detail=$Detail")
+}
+function Get-PackageTrace {
+    $trace
+    if (!$httpsControl) { return }
+    foreach ($name in @('browser.trace', 'helper.out.log')) {
+        $path = Join-Path $httpsControl $name
+        if (Test-Path -LiteralPath $path) {
+            Get-Content -LiteralPath $path -Tail 128 | Where-Object {
+                $_ -cmatch '^PACKAGE_HTTPS qpc=[0-9]+ source=(browser|helper) stage=[a-z_]+ detail=[A-Za-z0-9_-]+$'
+            }
+        }
+    }
+}
+function Get-PackageFailure([string[]]$Events, [bool]$BrowserExited) {
+    $joined = $Events -join "`n"
+    if ($BrowserExited -or $httpsComplete -or
+        ($joined -match 'stage=window_ready ' -and $joined -notmatch 'stage=observer_ready ')) { return 'Browser lifecycle failure' }
+    if ($joined -notmatch 'stage=address_enter detail=fixture') { return 'No browser navigation' }
+    if ($joined -notmatch 'stage=tcp_accept ') { return 'No TCP connection' }
+    if ($joined -notmatch 'stage=tls_ok ') { return 'TLS or certificate failure' }
+    if ($joined -notmatch 'stage=main_observed ') { return 'Main request missing' }
+    if ($joined -notmatch 'stage=image_observed ') { return 'Subresource (image) missing' }
+    return 'Marker publication failure'
+}
 try {
     Add-Type -TypeDefinition @'
 using System;
@@ -90,6 +119,7 @@ public static class AegisSmokeInput {
         $helperOut = Join-Path $httpsControl 'helper.out.log'
         $helperErr = Join-Path $httpsControl 'helper.err.log'
         $httpsHelper = Start-Process -FilePath $helperExe -ArgumentList @('https-package-server', ('"' + $env:P403_PACKAGE_TRUST_DIR + '"'), ('"' + $httpsControl + '"')) -WindowStyle Hidden -RedirectStandardOutput $helperOut -RedirectStandardError $helperErr -PassThru
+        [void]$httpsHelper.Handle
         $readyFile = Join-Path $httpsControl 'ready.txt'
         $readyWatch = [Diagnostics.Stopwatch]::StartNew()
         while (!(Test-Path -LiteralPath $readyFile) -and $readyWatch.ElapsedMilliseconds -lt 45000) {
@@ -105,7 +135,14 @@ public static class AegisSmokeInput {
             throw 'Unexpected controlled HTTPS fixture address.'
         }
     }
-    $process = Start-Process -FilePath $exe -ArgumentList "--profile=$profile" -WindowStyle Hidden -PassThru
+    $startArguments = @{ FilePath=$exe; ArgumentList="--profile=$profile"; WindowStyle='Hidden'; PassThru=$true }
+    if ($httpsUrl) {
+        $startArguments.Environment = @{ AEGIS_PACKAGE_SMOKE_TRACE=$httpsControl; AEGIS_PACKAGE_SMOKE_URL=$httpsUrl }
+    }
+    Add-PackageTrace 'browser_start_requested'
+    $process = Start-Process @startArguments
+    [void]$process.Handle
+    Add-PackageTrace 'browser_started' $process.Id
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     $browserHandle = [IntPtr]::Zero
     $expectedTitle = 'Aegis Browser ' + [char]0x2014 + ' ' + $profile
@@ -117,6 +154,7 @@ public static class AegisSmokeInput {
         if ($browserHandle -ne [IntPtr]::Zero) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($browserHandle -eq [IntPtr]::Zero) { throw 'Expected browser window was not found for the test-owned process.' }
+    Add-PackageTrace 'window_ready'
     # Let asynchronous Chromium startup progress; an early window alone is insufficient.
     Start-Sleep -Seconds 5
     $process.Refresh()
@@ -212,16 +250,32 @@ public static class AegisSmokeInput {
     Write-Output 'PASS: launched browser requested the controlled loopback HTTP page.'
 
     if ($httpsUrl) {
+        # The HTTP listener can see a request before CEF posts its final address
+        # update. Wait for that update on the UI thread within the HTTP budget.
+        $browserTrace = Join-Path $httpsControl 'browser.trace'
+        $httpUiSettled = $false
+        while ($watch.ElapsedMilliseconds -lt 15000) {
+            if ((Test-Path -LiteralPath $browserTrace) -and
+                (Select-String -LiteralPath $browserTrace -Quiet -Pattern 'source=browser stage=http_ui_settled detail=none$')) {
+                $httpUiSettled = $true
+                break
+            }
+            if ($process.HasExited) { throw "Browser exited while settling HTTP navigation: $($process.ExitCode)" }
+            Start-Sleep -Milliseconds 50
+        }
+        if (!$httpUiSettled) { throw 'The HTTP control navigation did not finish updating the browser address.' }
         if (![AegisSmokeInput]::IsOwnedBy($addressHandle, $process.Id)) { throw 'Browser address control no longer belongs to the test process.' }
         $messageResult = [IntPtr]::Zero
         if ([AegisSmokeInput]::SendTextTimeout($addressHandle, 0x000C, [IntPtr]::Zero, $httpsUrl,
                 2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero -or $messageResult -eq [IntPtr]::Zero) {
             throw 'Browser address control did not accept the controlled HTTPS URL.'
         }
+        Add-PackageTrace 'address_set'
         foreach ($message in @(0x0100, 0x0101)) {
             if ([AegisSmokeInput]::SendMessageTimeout($addressHandle, $message, [IntPtr]13, [IntPtr]0,
                     2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero) { throw 'HTTPS navigation input was not accepted.' }
         }
+        Add-PackageTrace 'https_input_sent'
         $observedFile = Join-Path $httpsControl 'observed.txt'
         $observedWatch = [Diagnostics.Stopwatch]::StartNew()
         while (!(Test-Path -LiteralPath $observedFile) -and $observedWatch.ElapsedMilliseconds -lt 25000) {
@@ -232,6 +286,8 @@ public static class AegisSmokeInput {
         if (!(Test-Path -LiteralPath $observedFile) -or (Get-Content -LiteralPath $observedFile -Raw).Trim() -cne 'https-request-observed') {
             throw 'The launched browser did not deliver the controlled HTTPS request.'
         }
+        $httpsComplete = $true
+        Add-PackageTrace 'marker_verified'
         Write-Output 'PASS: launched browser delivered controlled HTTPS page and same-origin subresource requests under normal certificate validation.'
     }
 
@@ -258,12 +314,14 @@ public static class AegisSmokeInput {
             2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero) { throw 'Could not request a normal window close.' }
     if (!$process.WaitForExit(15000)) { throw 'Browser did not exit within 15 seconds of normal close.' }
     if ($process.ExitCode -ne 0) { throw "Browser exited with code $($process.ExitCode)" }
+    Add-PackageTrace 'browser_exit' $process.ExitCode
     Write-Output 'PASS: Windows published-app window startup, profile cache creation and normal close.'
     if (!$httpsUrl) { Write-Output 'NOT TESTED: HTTPS/TLS (the hosted-runner fixture was not enabled).' }
     Write-Output 'NOT TESTED: permissions, cookie behavior or visual correctness.'
     if ($httpsHelper) {
         Set-Content -LiteralPath (Join-Path $httpsControl 'stop.txt') -Value 'stop'
         if (!$httpsHelper.WaitForExit(15000)) { throw 'Controlled HTTPS helper did not shut down.' }
+        Add-PackageTrace 'helper_exit' $httpsHelper.ExitCode
         if ($httpsHelper.ExitCode -ne 0) { throw "Controlled HTTPS helper failed (exit $($httpsHelper.ExitCode))." }
         $helperLog = Get-Content -LiteralPath $helperOut -Raw
         if ($helperLog -notmatch 'PASS: controlled HTTPS server observed the package navigation' -or
@@ -272,12 +330,30 @@ public static class AegisSmokeInput {
         }
         Write-Output 'PASS: controlled HTTPS helper removed its exact test root.'
     }
+    $smokePassed = $true
+}
+catch {
+    if ($httpsControl) {
+        $events = @(Get-PackageTrace)
+        $browserExited = $null -ne $process -and $process.HasExited
+        $classification = Get-PackageFailure $events $browserExited
+        Write-Output "PACKAGE_HTTPS_FAILURE: $classification"
+    }
+    throw
 }
 finally {
     if ($idlePeer) { $idlePeer.Dispose() }
     if ($listener) { $listener.Stop() }
     if ($process) {
-        if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+        if (!$process.HasExited) {
+            Add-PackageTrace 'browser_failure_teardown'
+            if ($browserHandle) {
+                $ignored = [IntPtr]::Zero
+                [void][AegisSmokeInput]::SendMessageTimeout($browserHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$ignored)
+            }
+            if (!$process.WaitForExit(15000)) { $process.Kill(); $process.WaitForExit() }
+        }
+        Add-PackageTrace 'browser_final_exit' $process.ExitCode
         $process.Dispose()
     }
     if ($httpsHelper) {
@@ -285,7 +361,40 @@ finally {
             try { Set-Content -LiteralPath (Join-Path $httpsControl 'stop.txt') -Value 'stop' } catch { }
             if (!$httpsHelper.WaitForExit(15000)) { $httpsHelper.Kill(); $httpsHelper.WaitForExit() }
         }
+        Add-PackageTrace 'helper_final_exit' $httpsHelper.ExitCode
         $httpsHelper.Dispose()
+    }
+    if ($httpsControl) {
+        $events = @(Get-PackageTrace | Sort-Object { [long]([regex]::Match($_, 'qpc=([0-9]+)').Groups[1].Value) })
+        $events | Write-Output
+        if (!$smokePassed) {
+            $diagnostics = @("classification=$classification", $events)
+            $chromium = Join-Path $profilePath 'chromium.log'
+            if (Test-Path -LiteralPath $chromium) {
+                $diagnostics += @(Get-Content -LiteralPath $chromium -Tail 64 | ForEach-Object {
+                    # Preserve only Chromium's timestamp and source-location token.
+                    if ($_ -match '^\[([0-9:/.]+):(?:WARNING|ERROR|FATAL):([A-Za-z0-9_./]+):([0-9]+)\]') {
+                        "CHROMIUM_ERROR timestamp=$($Matches[1]) location=$($Matches[2]):$($Matches[3])"
+                    }
+                })
+            }
+            foreach ($name in @('helper.out.log', 'helper.err.log')) {
+                $path = Join-Path $httpsControl $name
+                if (Test-Path -LiteralPath $path) {
+                    $diagnostics += @(Get-Content -LiteralPath $path -Tail 64 | Where-Object {
+                        $_ -match '^P403_STAGE: [a-z_]+$|^P404_HTTPS_FIXTURE: [a-z0-9=_ ]+$'
+                    })
+                    $diagnostics += @(Get-Content -LiteralPath $path -Tail 64 | ForEach-Object {
+                        if ($_ -match '^(System\.[A-Za-z.]+Exception):') { "HELPER_ERROR type=$($Matches[1])" }
+                    })
+                }
+            }
+            $diagnostics | Write-Output
+            if ($env:AEGIS_PACKAGE_HTTPS_EVIDENCE) {
+                New-Item -ItemType Directory -Path $env:AEGIS_PACKAGE_HTTPS_EVIDENCE -Force | Out-Null
+                $diagnostics | Set-Content -LiteralPath (Join-Path $env:AEGIS_PACKAGE_HTTPS_EVIDENCE "$profile.log")
+            }
+        }
     }
     # Keep the isolated profile/logs for failure investigation. Do not delete any user profile.
     Write-Output "Smoke-test profile/logs: $profilePath"

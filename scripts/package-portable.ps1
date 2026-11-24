@@ -1,6 +1,10 @@
-param([string]$PublishDirectory = 'artifacts/win-x64', [string]$OutputDirectory = 'artifacts/portable')
+param([string]$PublishDirectory = 'artifacts/win-x64', [string]$OutputDirectory = 'artifacts/portable',
+    [ValidateRange(1, 20)][int]$SmokeRuns = 1)
 $ErrorActionPreference = 'Stop'
 if (!$IsWindows) { throw 'Packaging verification requires Windows.' }
+if ($SmokeRuns -gt 1 -and ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or !$env:P403_PACKAGE_TRUST_DIR)) {
+    throw 'Repeated HTTPS smoke runs require the disposable hosted runner and trust fixture.'
+}
 if ($env:GITHUB_ACTIONS -eq 'true' -and [string]::IsNullOrWhiteSpace($env:P403_PACKAGE_TRUST_DIR)) {
     throw 'Hosted packaging requires the disposable HTTPS package fixture.'
 }
@@ -61,7 +65,29 @@ foreach ($file in $expected) {
 ./tests/acceptance/verify-published-runtime.ps1 -PublishDirectory $unpacked -ExpectedRuntimeVersion '10.0.15'
 ./tests/acceptance/verify-cef-notices.ps1 -PublishDirectory $unpacked -CreditsFile (Join-Path $unpacked 'third-party-licenses/CEF-CREDITS.html')
 ./tests/acceptance/verify-dotnet-notices.ps1 -PublishDirectory $unpacked -NoticeDirectory (Join-Path $unpacked 'third-party-licenses')
-./tests/acceptance/windows-smoke.ps1 -PublishDirectory $unpacked
+$smokeFailures = 0
+for ($run = 1; $run -le $SmokeRuns; $run++) {
+    try {
+        Write-Output "PACKAGE_HTTPS_RUN: run=$run total=$SmokeRuns"
+        ./tests/acceptance/windows-smoke.ps1 -PublishDirectory $unpacked
+        Write-Output "PACKAGE_HTTPS_RUN_RESULT: run=$run status=PASS"
+    }
+    catch {
+        $smokeFailures++
+        Write-Output "PACKAGE_HTTPS_RUN_RESULT: run=$run status=FAIL reason=$($_.Exception.Message)"
+        if ($SmokeRuns -eq 1) { throw }
+    }
+    finally {
+        if ($SmokeRuns -gt 1) {
+            ./tests/acceptance/p403-cleanup-test-ca.ps1 -TrustDirectory $env:P403_PACKAGE_TRUST_DIR
+            if ($run -lt $SmokeRuns) {
+                New-Item -ItemType Directory -Path $env:P403_PACKAGE_TRUST_DIR -ErrorAction Stop | Out-Null
+            }
+        }
+    }
+}
+if ($smokeFailures) { throw "PACKAGE_HTTPS_SUMMARY: passed=$($SmokeRuns - $smokeFailures) failed=$smokeFailures" }
+Write-Output "PACKAGE_HTTPS_SUMMARY: passed=$SmokeRuns failed=0"
 "$hash  $([IO.Path]::GetFileName($zip))" | Set-Content -LiteralPath $sidecar -ErrorAction Stop
 # A same-parent directory rename publishes both validated files together. The
 # destination must still be absent: Directory.Move never overwrites an existing

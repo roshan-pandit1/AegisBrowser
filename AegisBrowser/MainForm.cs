@@ -12,6 +12,7 @@ public sealed class MainForm : Form
     private readonly Button back;
     private readonly Button forward;
     private readonly Button reload;
+    private readonly PackageSmokeTrace? packageSmoke;
     private bool closing;
     private bool closeComplete;
     private readonly PrivacySession privacy;
@@ -44,6 +45,7 @@ public sealed class MainForm : Form
     internal MainForm(string profile, string? profilePath, Func<ChromiumWebBrowser, Task<double>>? zoomQuery,
         Action<string>? privacyLoadWarning = null)
     {
+        packageSmoke = PackageSmokeTrace.Create(profile);
         letterboxZoomQuery = zoomQuery ?? (browser =>
             (browser.GetBrowserHost() ?? throw new InvalidOperationException("CEF browser host unavailable.")).GetZoomLevelAsync());
         var configuration = new PrivacyConfiguration();
@@ -235,6 +237,8 @@ public sealed class MainForm : Form
     internal bool SubmitAddress(string input)
     {
         var result = AddressInputResolver.Resolve(input, searchSettings.EngineId);
+        packageSmoke?.Record("address_enter",
+            packageSmoke.Matches(result.Url) ? (Current is null ? "no_browser" : "fixture") : "other");
         if (result.Kind == AddressInputKind.Empty) return false;
         if (result.Kind == AddressInputKind.Rejected)
         {
@@ -416,7 +420,14 @@ public sealed class MainForm : Form
         browser.DownloadHandler = new DenyDownloads(Report);
         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
-        browser.LoadingStateChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
+        browser.LoadingStateChanged += (_, e) => Post(() =>
+        {
+            if (tabs.SelectedTab != page) return;
+            UpdateNavigation();
+            if (packageSmoke is not null && !e.IsLoading && !browser.IsLoading &&
+                PackageSmokeTrace.IsHttpControl(browser.Address))
+                packageSmoke.Record("http_ui_settled");
+        });
         browser.TitleChanged += (_, e) => Post(() =>
         {
             if (page.IsDisposed) return;
@@ -427,6 +438,7 @@ public sealed class MainForm : Form
         browser.FrameLoadStart += (_, e) =>
         {
             if (!e.Frame.IsMain) return;
+            if (packageSmoke?.Matches(e.Url) == true) packageSmoke.Record("navigation_start");
             if (letterboxingAtStartup) Post(() =>
             {
                 if (letterboxZoomQueries.TryGetValue(browser, out var query)) query.Invalidate();
@@ -436,11 +448,13 @@ public sealed class MainForm : Form
         browser.FrameLoadEnd += (_, e) =>
         {
             if (!e.Frame.IsMain) return;
+            if (packageSmoke?.Matches(e.Url) == true) packageSmoke.Record("navigation_finish", e.HttpStatusCode.ToString());
             if (e.HttpStatusCode >= 400) Report($"HTTP {e.HttpStatusCode} from {BrowserPolicy.DisplayOrigin(e.Url)}. Reload to retry.");
             else if (e.HttpStatusCode is >= 200 and < 400) Report("Ready");
         };
         browser.LoadError += (_, e) =>
         {
+            if (e.Frame.IsMain && packageSmoke?.Matches(e.FailedUrl) == true) packageSmoke.Record("navigation_error", e.ErrorCode.ToString());
             if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Load failed: {e.ErrorCode} at {BrowserPolicy.DisplayOrigin(e.FailedUrl)}. Reload to retry.");
         };
         page.Controls.Add(browser);
@@ -453,7 +467,12 @@ public sealed class MainForm : Form
     {
         var browser = Current;
         // Loading events must not overwrite an address the user is typing.
-        if (!address.Focused) address.Text = browser?.Address ?? "";
+        if (!address.Focused)
+        {
+            if (packageSmoke?.Matches(address.Text) == true && !packageSmoke.Matches(browser?.Address))
+                packageSmoke.Record("address_replaced");
+            address.Text = browser?.Address ?? "";
+        }
         status.Text = tabs.SelectedTab?.Tag as string ?? "Ready";
         back.Enabled = browser?.CanGoBack == true;
         forward.Enabled = browser?.CanGoForward == true;
