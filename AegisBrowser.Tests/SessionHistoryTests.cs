@@ -30,11 +30,17 @@ internal static class SessionHistoryTests
         Check(history.CompleteNavigation(tab, secondGood, "https://example.com/b", 200), "second visit recorded");
         var reload = history.BeginNavigation(tab, reload: true);
         Check(!history.CompleteNavigation(tab, reload, "https://example.com/b", 200) && history.Snapshot().Count == 2, "reload does not record or update time");
+        var delayedKind = history.BeginNavigation(tab);
+        Check(history.SetReload(tab, delayedKind, true) && !history.CompleteNavigation(tab, delayedKind, "https://example.com/b", 200), "transition callback can mark a pending reload");
+        var failed = history.BeginNavigation(tab);
+        history.FailNavigation(tab, failed);
+        Check(!history.CompleteNavigation(tab, failed, "https://example.com/failure", 200), "failed navigation cannot later record a visit");
         time = time.AddMinutes(1);
         var third = history.BeginNavigation(tab);
         Check(history.CompleteNavigation(tab, third, "http://example.net/c", 302), "third visit recorded");
         Check(history.Snapshot().Count == 2 && history.Snapshot().Last().Url.EndsWith("/b", StringComparison.Ordinal), "oldest entry evicted at limit");
         history.SetPaused(true);
+        Check(!history.UpdateTitle(tab, third, "paused title"), "paused history does not update titles");
         var duringPause = history.BeginNavigation(tab);
         history.SetPaused(false);
         Check(!history.CompleteNavigation(tab, duringPause, "https://example.com/paused", 200), "resuming cannot backfill a paused navigation");
@@ -54,7 +60,10 @@ internal static class SessionHistoryTests
         Check(SessionHistoryService.TrySanitizeUrl(prefix + new string('x', SessionHistoryService.MaxUrlLength - prefix.Length), out _), "maximum URL length accepted");
         Check(!SessionHistoryService.TrySanitizeUrl(prefix + new string('x', SessionHistoryService.MaxUrlLength - prefix.Length + 1), out _), "oversized URL rejected");
         Check(SessionHistoryService.TrySanitizeUrl("HTTPS://例え.テスト/path?q=1#x", out var idn) && !idn.Contains('?') && !idn.Contains('#'), "IDN address sanitized");
+        Check(SessionHistoryService.SanitizeTitle(new string('a', 256)).Length == 256, "maximum title length accepted");
         Check(SessionHistoryService.SanitizeTitle(new string('a', 257)).Length == 256, "long title bounded");
+        Check(SessionHistoryService.SanitizeTitle(new string('a', 255) + "😀").Length == 255, "title truncation preserves surrogate pairs");
+        Check(SessionHistoryService.SanitizeTitle(new string('\u0001', 2048) + "tail") == "", "title processing has a bounded input scan");
         Check(SessionHistoryService.SanitizeTitle("<b>text</b>") == "<b>text</b>", "markup-like title remains plain text");
 
         var concurrent = new SessionHistoryService(entryLimit: 1000);

@@ -44,6 +44,22 @@ public sealed class SessionHistoryService
         }
     }
 
+    public bool SetReload(Guid tabId, long navigationId, bool reload)
+    {
+        lock (gate)
+        {
+            if (!tabs.TryGetValue(tabId, out var nav) || nav.Generation != navigationId || nav.Completed) return false;
+            nav.Reload = reload;
+            return true;
+        }
+    }
+
+    public void FailNavigation(Guid tabId, long navigationId)
+    {
+        lock (gate)
+            if (tabs.TryGetValue(tabId, out var nav) && nav.Generation == navigationId) nav.Allowed = false;
+    }
+
     public bool CompleteNavigation(Guid tabId, long navigationId, string? url, int httpStatus)
     {
         if (httpStatus is < 200 or >= 400 || !TrySanitizeUrl(url, out var normalized)) return false;
@@ -96,8 +112,9 @@ public sealed class SessionHistoryService
     {
         lock (gate)
         {
-            var term = (search ?? "").Trim();
+            var term = search ?? "";
             if (term.Length > MaxUrlLength) term = term[..MaxUrlLength];
+            term = term.Trim();
             return entries.AsEnumerable().Reverse().Where(e => term.Length == 0 ||
                 e.Title.Contains(term, StringComparison.OrdinalIgnoreCase) || e.Url.Contains(term, StringComparison.OrdinalIgnoreCase)).ToArray();
         }
@@ -146,9 +163,19 @@ public sealed class SessionHistoryService
     {
         if (string.IsNullOrEmpty(title)) return "";
         var buffer = new System.Text.StringBuilder(Math.Min(title.Length, MaxTitleLength));
-        foreach (var c in title)
+        var examined = Math.Min(title.Length, MaxUrlLength);
+        for (var i = 0; i < examined; i++)
         {
+            var c = title[i];
             if (char.IsControl(c) || c is '\u061c' or '\u200e' or '\u200f' or >= '\u202a' and <= '\u202e' or >= '\u2066' and <= '\u2069') continue;
+            if (char.IsHighSurrogate(c) && i + 1 < examined && char.IsLowSurrogate(title[i + 1]))
+            {
+                if (buffer.Length + 2 > MaxTitleLength) break;
+                buffer.Append(c); buffer.Append(title[++i]);
+                if (buffer.Length == MaxTitleLength) break;
+                continue;
+            }
+            if (char.IsSurrogate(c)) continue;
             buffer.Append(c);
             if (buffer.Length == MaxTitleLength) break;
         }
