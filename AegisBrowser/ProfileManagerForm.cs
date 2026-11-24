@@ -136,6 +136,11 @@ public sealed class ProfileManagerForm : Form
         import.Click += async (_, _) => await ImportProfiles();
         applyTemplate.Click += (_, _) => ApplyTemplateSettings();
         selectionCount.Text = "0 selected";
+        foreach (var filter in new[] { statusFilter, folderFilter, sort })
+        {
+            var textWidth = filter.Items.Cast<string>().Max(item => TextRenderer.MeasureText(item, filter.Font).Width);
+            filter.Width = Math.Max(filter.Width, textWidth + SystemInformation.VerticalScrollBarWidth + 12);
+        }
         tools.Controls.AddRange([statusFilter, folderFilter, sort, clear]);
         foreach (Control filter in tools.Controls) filter.Margin = new Padding(0, 4, 8, 4);
         content.Controls.Add(tools, 0, 2);
@@ -143,7 +148,8 @@ public sealed class ProfileManagerForm : Form
         bulkTools.Controls.AddRange([selectVisible, clearSelection, bulkEdit, bulkCopy, bulkProxyButton, applyTemplate, export, import, selectionCount]);
         content.Controls.Add(bulkTools, 0, 3);
         var main = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 8, 0, 0) };
-        main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); main.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
+        main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
+        main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
         grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "SelectProfile", HeaderText = "Select", Width = 52 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "DisplayName", HeaderText = "Profile name", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 145, MinimumWidth = 76 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ProfileId", HeaderText = "Profile ID", Visible = false });
@@ -158,7 +164,12 @@ public sealed class ProfileManagerForm : Form
         grid.Columns.Add(new DataGridViewButtonColumn { Name = "Actions", HeaderText = "Actions", Text = "Actions", UseColumnTextForButtonValue = true, Width = 75 });
         foreach (DataGridViewColumn column in grid.Columns) if (column.Name != "SelectProfile") column.ReadOnly = true;
         grid.Columns["Status"]!.DisplayIndex = 2;
-        grid.RowTemplate.Height = 34;
+        grid.RowTemplate.Height = Math.Max(34, TextRenderer.MeasureText("Ag", grid.Font).Height + 8);
+        foreach (var name in new[] { "SelectProfile", "Actions" })
+        {
+            var column = grid.Columns[name]!;
+            column.AutoSizeMode = DataGridViewAutoSizeColumnMode.ColumnHeader;
+        }
         grid.BackgroundColor = SystemColors.Window;
         if (!SystemInformation.HighContrast)
             grid.AlternatingRowsDefaultCellStyle.BackColor = DesktopStyle.Surface;
@@ -288,6 +299,8 @@ public sealed class ProfileManagerForm : Form
         try
         {
             folderFilter.Items.Clear(); folderFilter.Items.Add("All folders"); folderFilter.Items.AddRange(folders);
+            folderFilter.DropDownWidth = folders.Select(folder => TextRenderer.MeasureText(folder, folderFilter.Font).Width)
+                .Append(folderFilter.Width).Max() + SystemInformation.VerticalScrollBarWidth;
             folderFilter.SelectedIndex = selected is null ? 0 :
                 Array.FindIndex(folders, value => string.Equals(value, selected, StringComparison.OrdinalIgnoreCase)) + 1;
         }
@@ -327,8 +340,12 @@ public sealed class ProfileManagerForm : Form
                 var metadata = profile.Metadata;
                 var index = grid.Rows.Add(metadata is not null && selectedIds.Contains(metadata.Id), profile.DisplayName, metadata?.Id.ToString("D") ?? "Not registered", profile.Slug,
                     metadata is null ? "" : string.Join(", ", metadata.Tags), metadata is null ? "" : string.Join(", ", metadata.Folders),
-                    metadata?.UpdatedUtc.ToLocalTime().ToString("g") ?? "—", StatusText(profile.Status.Activity), ProxyStateText(profile.ProxyState));
+                    metadata?.UpdatedUtc.ToLocalTime().ToString("d") ?? "—",
+                    profile.Status.Activity == ProfileActivity.Missing ? "Missing" : StatusText(profile.Status.Activity),
+                    ProxyStateText(profile.ProxyState));
                 grid.Rows[index].Tag = profile;
+                grid.Rows[index].Cells["Updated"].ToolTipText = metadata?.UpdatedUtc.ToLocalTime().ToString("g") ?? "";
+                grid.Rows[index].Cells["Status"].ToolTipText = profile.Status.Detail;
                 grid.Rows[index].Cells["SelectProfile"].ReadOnly = metadata is null;
             }
             grid.ClearSelection();
@@ -400,7 +417,7 @@ public sealed class ProfileManagerForm : Form
         openDetails.Enabled = p?.CanLaunch == true; editDetails.Enabled = proxyDetails.Enabled = p is not null;
         if (p is null) { details.Text = "Select a profile to view its details."; return; }
         var m = p.Metadata;
-        details.Text = $"{p.DisplayName}\r\n\r\nStatus: {StatusText(p.Status.Activity)}\r\n{p.Status.Detail}\r\nSaved proxy: {ProxyStateText(p.ProxyState)}\r\n\r\n" +
+        details.Text = $"{p.DisplayName}\r\nStatus: {StatusText(p.Status.Activity)}\r\nSaved proxy: {ProxyStateText(p.ProxyState)}\r\n{p.Status.Detail}\r\n\r\n" +
             $"Profile ID: {m?.Id.ToString("D") ?? "Not registered"}\r\nStorage slug: {p.Slug}\r\n" +
             $"Metadata version: {m?.MetadataVersion.ToString() ?? "—"}\r\nRevision: {m?.Revision.ToString() ?? "—"}\r\n" +
             $"Created: {m?.MetadataCreatedUtc.ToLocalTime().ToString("g") ?? "—"}\r\nUpdated: {m?.UpdatedUtc.ToLocalTime().ToString("g") ?? "—"}\r\n\r\n" +
