@@ -17,6 +17,13 @@ internal static partial class Program
     private const string Origin = "https://browser-tests.invalid/";
     private static int checks;
 
+    private static IEnumerable<Control> BrowserShellControls(MainForm form) =>
+        form.Controls.OfType<TableLayoutPanel>().Single().Controls.Cast<Control>()
+            .SelectMany(row => row.Controls.Cast<Control>());
+
+    private static ToolStripItem BrowserMenuItem(MainForm form, string name) =>
+        form.Controls.Find("BrowserMore", true).Single().ContextMenuStrip!.Items[name]!;
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -535,9 +542,9 @@ internal static partial class Program
         using var form = new MainForm("integration");
         form.Show();
         var tabs = form.Controls.OfType<TabControl>().Single();
-        var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
+
         var status = form.Controls.OfType<StatusStrip>().Single().Items.OfType<ToolStripStatusLabel>().Last();
-        Button Button(string label) => toolbar.Controls.OfType<Button>().Single(b => b.Text == label);
+        Button Button(string label) => BrowserShellControls(form).OfType<Button>().Single(button => button.Text == label);
         ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
         await Wait(() => tabs.TabCount == 1, "initial tab"); await Ready(Current());
         Check(await Js(Current(), "document.querySelector('#result').textContent.includes('userAgent')") == "True", "embedded diagnostics renders in CEF");
@@ -551,7 +558,7 @@ internal static partial class Program
         Button("←").PerformClick(); await Wait(() => navigating.Address == Origin + "one" && !navigating.IsLoading, "back navigation");
         Button("→").PerformClick(); await Wait(() => navigating.Address == Origin + "two" && !navigating.IsLoading, "forward navigation");
         Check(true, "back and forward navigation buttons");
-        var address = toolbar.Controls.OfType<TextBox>().Single();
+        var address = (TextBox)form.Controls.Find("BrowserAddress", true).Single();
         address.Focus(); address.Text = "editing.example/path";
         await ReloadReady(navigating);
         Check(address.Text == "editing.example/path", "loading does not overwrite an address being typed");
@@ -566,7 +573,7 @@ internal static partial class Program
         Button("←").PerformClick(); await Wait(() => navigating.Address == previousUrl && !navigating.IsLoading, "back from search");
         Button("→").PerformClick(); await Wait(() => navigating.Address.StartsWith("https://duckduckgo.com/") && !navigating.IsLoading, "forward to search");
         Check(tabs.TabCount == 1, "search preserves tab count and history");
-        Button("Search").PerformClick();
+        BrowserMenuItem(form, "OpenSearchSettings").PerformClick();
         var searchForm = form.OwnedForms.OfType<SearchSettingsForm>().Single();
         var picker = searchForm.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<ComboBox>().Single();
         picker.SelectedItem = SearchEngines.Get("google"); searchForm.SaveSelection(); searchForm.Close();
@@ -576,10 +583,10 @@ internal static partial class Program
         Check(await Js(navigating, "new URL(location.href).searchParams.get('q')") == "日本語 + café", "search query reaches renderer without double encoding");
         Check(!form.SubmitAddress("javascript:alert(1)"), "omnibox rejects script schemes");
         await LoadReady(navigating, BrowserPolicy.DiagnosticsUrl);
-        for (var i = 0; i < 5; i++) { Button("+").PerformClick(); Button("×").PerformClick(); }
+        for (var i = 0; i < 5; i++) { Button("New tab").PerformClick(); Button("Close tab").PerformClick(); }
         await Wait(() => tabs.TabCount == 1, "rapid native tab closure");
         Check(tabs.TabCount == 1, "rapid tab creation and disposal during loading");
-        Button("+").PerformClick(); await Ready(Current());
+        Button("New tab").PerformClick(); await Ready(Current());
         var damaged = Current();
         await Cef.UIThreadTaskFactory.StartNew(() => damaged.GetBrowserHost().ExecuteDevToolsMethod(0, "Page.crash", new Dictionary<string, object>()));
         await Wait(() => status.Text?.Contains("Renderer stopped") == true, "renderer termination diagnostic");
@@ -594,16 +601,16 @@ internal static partial class Program
             new Dictionary<string, object> { ["expression"] = "window.blankPopup=window.open('about:blank','blank'); window.blankOpener=!!window.blankPopup && window.blankPopup.opener===window;", ["userGesture"] = true }));
         await Wait(() => ownerPopups.PopupCount == 1, "blank popup created");
         Check(await Js(owner, "window.blankOpener") == "True", "user-initiated about:blank preserves opener");
-        Button("×").PerformClick();
-        Button("×").PerformClick(); // Idempotent while the selected tab is retiring.
+        Button("Close tab").PerformClick();
+        Button("Close tab").PerformClick(); // Idempotent while the selected tab is retiring.
         await Wait(() => ownerPopups.PopupCount == 0, "owner tab closes its native popup");
         await Wait(() => tabs.TabCount == 1, "owner tab removed after native close readiness");
         Check(true, "popup lifecycle ends with owner tab");
         var last = Current();
-        Button("×").PerformClick();
+        Button("Close tab").PerformClick();
         await Wait(() => tabs.TabCount == 1 && Current() != last, "last tab replacement created");
         await Ready(Current()); Check(tabs.TabCount == 1, "last-tab replacement");
-        for (var i = 0; i < 4; i++) Button("+").PerformClick();
+        for (var i = 0; i < 4; i++) Button("New tab").PerformClick();
         form.Close();
         form.Close(); // Repeated window-close requests during tab initialization.
         await Wait(() => form.IsDisposed, "asynchronous window shutdown");

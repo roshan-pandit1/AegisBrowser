@@ -6,7 +6,7 @@ namespace AegisBrowser;
 
 public sealed class MainForm : Form
 {
-    private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
+    private readonly TabControl tabs = new() { Dock = DockStyle.Fill, ShowToolTips = true, AccessibleName = "Browser tabs" };
     private readonly TextBox address = new() { Dock = DockStyle.Fill, AccessibleName = "Address" };
     private readonly ToolStripStatusLabel status = new() { Text = "Ready", Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly Button back;
@@ -84,46 +84,82 @@ public sealed class MainForm : Form
                 : "\n\nThe existing Chromium WebRTC policy could not be restored to the default."),
             "WebRTC privacy setting could not be applied");
         Text = $"Aegis Browser — {profile}";
-        Width = 1250;
-        Height = 850;
-        MinimumSize = new Size(750, 450);
-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 11 };
-        for (var i = 0; i < 11; i++)
-            bar.ColumnStyles.Add(new ColumnStyle(i == 3 ? SizeType.Percent : SizeType.Absolute,
-                i == 3 ? 100 : i >= 6 ? 100 : 48));
-        back = MakeButton("←", () => Current?.Back());
-        forward = MakeButton("→", () => Current?.Forward());
-        reload = MakeButton("Reload", () => { if (Current?.IsLoading == true) Current.Stop(); else Current?.Reload(); });
+        DesktopStyle.Apply(this);
+        ClientSize = new(1150, 740);
+        MinimumSize = new(570, 340);
+
+        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
+        shell.RowStyles.Add(new(SizeType.Absolute, 48));
+        shell.RowStyles.Add(new(SizeType.Absolute, 52));
+        shell.RowStyles.Add(new(SizeType.Percent, 100));
+        var tabActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new(8, 4, 8, 4),
+            WrapContents = false, BackColor = DesktopStyle.Header
+        };
+        tabActions.Controls.Add(MakeButton("New tab", "New tab (Ctrl+T)", () => NewTab(BrowserPolicy.DiagnosticsUrl)));
+        tabActions.Controls.Add(MakeButton("Close tab", "Close current tab (Ctrl+W)", CloseTab));
+        shell.Controls.Add(tabActions, 0, 0);
+
+        var bar = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 7, RowCount = 1, Margin = Padding.Empty,
+            Padding = new(8, 4, 8, 4), BackColor = DesktopStyle.Surface
+        };
+        bar.ColumnStyles.Add(new(SizeType.Absolute, 42));
+        bar.ColumnStyles.Add(new(SizeType.Absolute, 42));
+        bar.ColumnStyles.Add(new(SizeType.Absolute, 68));
+        bar.ColumnStyles.Add(new(SizeType.Percent, 100));
+        for (var i = 0; i < 3; i++) bar.ColumnStyles.Add(new(SizeType.AutoSize));
+        back = MakeButton("←", "Back (Alt+Left)", () => Current?.Back());
+        forward = MakeButton("→", "Forward (Alt+Right)", () => Current?.Forward());
+        reload = MakeButton("Reload", "Reload (F5)", () => { if (Current?.IsLoading == true) Current.Stop(); else Current?.Reload(); });
         bar.Controls.Add(back, 0, 0);
         bar.Controls.Add(forward, 1, 0);
         bar.Controls.Add(reload, 2, 0);
+        address.Dock = DockStyle.None;
+        address.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        address.Margin = new(8, 0, 8, 0);
         bar.Controls.Add(address, 3, 0);
-        bar.Controls.Add(MakeButton("+", () => NewTab(BrowserPolicy.DiagnosticsUrl)), 4, 0);
-        bar.Controls.Add(MakeButton("×", CloseTab), 5, 0);
-        bar.Controls.Add(MakeButton("Diagnostics", () => NewTab(BrowserPolicy.DiagnosticsUrl)), 6, 0);
-        bar.Controls.Add(MakeButton("DevTools", () => Current?.ShowDevTools()), 7, 0);
-        bar.Controls.Add(MakeButton("Privacy", () =>
+        bar.Controls.Add(MakeButton("Privacy", "Privacy settings", () =>
         {
             if (privacyWindow is null || privacyWindow.IsDisposed)
                 privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save), cookiePolicy.Status, letterboxingAtStartup, disableWebGlAtStartup, disableRemoteFontsAtStartup, webRtcPolicy.Status);
             privacyWindow.Show(this); privacyWindow.BringToFront();
-        }), 8, 0);
-        bar.Controls.Add(MakeButton("Search", () =>
+        }), 4, 0);
+        var profiles = MakeButton("Profiles", $"Current profile: {profile}. Open browser profiles", () =>
+        {
+            var manager = new ProfileManagerForm(ProfileCatalog.DefaultRoot);
+            manager.Show(this);
+        });
+        bar.Controls.Add(profiles, 5, 0);
+        var menu = new ContextMenuStrip();
+        var more = MakeButton("More ▾", "More browser actions", () => menu.Show(bar.GetControlFromPosition(6, 0)!, new Point(0, bar.Height - bar.Padding.Top)));
+        menu.Items.Add("Diagnostics", null, (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl)).Name = "OpenDiagnostics";
+        menu.Items.Add("Developer tools (F12)", null, (_, _) => Current?.ShowDevTools());
+        menu.Items.Add("Search settings", null, (_, _) =>
         {
             if (searchWindow is null || searchWindow.IsDisposed)
                 searchWindow = new SearchSettingsForm(searchSettings, settings =>
                 {
-                    searchStore?.Save(settings); // Publish only after persistence succeeds.
+                    searchStore?.Save(settings);
                     searchSettings = settings;
                     address.PlaceholderText = "Search " + SearchEngines.Get(settings.EngineId).Name + " or enter address";
                 });
             searchWindow.Show(this); searchWindow.BringToFront();
-        }), 9, 0);
-        bar.Controls.Add(MakeButton("Profiles", () =>
-        {
-            var manager = new ProfileManagerForm(ProfileCatalog.DefaultRoot);
-            manager.Show(this);
-        }), 10, 0);
+        });
+        menu.Items[^1].Name = "OpenSearchSettings";
+        more.Name = "BrowserMore";
+        more.ContextMenuStrip = menu;
+        bar.Controls.Add(more, 6, 0);
+        Disposed += (_, _) => menu.Dispose();
+        shell.Controls.Add(bar, 0, 1);
+        shell.Dock = DockStyle.Top;
+        shell.Height = 100;
+        shell.RowCount = 2;
+        shell.RowStyles.RemoveAt(2);
+        tabs.Margin = Padding.Empty;
+        address.Name = "BrowserAddress";
         address.AccessibleName = "Search or enter address";
         address.PlaceholderText = "Search " + SearchEngines.Get(searchSettings.EngineId).Name + " or enter address";
         address.KeyDown += (_, e) =>
@@ -137,7 +173,7 @@ public sealed class MainForm : Form
         bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: ask by origin |"));
         bottom.Items.Add(status);
         Controls.Add(tabs);
-        Controls.Add(bar);
+        Controls.Add(shell);
         Controls.Add(bottom);
         tabs.SelectedIndexChanged += (_, _) =>
         {
@@ -208,9 +244,10 @@ public sealed class MainForm : Form
         return true;
     }
 
-    private static Button MakeButton(string text, Action action)
+    private static Button MakeButton(string text, string accessibleName, Action action)
     {
-        var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = text };
+        var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = accessibleName, AutoSize = true };
+        DesktopStyle.Button(button);
         button.Click += (_, _) => action();
         return button;
     }
@@ -419,6 +456,8 @@ public sealed class MainForm : Form
         back.Enabled = browser?.CanGoBack == true;
         forward.Enabled = browser?.CanGoForward == true;
         reload.Text = browser?.IsLoading == true ? "Stop" : "Reload";
+        reload.AccessibleName = browser?.IsLoading == true ? "Stop loading (Esc)" : "Reload (F5)";
+        reload.Enabled = browser is not null;
     }
 
     private void CloseTab()

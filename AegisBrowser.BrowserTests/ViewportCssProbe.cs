@@ -87,9 +87,9 @@ internal static partial class Program
         {
             form.Show();
             var tabs = form.Controls.OfType<TabControl>().Single();
-            var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
-            var newTab = toolbar.Controls.OfType<Button>().Single(button => button.Text == "+");
-            var diagnostics = toolbar.Controls.OfType<Button>().Single(button => button.Text == "Diagnostics");
+
+            var newTab = BrowserShellControls(form).OfType<Button>().Single(button => button.Text == "New tab");
+            var diagnostics = BrowserMenuItem(form, "OpenDiagnostics");
             await Wait(() => warnings.Count > 0, "unreadable privacy configuration warning");
             Check(warnings.Count == 1 && warnings[0].Contains("No browser tabs", StringComparison.OrdinalIgnoreCase),
                 "unreadable privacy configuration reports browsing is blocked");
@@ -163,8 +163,8 @@ internal static partial class Program
         {
             form.Show();
             var tabs = form.Controls.OfType<TabControl>().Single();
-            var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
-            Button Button(string label) => toolbar.Controls.OfType<Button>().Single(b => b.Text == label);
+
+            Button Button(string label) => BrowserShellControls(form).OfType<Button>().Single(button => button.Text == label);
             ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
             await Wait(() => tabs.TabCount == 1, "viewport initial tab");
             var browser = Current();
@@ -198,7 +198,7 @@ internal static partial class Program
                     "unletterboxed zoom reset");
                 return;
             }
-            Button("+").PerformClick();
+            Button("New tab").PerformClick();
             await Wait(() => tabs.TabCount == 2, "viewport second tab");
             await Ready(Current());
             await LoadReady(Current(), Origin + "viewport-second");
@@ -263,7 +263,7 @@ internal static partial class Program
             tabs.SelectedIndex = 1;
             var closingTab = Current();
             closingTab.GetBrowserHost().SetZoomLevel(1);
-            Button("×").PerformClick();
+            Button("Close tab").PerformClick();
             await Wait(() => tabs.TabCount == 1, "zooming tab native close");
             await Ready(Current());
             await ReportViewport(form, tabs, Current(), enabled, "after_tab_close");
@@ -413,8 +413,8 @@ internal static partial class Program
         {
             form.Show();
             var tabs = form.Controls.OfType<TabControl>().Single();
-            var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
-            Button Button(string label) => toolbar.Controls.OfType<Button>().Single(b => b.Text == label);
+
+            Button Button(string label) => BrowserShellControls(form).OfType<Button>().Single(button => button.Text == label);
             ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
             await Wait(() => tabs.TabCount == 1 && stalledRequests == 1, "first zoom query started");
             var first = Current();
@@ -424,7 +424,7 @@ internal static partial class Program
             Check(stalledRequests == 1, "stalled query is not repeatedly queued");
             await LoadReady(first, Origin + "viewport-stalled-navigation");
             Check(stalledRequests == 1, "navigation does not multiply a stalled query");
-            Button("+").PerformClick();
+            Button("New tab").PerformClick();
             await Wait(() => tabs.TabCount == 2, "open tab while zoom query stalled");
             var second = Current();
             await Ready(second);
@@ -432,7 +432,7 @@ internal static partial class Program
             await Wait(() => otherRequests > 0, "independent tab zoom query");
             await ReportViewport(form, tabs, second, true, "other_tab_while_stalled");
             tabs.SelectedIndex = 0;
-            Button("×").PerformClick();
+            Button("Close tab").PerformClick();
             await Wait(() => tabs.TabCount == 1, "stalled tab closes without completing query");
             never.TrySetResult(5);
             await Ready(Current());

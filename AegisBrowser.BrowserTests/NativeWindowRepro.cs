@@ -96,19 +96,19 @@ internal static partial class Program
                         var tabs = form.Controls.OfType<TabControl>().Single();
                         tabs.SelectedIndexChanged += (_, _) => Trace("TabControl", tabs, "selection-" + tabs.SelectedIndex, tabs.IsHandleCreated ? tabs.Handle : IntPtr.Zero);
                         tabs.ControlRemoved += (_, _) => Trace("TabControl", tabs, "child-removed", tabs.IsHandleCreated ? tabs.Handle : IntPtr.Zero);
-                        var toolbar = form.Controls.OfType<TableLayoutPanel>().Single();
-                        Button Button(string text) => toolbar.Controls.OfType<Button>().Single(b => b.Text == text);
+
+                        Button Button(string label) => BrowserShellControls(form).OfType<Button>().Single(button => button.Text == label);
                         ChromiumWebBrowser Current() => tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
                         await Wait(() => tabs.TabCount == 1, "window repro initial tab");
                         await Ready(Current());
                         Event("INITIAL_BROWSER_READY", $"iteration={number}");
                         var previous = Current();
                         Event("LAST_TAB_CLOSE_REQUESTED", $"iteration={number}");
-                        Button("×").PerformClick();
+                        Button("Close tab").PerformClick();
                         await Wait(() => tabs.TabCount == 1 && Current() != previous, "window repro last-tab replacement");
                         await Ready(Current());
                         Trace("MainForm", form, "replacement-ready", form.IsHandleCreated ? form.Handle : IntPtr.Zero);
-                        for (var tab = 0; tab < 4; tab++) Button("+").PerformClick();
+                        for (var tab = 0; tab < 4; tab++) Button("New tab").PerformClick();
                         Trace("MainForm", form, "rapid-tabs-created", form.IsHandleCreated ? form.Handle : IntPtr.Zero);
                         var owners = tabs.TabPages.Cast<TabPage>()
                             .SelectMany(page => page.Controls.OfType<ChromiumWebBrowser>())
