@@ -168,13 +168,14 @@ internal static partial class Program
         private readonly ConcurrentBag<Task> clients = new();
         private readonly string label;
         private readonly int? allowedOriginPort;
+        private readonly Action? onRequest;
         private readonly Task loop;
         private bool stopped;
         public int Port { get; }
 
-        public LocalHttpFixture(string label, int? allowedOriginPort = null)
+        public LocalHttpFixture(string label, int? allowedOriginPort = null, Action? onRequest = null)
         {
-            this.label = label; this.allowedOriginPort = allowedOriginPort;
+            this.label = label; this.allowedOriginPort = allowedOriginPort; this.onRequest = onRequest;
             listener.Start(); Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             loop = Task.Run(AcceptLoop);
         }
@@ -217,6 +218,7 @@ internal static partial class Program
                         if (line.Equals("X-Aegis-Test-Proxy: yes", StringComparison.OrdinalIgnoreCase)) viaProxy = true;
                     }
                     requests.Enqueue((first, viaProxy)); // Only a controlled request line and a boolean; no headers or credentials.
+                    onRequest?.Invoke();
                     if (allowedOriginPort is int port)
                     {
                         var parts = first.Split(' ', 3);
