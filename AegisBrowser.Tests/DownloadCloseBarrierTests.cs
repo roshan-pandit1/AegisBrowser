@@ -12,6 +12,7 @@ internal static class DownloadCloseBarrierTests
         Check(barrier.TryRegister(11, 1, () => order.Add("cancel popup")), "same download id in another browser");
         Check(!barrier.TryRegister(10, 1, () => { }), "reject duplicate identity");
         Check(!barrier.TryRegister(0, 2, () => { }), "reject invalid browser");
+        Check(!barrier.TryRegister(10, -1, () => { }), "reject invalid download id");
         var close = barrier.BeginClose();
         Check(order.SequenceEqual(["cancel one", "cancel popup"]), "request each cancellation once");
         Check(!close.IsCompleted, "cancellation request alone cannot release browser");

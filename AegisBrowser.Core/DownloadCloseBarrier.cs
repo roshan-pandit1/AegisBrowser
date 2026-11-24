@@ -9,16 +9,16 @@ namespace AegisBrowser.Core;
 public sealed class DownloadCloseBarrier
 {
     private readonly int ownerThread = Environment.CurrentManagedThreadId;
-    private readonly Dictionary<(int BrowserId, uint DownloadId), Action> pending = new();
+    private readonly Dictionary<(int BrowserId, int DownloadId), Action> pending = new();
     private readonly TaskCompletionSource<bool> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool closing;
     private bool issuingRequests;
 
-    public bool TryRegister(int browserId, uint downloadId, Action requestCancellation)
+    public bool TryRegister(int browserId, int downloadId, Action requestCancellation)
     {
         AssertOwner();
         ArgumentNullException.ThrowIfNull(requestCancellation);
-        if (closing || browserId <= 0 || downloadId == 0) return false;
+        if (closing || browserId <= 0 || downloadId <= 0) return false;
         return pending.TryAdd((browserId, downloadId), requestCancellation);
     }
 
@@ -48,7 +48,7 @@ public sealed class DownloadCloseBarrier
     // The caller must invoke this only after observing a terminal CEF state and
     // releasing the associated callbacks, or after safely cancelling an
     // uncontinued approval and establishing that it cannot start.
-    public bool ObserveTerminal(int browserId, uint downloadId)
+    public bool ObserveTerminal(int browserId, int downloadId)
     {
         AssertOwner();
         if (!pending.Remove((browserId, downloadId))) return false;
