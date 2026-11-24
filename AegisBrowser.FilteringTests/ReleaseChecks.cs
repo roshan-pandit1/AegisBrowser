@@ -63,7 +63,10 @@ internal static partial class Program
             Check(!pause.Checked && Named<DataGridView>(settings, "Requests").Rows.Count <= 1, "restart clears pause and previous request history");
         }
         settings.Close();
-        All(form).OfType<Button>().Single(c => c.Text == "Search").PerformClick();
+        var more = Named<Button>(form, "BrowserMore");
+        var openSearch = more.ContextMenuStrip?.Items["OpenSearchSettings"]
+            ?? throw new InvalidOperationException("The More menu is missing Search settings.");
+        openSearch.PerformClick();
         var search = form.OwnedForms.OfType<SearchSettingsForm>().Single();
         if (write)
         {
