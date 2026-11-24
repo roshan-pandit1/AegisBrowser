@@ -242,7 +242,7 @@ public static class AegisSmokeInput {
     if ([AegisSmokeInput]::SendMessageTimeout($privacyButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero,
             2, 2000, [ref]$messageResult) -eq [IntPtr]::Zero) { throw 'Privacy toolbar action did not accept the click.' }
     $privacyHandle = [IntPtr]::Zero
-    $privacyTitle = 'Aegis Privacy ' + [char]0x2014 + ' profile settings and network inspector'
+    $privacyTitle = 'Privacy settings'
     $privacyDeadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
         $privacyHandle = [AegisSmokeInput]::FindWindow($process.Id, $privacyTitle)
