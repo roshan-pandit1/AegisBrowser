@@ -14,6 +14,23 @@ internal static class BookmarkTests
         var root = Path.Combine(Path.GetTempPath(), "aegis-bookmarks-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         using var lease = new ProfileLease(root);
+        if (OperatingSystem.IsWindows())
+        {
+            var moved = root + "-moved";
+            var renameBlocked = false;
+            using var first = BookmarkDirectoryObservation.Open(root, lease);
+            using var second = BookmarkDirectoryObservation.Open(root, lease);
+            Check(first.DirectoryIdentity == first.ReadHeldIdentity(), "held directory identity remains stable");
+            Check(first.DirectoryIdentity == second.DirectoryIdentity, "two handles observe the same directory identity");
+            Check(first.FinalPath.EndsWith(Path.GetFileName(root), StringComparison.OrdinalIgnoreCase), "final handle path names the fixture profile");
+            Reject(() => BookmarkDirectoryObservation.Open(Path.GetTempPath(), lease), "mismatched lease rejects directory observation");
+            try { Directory.Move(root, moved); }
+            catch (IOException) { renameBlocked = true; }
+            finally { if (Directory.Exists(moved)) Directory.Move(moved, root); }
+            Check(renameBlocked, "list-access handles block fixture profile rename");
+            Check(first.DirectoryIdentity == first.ReadHeldIdentity(), "directory identity survives blocked rename");
+            Console.WriteLine($"BOOKMARK_DIRECTORY_OBSERVATION: volume={first.DirectoryIdentity.VolumeSerial:X} id={first.DirectoryIdentity.High:X16}{first.DirectoryIdentity.Low:X16} final={first.FinalPath} held-rename-blocked={renameBlocked}");
+        }
         var store = new BookmarkStore(root, lease);
         Check(store.Snapshot().Items.Count == 0, "new store empty");
         Check(BookmarkStore.NormalizeUrl("HTTPS://Example.COM:443/a#fragment") == "https://example.com/a", "normalize URL");
@@ -43,6 +60,7 @@ internal static class BookmarkTests
         Reject(() => store.Export(Path.Combine(Path.GetTempPath(), "outside.json")), "export confined to profile");
         lease.Dispose();
         Reject(() => store.Save(store.Snapshot()), "released lease rejects save");
+        if (OperatingSystem.IsWindows()) Reject(() => BookmarkDirectoryObservation.Open(root, lease), "released lease rejects directory observation");
         using var lease2 = new ProfileLease(root);
         File.WriteAllText(Path.Combine(root, "bookmarks.json"), "{bad");
         Reject(() => _ = new BookmarkStore(root, lease2), "corrupt file blocks load");
