@@ -77,6 +77,16 @@ public sealed class DownloadDirectoryObservation : IDisposable
         return ReadIdentity(handle);
     }
 
+    // Observation only: a pending-delete result does not establish whether a
+    // particular path can be reopened, replaced, or used by CEF.
+    public bool ReadDeletePending()
+    {
+        ObjectDisposedException.ThrowIf(handle.IsClosed, this);
+        if (!GetFileStandardInformation(handle, 1, out var information, (uint)Marshal.SizeOf<FileStandardInformation>()))
+            throw NativeError("Could not inspect directory deletion state.");
+        return information.DeletePending != 0;
+    }
+
     public void Dispose() => handle.Dispose();
 
     private static DirectoryIdentity ReadIdentity(SafeFileHandle handle)
@@ -99,6 +109,11 @@ public sealed class DownloadDirectoryObservation : IDisposable
     private struct FileIdInformation { public ulong VolumeSerial; public ulong FileIdLow; public ulong FileIdHigh; }
     [StructLayout(LayoutKind.Sequential)]
     private struct FileAttributeTagInformation { public uint Attributes; public uint ReparseTag; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileStandardInformation
+    {
+        public long AllocationSize; public long EndOfFile; public uint NumberOfLinks; public byte DeletePending; public byte Directory;
+    }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -109,6 +124,9 @@ public sealed class DownloadDirectoryObservation : IDisposable
     [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileAttributeTagInformation(SafeFileHandle file, int informationClass, out FileAttributeTagInformation information, uint size);
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileStandardInformation(SafeFileHandle file, int informationClass, out FileStandardInformation information, uint size);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetVolumeInformationByHandleW(SafeFileHandle file, StringBuilder? name, uint nameSize,

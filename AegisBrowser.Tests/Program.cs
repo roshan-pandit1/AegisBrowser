@@ -8,6 +8,16 @@ if (args.Length == 1 && args[0] == "--download-directory-sharing-observation")
     DownloadDirectoryObservationTests.RunDisposableSharingObservation();
     return;
 }
+if (args.Length == 1 && args[0] == "--download-directory-delete-diagnostic")
+{
+    DownloadDirectoryObservationTests.RunDisposableDeleteDiagnostic();
+    return;
+}
+if (args.Length == 1 && args[0] == "--download-publication-observation")
+{
+    DownloadPublicationObservationTests.RunDisposable();
+    return;
+}
 
 // A child process proves that the OS lease is exclusive beyond this process.
 if (args.Length == 2 && args[0] == "--probe-lock")

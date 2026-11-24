@@ -29,10 +29,7 @@ internal static class DownloadDirectoryObservationTests
     // This performs rename and delete attempts. Never run it on the everyday host.
     internal static void RunDisposableSharingObservation()
     {
-        if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
-            Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted" ||
-            Environment.GetEnvironmentVariable("AEGIS_DISPOSABLE_DOWNLOAD_TEST") != "1")
-            throw new InvalidOperationException("This experiment requires the acknowledged disposable GitHub-hosted Windows runner.");
+        RequireDisposable();
         var runnerTemp = Environment.GetEnvironmentVariable("RUNNER_TEMP") ?? throw new IOException("Runner temporary directory is unavailable.");
         var root = Path.Combine(Path.GetFullPath(runnerTemp), "aegis-download-handles-" + Guid.NewGuid().ToString("N"));
         var ancestor = Path.Combine(root, "ancestor");
@@ -83,5 +80,46 @@ internal static class DownloadDirectoryObservationTests
             // Preserve all fixture objects for the disposable VM to discard.
             // A path alone is not sufficient evidence for cleanup.
         }
+    }
+
+    internal static void RunDisposableDeleteDiagnostic()
+    {
+        RequireDisposable();
+        var runnerTemp = Environment.GetEnvironmentVariable("RUNNER_TEMP") ?? throw new IOException("Runner temporary directory is unavailable.");
+        var root = Path.Combine(Path.GetFullPath(runnerTemp), "aegis-delete-observation-" + Guid.NewGuid().ToString("N"));
+        var stage = Path.Combine(root, "owned-stage");
+        var control = Path.Combine(root, "unheld-control");
+        Directory.CreateDirectory(stage); Directory.CreateDirectory(control);
+        Directory.Delete(control);
+        if (Directory.Exists(control)) throw new Exception("FAIL: unheld delete control did not remove the owned fixture directory");
+        Console.WriteLine("DELETE_OBSERVATION: unheld delete control succeeded");
+        using var held = DownloadDirectoryObservation.OpenExistingLocalNtfs(stage);
+        var id = held.Identity;
+        var returned = false;
+        try { Directory.Delete(stage); returned = true; }
+        catch (IOException ex) { Console.WriteLine("DELETE_OBSERVATION: delete returned IOException hresult=" + ex.HResult); }
+        catch (UnauthorizedAccessException ex) { Console.WriteLine("DELETE_OBSERVATION: delete returned access denied hresult=" + ex.HResult); }
+        Console.WriteLine("DELETE_OBSERVATION: delete_returned=" + returned + " path_exists=" + Directory.Exists(stage) +
+            " delete_pending=" + held.ReadDeletePending() + " retained_identity=" + (id == held.ReadHeldIdentity()));
+        if (returned)
+        {
+            try
+            {
+                Directory.CreateDirectory(stage);
+                using var reopened = DownloadDirectoryObservation.OpenExistingLocalNtfs(stage);
+                Console.WriteLine("DELETE_OBSERVATION: path_recreated=true same_identity=" + (id == reopened.Identity));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { Console.WriteLine("DELETE_OBSERVATION: path_recreated=false hresult=" + ex.HResult); }
+        }
+        // Preserve all test-owned objects until the disposable runner is discarded.
+    }
+
+    private static void RequireDisposable()
+    {
+        if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
+            Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted" ||
+            Environment.GetEnvironmentVariable("AEGIS_DISPOSABLE_DOWNLOAD_TEST") != "1")
+            throw new InvalidOperationException("This experiment requires the acknowledged disposable GitHub-hosted Windows runner.");
     }
 }
