@@ -38,7 +38,7 @@ public sealed class ProfileManagerForm : Form
     private readonly Label feedback = new() { Name = "DashboardFeedback", AccessibleName = "Dashboard messages", Dock = DockStyle.Fill, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly TextBox details = new() { Name = "ProfileDetails", AccessibleName = "Selected profile details", Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.FixedSingle };
     private readonly Button openDetails = new() { Text = "Launch", AccessibleName = "Launch selected profile", AutoSize = true };
-    private readonly Button editDetails = new() { Text = "Edit metadata", AccessibleName = "Edit selected profile", AutoSize = true };
+    private readonly Button editDetails = new() { Text = "Edit", AccessibleName = "Edit selected profile", AutoSize = true };
     private readonly Button proxyDetails = new() { Name = "EditProxyDraft", Text = "Proxy draft", AccessibleName = "Edit saved proxy draft", AutoSize = true };
     private readonly ContextMenuStrip actions = new();
     private IReadOnlyList<DashboardProfile> allProfiles = [];
@@ -70,9 +70,9 @@ public sealed class ProfileManagerForm : Form
         backups = new ProfileBackupService(root, repository);
         settingsTransactions = new ProfileSettingsTransactions(root, repository, templateRepository);
         Text = "Aegis Browser — Profiles";
-        AutoScaleMode = AutoScaleMode.Dpi;
+        DesktopStyle.Apply(this);
         StartPosition = FormStartPosition.CenterScreen;
-        Width = 1300; Height = 760; MinimumSize = new Size(900, 560);
+        ClientSize = new Size(1060, 640); MinimumSize = new Size(650, 460);
         KeyPreview = true;
         BuildLayout();
         BindEvents();
@@ -83,29 +83,36 @@ public sealed class ProfileManagerForm : Form
 
     private void BuildLayout()
     {
-        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Color.White };
-        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190)); shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        var sidebar = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(16), BackColor = Color.FromArgb(28, 39, 57), AutoScroll = true };
-        sidebar.Controls.Add(new Label { Text = "AEGIS BROWSER", ForeColor = Color.White, Font = new Font(Font.FontFamily, 12, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 4, 0, 24) });
-        sidebar.Controls.Add(new Label { Text = "Profiles", ForeColor = Color.White, AutoSize = true, Margin = new Padding(0, 0, 0, 14) });
-        var create = new Button { Name = "CreateProfile", Text = "+ New profile", AccessibleName = "Create profile", Width = 150, Height = 38 };
-        var refresh = new Button { Text = "Refresh", AccessibleName = "Refresh profiles", Width = 150, Height = 36 };
-        var manageTemplates = new Button { Name = "ManageTemplates", Text = "Templates", AccessibleName = "Manage profile templates", Width = 150, Height = 36 };
-        var manageBackups = new Button { Name = "ManageBackups", Text = "Backups", AccessibleName = "Manage metadata backups", Width = 150, Height = 36 };
-        var manageProxyPresets = new Button { Name = "ManageProxyPresets", Text = "Proxy presets", AccessibleName = "Manage proxy presets", Width = 150, Height = 36 };
+        var create = new Button { Name = "CreateProfile", Text = "New profile", AccessibleName = "Create profile", AutoSize = true };
+        DesktopStyle.Button(create, primary: true);
         create.Click += (_, _) => CreateProfile();
-        refresh.Click += async (_, _) => await RefreshProfiles(manual: true);
-        manageTemplates.Click += (_, _) => ManageTemplates();
-        manageBackups.Click += async (_, _) => await ManageBackups();
-        manageProxyPresets.Click += (_, _) => ManageProxyPresets();
-        sidebar.Controls.Add(create); sidebar.Controls.Add(refresh); sidebar.Controls.Add(manageTemplates); sidebar.Controls.Add(manageBackups); sidebar.Controls.Add(manageProxyPresets);
-        sidebar.Controls.Add(new Label { Text = "Local profiles\nEach profile uses its own browser storage.", ForeColor = Color.Gainsboro, Width = 150, Height = 70, Margin = new Padding(0, 24, 0, 0) });
+        var advanced = new Button { Name = "ProfileManagementActions", Text = "Actions", AccessibleName = "Profile management actions", AutoSize = true };
+        DesktopStyle.Button(advanced);
+        var management = new ContextMenuStrip();
+        advanced.ContextMenuStrip = management;
+        advanced.Click += (_, _) => management.Show(advanced, new Point(0, advanced.Height));
+        management.Items.Add("Refresh (F5)", null, async (_, _) => await RefreshProfiles(manual: true));
+        management.Items.Add("Templates", null, (_, _) => ManageTemplates());
+        management.Items.Add("Backups", null, async (_, _) => await ManageBackups());
+        var presets = management.Items.Add("Proxy presets", null, (_, _) => ManageProxyPresets());
+        presets.Name = "ManageProxyPresets";
+        presets.AccessibleName = "Manage proxy presets";
+        Disposed += (_, _) => management.Dispose();
 
-        var content = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new Padding(16) };
-        content.RowStyles.Add(new RowStyle(SizeType.AutoSize)); content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        content.RowStyles.Add(new RowStyle(SizeType.AutoSize)); content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-        content.Controls.Add(new Label { Text = "Browser profiles", AccessibleName = "Browser profiles dashboard", Font = new Font(Font.FontFamily, 17, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 10) }, 0, 0);
+        var content = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 7, ColumnCount = 1, Padding = new Padding(16) };
+        for (var i = 0; i < 4; i++) content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        content.Controls.Add(new Label { Text = "Browser profiles", Font = new Font(Font.FontFamily, 20, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 8) }, 0, 0);
+        var header = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3, RowCount = 1 };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        search.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        header.Controls.Add(search, 0, 0);
+        header.Controls.Add(create, 1, 0);
+        header.Controls.Add(advanced, 2, 0);
+        content.Controls.Add(header, 0, 1);
         var tools = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Margin = new Padding(0, 0, 0, 8) };
         statusFilter.Items.AddRange(["All statuses", "Running / in use", "Stopped"]); statusFilter.SelectedIndex = 0;
         sort.Items.AddRange(["Name A–Z", "Recently updated"]); sort.SelectedIndex = 0;
@@ -129,32 +136,47 @@ public sealed class ProfileManagerForm : Form
         import.Click += async (_, _) => await ImportProfiles();
         applyTemplate.Click += (_, _) => ApplyTemplateSettings();
         selectionCount.Text = "0 selected";
-        tools.Controls.AddRange([search, statusFilter, folderFilter, sort, clear, selectVisible, clearSelection, bulkEdit, bulkCopy, bulkProxyButton, applyTemplate, export, import, selectionCount]);
-        content.Controls.Add(tools, 0, 1); content.Controls.Add(summary, 0, 2);
+        tools.Controls.AddRange([statusFilter, folderFilter, sort, clear]);
+        foreach (Control filter in tools.Controls) filter.Margin = new Padding(0, 4, 8, 4);
+        content.Controls.Add(tools, 0, 2);
+        var bulkTools = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+        bulkTools.Controls.AddRange([selectVisible, clearSelection, bulkEdit, bulkCopy, bulkProxyButton, applyTemplate, export, import, selectionCount]);
+        content.Controls.Add(bulkTools, 0, 3);
         var main = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 8, 0, 0) };
-        main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); main.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
-        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "SelectProfile", HeaderText = "Select", Width = 55 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "DisplayName", HeaderText = "Name", Width = 170 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ProfileId", HeaderText = "Profile ID", Width = 250 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Slug", HeaderText = "Storage slug", Width = 125 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Tags", HeaderText = "Tags", Width = 140 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Folders", HeaderText = "Folders", Width = 140 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Updated", HeaderText = "Updated", Width = 150 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", Width = 110 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "SavedProxy", HeaderText = "Saved proxy", Width = 165 });
-        grid.Columns.Add(new DataGridViewButtonColumn { Name = "Launch", HeaderText = "", Text = "Launch", UseColumnTextForButtonValue = true, Width = 75 });
-        grid.Columns.Add(new DataGridViewButtonColumn { Name = "Edit", HeaderText = "", Text = "Edit", UseColumnTextForButtonValue = true, Width = 60 });
-        grid.Columns.Add(new DataGridViewButtonColumn { Name = "Actions", HeaderText = "", Text = "Actions", UseColumnTextForButtonValue = true, Width = 75 });
+        main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); main.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "SelectProfile", HeaderText = "Select", Width = 52 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "DisplayName", HeaderText = "Profile name", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 145, MinimumWidth = 76 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ProfileId", HeaderText = "Profile ID", Visible = false });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Slug", HeaderText = "Storage slug", Visible = false });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Tags", HeaderText = "Tags", Visible = false });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Folders", HeaderText = "Folder", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 85, MinimumWidth = 60 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Updated", HeaderText = "Last updated", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 110, MinimumWidth = 74 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "Status", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 76, MinimumWidth = 68 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "SavedProxy", HeaderText = "Saved proxy", Visible = false });
+        grid.Columns.Add(new DataGridViewButtonColumn { Name = "Launch", HeaderText = "", Text = "Launch", UseColumnTextForButtonValue = true, Visible = false });
+        grid.Columns.Add(new DataGridViewButtonColumn { Name = "Edit", HeaderText = "", Text = "Edit", UseColumnTextForButtonValue = true, Visible = false });
+        grid.Columns.Add(new DataGridViewButtonColumn { Name = "Actions", HeaderText = "Actions", Text = "Actions", UseColumnTextForButtonValue = true, Width = 75 });
         foreach (DataGridViewColumn column in grid.Columns) if (column.Name != "SelectProfile") column.ReadOnly = true;
+        grid.Columns["Status"]!.DisplayIndex = 2;
+        grid.RowTemplate.Height = 34;
+        grid.BackgroundColor = SystemColors.Window;
+        if (!SystemInformation.HighContrast)
+            grid.AlternatingRowsDefaultCellStyle.BackColor = DesktopStyle.Surface;
         main.Controls.Add(grid, 0, 0);
         var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Padding = new Padding(12, 0, 0, 0) };
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize)); detailPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.Controls.Add(new Label { Text = "Profile details", Font = new Font(Font, FontStyle.Bold), AutoSize = true }, 0, 0);
         detailPanel.Controls.Add(details, 0, 1);
         var detailButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+        DesktopStyle.Button(openDetails, primary: true);
+        DesktopStyle.Button(editDetails);
+        DesktopStyle.Button(proxyDetails);
         detailButtons.Controls.AddRange([openDetails, editDetails, proxyDetails]); detailPanel.Controls.Add(detailButtons, 0, 2);
-        main.Controls.Add(detailPanel, 1, 0); content.Controls.Add(main, 0, 3); content.Controls.Add(feedback, 0, 4);
-        shell.Controls.Add(sidebar, 0, 0); shell.Controls.Add(content, 1, 0); Controls.Add(shell);
+        main.Controls.Add(detailPanel, 1, 0); content.Controls.Add(main, 0, 4);
+        content.Controls.Add(summary, 0, 5);
+        feedback.AutoSize = true;
+        content.Controls.Add(feedback, 0, 6);
+        Controls.Add(content);
         actions.Items.Add("Launch", null, async (_, _) => await LaunchSelected());
         actions.Items.Add("Edit metadata", null, async (_, _) => await EditSelected());
         actions.Items.Add("Proxy draft", null, async (_, _) => await EditProxyDraft());
@@ -312,7 +334,11 @@ public sealed class ProfileManagerForm : Form
             grid.ClearSelection();
             var selected = grid.Rows.Cast<DataGridViewRow>().FirstOrDefault(r => (r.Tag as DashboardProfile)?.Slug == previous);
             if (selected is null && grid.Rows.Count > 0) selected = grid.Rows[0];
-            if (selected is not null) { selected.Selected = true; grid.CurrentCell = selected.Cells[Math.Clamp(column, 0, grid.Columns.Count - 1)]; }
+            if (selected is not null)
+            {
+                selected.Selected = true;
+                grid.CurrentCell = selected.Cells[grid.Columns[column].Visible ? column : 0];
+            }
             if (scroll >= 0 && grid.Rows.Count > 0) grid.FirstDisplayedScrollingRowIndex = Math.Min(scroll, grid.Rows.Count - 1);
         }
         finally { updatingRows = false; grid.ResumeLayout(); }

@@ -8,7 +8,7 @@ internal static partial class Program
     private static async Task ProxyPresetUi(string root, ProfileRepository profiles, Form owner)
     {
         T Control<T>(Control parent, string name) where T : Control => parent.Controls.Find(name, true).OfType<T>().Single();
-        Check(Control<Button>(owner, "ManageProxyPresets").AccessibleName == "Manage proxy presets", "dashboard exposes accessible proxy preset management");
+        Check(Control<Button>(owner, "ProfileManagementActions").ContextMenuStrip!.Items["ManageProxyPresets"]!.AccessibleName == "Manage proxy presets", "dashboard exposes accessible proxy preset management");
         var presets = new ProxyPresetRepository(root);
         using (var form = new ProxyPresetsForm(presets, false, _ => true))
         {
