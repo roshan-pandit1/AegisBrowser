@@ -3,6 +3,12 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
 
+if (args.Length == 1 && args[0] == "--bookmark-sharing")
+{
+    BookmarkSharingIsolationTests.Run();
+    return;
+}
+
 // A child process proves that the OS lease is exclusive beyond this process.
 if (args.Length == 2 && args[0] == "--probe-lock")
 {
@@ -65,6 +71,7 @@ Console.WriteLine($"PASS: core tests run on .NET {Environment.Version}, process 
 DependencyUpgradeTests.Run();
 PrivacyTests.Run();
 BookmarkTests.Run();
+BookmarkSharingIsolationTests.Run();
 ViewportLetterboxingTests.Run();
 ViewportZoomQueryTests.Run();
 AddressTests.Run();

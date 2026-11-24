@@ -49,6 +49,27 @@ same-user filesystem changes require separate handle-based qualification.
 
 ## File-access gate: BLOCKED
 
+### Target threat model (not yet qualified)
+
+The intended boundary protects against accidental path changes and application
+mistakes; rejects reparse points already present when opened; and prevents a
+different or lower-privileged process from redirecting a bookmark operation
+while the validated lease and storage handles are held. None of these are yet
+verified for the store. The corresponding positive and negative filesystem
+tests are required before claiming protection.
+
+Processes running as the same user are outside the boundary: they can normally
+open the same objects and may change permissions, names or pre-open handles.
+Administrator and SYSTEM processes are also outside it. The intended supported
+scope is fixed local NTFS; UNC/network storage, removable media, FAT, exFAT,
+ReFS and cloud placeholders are unsupported until independently qualified.
+The proposed anchor is the fixed volume root, with no filesystem ancestors
+above that root. The drive mapping and device namespace used to reach it must
+still be bound and verified. Remaining races include changes before acquisition,
+pre-existing handles, lease-to-directory identity binding, component replacement
+while walking, file substitution, publication and recovery. No test has yet
+established protection for these races.
+
 `BookmarkDirectoryObservation` is an experimental building block used only by
 the tests. It is compiled into the core assembly. Under a live
 matching lease it opens a fixed local NTFS directory with `CreateFileW`,
@@ -56,6 +77,9 @@ matching lease it opens a fixed local NTFS directory with `CreateFileW`,
 `FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES`, and read/write sharing without
 delete sharing. It reads attributes, volume serial, file ID and final path from
 the handle. It is not connected to bookmark storage or application activation.
+The observer registers with the already-held lease and closes its handle on
+revocation; it still opens after lease acquisition and is not the lease's own
+acquisition-time directory binding.
 
 The profile lease currently retains a lock-file handle and pathname; it does not
 record the profile directory file ID at lease acquisition. Consequently the
@@ -86,6 +110,22 @@ disposable runner allowed deletion and recreation with a different file ID;
 omitting delete sharing alone is not a confinement proof. The list-access
 comparison blocked the tested leaf delete/rename and held-parent rename, but
 did not cover pre-existing handles or the bookmark access path.
+
+The later 40-case Windows sharing observation separated a synthetic exclusive
+lock file from a directory handle. With no lock file, an attributes-only handle
+without delete sharing allowed the tested profile directory to be renamed or
+removed and recreated with a different file ID. A list-access handle without
+delete sharing blocked the tested profile rename and removal with sharing error
+32. With delete sharing, the tested profile rename, removal and replacement
+succeeded even with list access. The lock-file-only case blocked the tested
+profile and ancestor renames with error 5; removal reported directory-not-empty
+while the lock file existed, so that result does not isolate sharing behavior.
+In the ancestor-rename cases a handle on the ancestor with list access and no
+delete sharing returned error 32, while the unguarded control succeeded. An
+open child-directory handle produced error 5 for the tested ancestor rename,
+including with delete sharing. Held identities and final paths were recorded;
+this is one filesystem and test process, not a lower-privileged attack, a test
+of every ancestor, or an authorization for bookmark storage.
 
 Before activation, bind the lease to directory identity at acquisition; open and
 validate the full chain and each file relative to retained handles; qualify
