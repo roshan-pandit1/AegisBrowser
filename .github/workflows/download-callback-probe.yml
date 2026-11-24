@@ -1,0 +1,33 @@
+name: Native download callback fixture
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  callback-fixture:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.404'
+      - name: Record tested source
+        run: git rev-parse HEAD
+      - name: Build native fixture
+        run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Test native CEF download callbacks on loopback
+        run: |
+          $exe = './AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe'
+          foreach ($mode in @('decline', 'accept', 'cancel', 'interrupt')) {
+            $root = Join-Path $env:RUNNER_TEMP ("download-$mode-" + [guid]::NewGuid().ToString('N'))
+            $output = & $exe download-callback-probe $root $mode 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
+                ($output -join "`n") -notmatch "PASS: native download callback probe \($mode\), CEF shutdown and output listing") {
+              throw "CEF download callback fixture failed: $mode"
+            }
+          }
