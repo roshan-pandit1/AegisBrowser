@@ -101,7 +101,7 @@ internal static partial class Program
             {
                 try
                 {
-                    if (args[0] == "write") { await TabsAndRenderer(); await DashboardUi(root); }
+                    if (args[0] == "write") { await TabsAndRenderer(); await BookmarkUi(root); await DashboardUi(root); }
                     await Storage(host, root, args[0]);
                     if (args[0] == "write") await RejectUntrustedTls(host);
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
@@ -535,6 +535,50 @@ internal static partial class Program
             Check(code.ToString().StartsWith("Cert", StringComparison.Ordinal), "untrusted TLS certificate rejected by production handler: " + code);
         }
         finally { stop.Cancel(); await serving; await CloseWeb(web); host.Controls.Remove(web); }
+    }
+
+    private static async Task BookmarkUi(string root)
+    {
+        var path = Path.Combine(root, "bookmark-profile");
+        Directory.CreateDirectory(path);
+        using var lease = new ProfileLease(path);
+        using var form = new MainForm("bookmark-ui", path, lease);
+        form.Show();
+        var tabs = form.Controls.OfType<TabControl>().Single();
+        await Wait(() => tabs.TabCount == 1, "bookmark fixture tab");
+        var browser = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+        await Ready(browser);
+        var star = (Button)form.Controls.Find("BookmarkStar", true).Single();
+        Check(!star.Enabled, "diagnostics cannot be bookmarked");
+        await LoadReady(browser, Origin + "bookmarks");
+        await Wait(() => star.Enabled, "bookmark star enabled");
+        Check(star.Text == "\u2606", "unbookmarked page shows empty star");
+        form.BeginInvoke((Action)(() =>
+        {
+            var editor = form.OwnedForms.OfType<BookmarkEditorForm>().Single();
+            ((TextBox)editor.Controls.Find("BookmarkTitle", true).Single()).Text = "Fixture";
+            ((Button)editor.Controls.Find("SaveBookmark", true).Single()).PerformClick();
+        }));
+        star.PerformClick();
+        Check(star.Text == "\u2605", "saved page shows filled star");
+        Check(new BookmarkStore(path, lease).Snapshot().Items.Single().Title == "Fixture", "bookmark persisted under live lease");
+        BrowserMenuItem(form, "OpenBookmarks").PerformClick();
+        var manager = form.OwnedForms.OfType<BookmarksManagerForm>().Single();
+        var list = (ListView)manager.Controls.Find("BookmarkList", true).Single();
+        var search = (TextBox)manager.Controls.Find("BookmarkSearch", true).Single();
+        Check(list.Items.Count == 1 && list.Items[0].Text == "Fixture", "bookmark manager displays saved entry");
+        search.Text = "missing";
+        Check(list.Items.Count == 0, "bookmark manager search filters entries");
+        search.Text = "";
+        using (var screenshot = new Bitmap(manager.Width, manager.Height))
+        {
+            manager.DrawToBitmap(screenshot, new Rectangle(Point.Empty, manager.Size));
+            screenshot.Save(Path.Combine(root, "bookmarks-manager.png"));
+        }
+        manager.Close();
+        form.Close();
+        await Wait(() => form.IsDisposed, "bookmark fixture window closed");
+        Check(form.IsDisposed, "bookmark window closes normally");
     }
 
     private static async Task TabsAndRenderer()

@@ -12,6 +12,11 @@ public sealed class MainForm : Form
     private readonly Button back;
     private readonly Button forward;
     private readonly Button reload;
+    private readonly Button bookmarkStar;
+    private readonly BookmarkStore? bookmarks;
+    private BookmarksManagerForm? bookmarksWindow;
+    private readonly Dictionary<TabPage, string> committedUrls = new();
+    private readonly Dictionary<TabPage, string> pageTitles = new();
     private readonly PackageSmokeTrace? packageSmoke;
     private bool closing;
     private bool closeComplete;
@@ -40,11 +45,18 @@ public sealed class MainForm : Form
     private readonly HashSet<TabPage> retiring = new();
     private ChromiumWebBrowser? Current => tabs.SelectedTab?.Controls.OfType<ChromiumWebBrowser>().FirstOrDefault();
 
-    public MainForm(string profile, string? profilePath = null) : this(profile, profilePath, null) { }
+    public MainForm(string profile, string? profilePath = null) : this(profile, profilePath, (Func<ChromiumWebBrowser, Task<double>>?)null) { }
+
+    internal MainForm(string profile, string profilePath, ProfileLease lease) : this(profile, profilePath, null, null, lease) { }
 
     internal MainForm(string profile, string? profilePath, Func<ChromiumWebBrowser, Task<double>>? zoomQuery,
-        Action<string>? privacyLoadWarning = null)
+        Action<string>? privacyLoadWarning = null, ProfileLease? bookmarkLease = null)
     {
+        if (profilePath is not null && bookmarkLease is not null)
+        {
+            try { bookmarks = new BookmarkStore(profilePath, bookmarkLease); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Shown += (_, _) => MessageBox.Show(this, ex.Message, "Bookmarks unavailable"); }
+        }
         packageSmoke = PackageSmokeTrace.Create(profile);
         letterboxZoomQuery = zoomQuery ?? (browser =>
             (browser.GetBrowserHost() ?? throw new InvalidOperationException("CEF browser host unavailable.")).GetZoomLevelAsync());
@@ -111,12 +123,12 @@ public sealed class MainForm : Form
 
         var bar = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 7, RowCount = 1, Margin = Padding.Empty, AutoSize = true,
+            Dock = DockStyle.Fill, ColumnCount = 8, RowCount = 1, Margin = Padding.Empty, AutoSize = true,
             Padding = new(8, 4, 8, 4), BackColor = DesktopStyle.Surface
         };
         for (var i = 0; i < 3; i++) bar.ColumnStyles.Add(new(SizeType.AutoSize));
         bar.ColumnStyles.Add(new(SizeType.Percent, 100));
-        for (var i = 0; i < 3; i++) bar.ColumnStyles.Add(new(SizeType.AutoSize));
+        for (var i = 0; i < 4; i++) bar.ColumnStyles.Add(new(SizeType.AutoSize));
         back = MakeButton("←", "Back (Alt+Left)", () => Current?.Back());
         forward = MakeButton("→", "Forward (Alt+Right)", () => Current?.Forward());
         reload = MakeButton("Reload", "Reload (F5)", () => { if (Current?.IsLoading == true) Current.Stop(); else Current?.Reload(); });
@@ -127,20 +139,28 @@ public sealed class MainForm : Form
         address.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         address.Margin = new(8, 0, 8, 0);
         bar.Controls.Add(address, 3, 0);
+        bookmarkStar = MakeButton("\u2606", "Bookmark this page", EditCurrentBookmark);
+        bookmarkStar.Name = "BookmarkStar";
+        bookmarkStar.Visible = bookmarks is not null;
+        bookmarkStar.AccessibleDescription = "Add or edit a bookmark for the current page.";
+        bar.Controls.Add(bookmarkStar, 4, 0);
+        var bookmarkTip = new ToolTip();
+        bookmarkTip.SetToolTip(bookmarkStar, "Bookmark this page (Ctrl+D)");
+        Disposed += (_, _) => bookmarkTip.Dispose();
         bar.Controls.Add(MakeButton("Privacy", "Privacy settings", () =>
         {
             if (privacyWindow is null || privacyWindow.IsDisposed)
                 privacyWindow = new PrivacyForm(privacy, Current?.Address, config => privacy.Apply(config, privacyStore is null ? null : privacyStore.Save), cookiePolicy.Status, letterboxingAtStartup, disableWebGlAtStartup, disableRemoteFontsAtStartup, webRtcPolicy.Status);
             privacyWindow.Show(this); privacyWindow.BringToFront();
-        }), 4, 0);
+        }), 5, 0);
         var profiles = MakeButton("Profiles", $"Current profile: {profile}. Open browser profiles", () =>
         {
             var manager = new ProfileManagerForm(ProfileCatalog.DefaultRoot);
             manager.Show(this);
         });
-        bar.Controls.Add(profiles, 5, 0);
+        bar.Controls.Add(profiles, 6, 0);
         var menu = new ContextMenuStrip();
-        var more = MakeButton("More ▾", "More browser actions", () => menu.Show(bar.GetControlFromPosition(6, 0)!, new Point(0, bar.GetControlFromPosition(6, 0)!.Height)));
+        var more = MakeButton("More ▾", "More browser actions", () => menu.Show(bar.GetControlFromPosition(7, 0)!, new Point(0, bar.GetControlFromPosition(7, 0)!.Height)));
         menu.Items.Add("Diagnostics", null, (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl)).Name = "OpenDiagnostics";
         menu.Items.Add("Developer tools (F12)", null, (_, _) => Current?.ShowDevTools());
         menu.Items.Add("Search settings", null, (_, _) =>
@@ -155,9 +175,12 @@ public sealed class MainForm : Form
             searchWindow.Show(this); searchWindow.BringToFront();
         });
         menu.Items[^1].Name = "OpenSearchSettings";
+        var bookmarkMenu = menu.Items.Add("Bookmarks", null, (_, _) => OpenBookmarks());
+        bookmarkMenu.Name = "OpenBookmarks";
+        bookmarkMenu.Visible = bookmarks is not null;
         more.Name = "BrowserMore";
         more.ContextMenuStrip = menu;
-        bar.Controls.Add(more, 6, 0);
+        bar.Controls.Add(more, 7, 0);
         Disposed += (_, _) => menu.Dispose();
         shell.Controls.Add(bar, 0, 1);
         tabs.Margin = Padding.Empty;
@@ -178,9 +201,16 @@ public sealed class MainForm : Form
         Controls.Add(shell);
         Controls.Add(bottom);
         UpdateNavigation();
+        UpdateBookmarkStar();
+        if (bookmarks is not null) bookmarks.Changed += (_, _) =>
+        {
+            if (IsDisposed || closing || !IsHandleCreated) return;
+            if (InvokeRequired) Post(UpdateBookmarkStar); else UpdateBookmarkStar();
+        };
         tabs.SelectedIndexChanged += (_, _) =>
         {
             UpdateNavigation();
+            UpdateBookmarkStar();
             if (letterboxingAtStartup)
             {
                 // A result captured before a tab was backgrounded may no
@@ -418,7 +448,7 @@ public sealed class MainForm : Form
         browser.LifeSpanHandler = popups;
         page.Disposed += (_, _) => popups.ClosePopups();
         browser.DownloadHandler = new DenyDownloads(Report);
-        browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
+        browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)), bookmarks is not null);
         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
         browser.LoadingStateChanged += (_, e) => Post(() =>
         {
@@ -434,10 +464,13 @@ public sealed class MainForm : Form
             var title = string.IsNullOrWhiteSpace(e.Title) ? "New tab" : e.Title;
             page.Text = title.Length > 28 ? title[..28] + "…" : title;
             page.ToolTipText = title;
+            pageTitles[page] = title;
         });
         browser.FrameLoadStart += (_, e) =>
         {
             if (!e.Frame.IsMain) return;
+            var committedUrl = e.Url;
+            Post(() => { if (!page.IsDisposed) { committedUrls[page] = committedUrl; if (tabs.SelectedTab == page) UpdateBookmarkStar(); } });
             if (packageSmoke?.Matches(e.Url) == true) packageSmoke.Record("navigation_start");
             if (letterboxingAtStartup) Post(() =>
             {
@@ -457,6 +490,7 @@ public sealed class MainForm : Form
             if (e.Frame.IsMain && packageSmoke?.Matches(e.FailedUrl) == true) packageSmoke.Record("navigation_error", e.ErrorCode.ToString());
             if (e.Frame.IsMain && e.ErrorCode != CefErrorCode.Aborted) Report($"Load failed: {e.ErrorCode} at {BrowserPolicy.DisplayOrigin(e.FailedUrl)}. Reload to retry.");
         };
+        page.Disposed += (_, _) => { committedUrls.Remove(page); pageTitles.Remove(page); };
         page.Controls.Add(browser);
         tabs.TabPages.Add(page);
         tabs.SelectedTab = page;
@@ -494,6 +528,46 @@ public sealed class MainForm : Form
         if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
     }
 
+    private string? CurrentBookmarkUrl()
+    {
+        if (bookmarks is null || tabs.SelectedTab is not { } page || !committedUrls.TryGetValue(page, out var url)) return null;
+        try { return BookmarkStore.NormalizeUrl(url); }
+        catch (ArgumentException) { return null; }
+    }
+
+    private void UpdateBookmarkStar()
+    {
+        var url = CurrentBookmarkUrl();
+        var saved = url is not null && bookmarks!.Snapshot().Items.Any(item => item.Url == url);
+        bookmarkStar.Enabled = url is not null;
+        bookmarkStar.Text = saved ? "\u2605" : "\u2606";
+        bookmarkStar.AccessibleName = saved ? "Edit bookmark, bookmarked" : "Bookmark this page, not bookmarked";
+    }
+
+    private void EditCurrentBookmark()
+    {
+        var url = CurrentBookmarkUrl();
+        if (url is null || bookmarks is null) return;
+        var existing = bookmarks.Snapshot().Items.FirstOrDefault(item => item.Url == url);
+        var title = tabs.SelectedTab is { } page && pageTitles.TryGetValue(page, out var value) ? value : new Uri(url).Host;
+        using var editor = new BookmarkEditorForm(bookmarks, existing, url, title);
+        editor.ShowDialog(this);
+        UpdateBookmarkStar();
+    }
+
+    private void OpenBookmarks()
+    {
+        if (bookmarks is null) return;
+        if (bookmarksWindow is null || bookmarksWindow.IsDisposed)
+            bookmarksWindow = new BookmarksManagerForm(bookmarks, url => SubmitAddress(url), url =>
+            {
+                var resolved = AddressInputResolver.Resolve(url, searchSettings.EngineId);
+                if (resolved.Kind != AddressInputKind.Rejected && resolved.Url is not null) NewTab(resolved.Url);
+            });
+        bookmarksWindow.Show(this);
+        bookmarksWindow.BringToFront();
+    }
+
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>
         HandleShortcut(keyData) || base.ProcessCmdKey(ref msg, keyData);
 
@@ -501,6 +575,8 @@ public sealed class MainForm : Form
     {
         switch (keys)
         {
+            case Keys.Control | Keys.D when bookmarks is not null: EditCurrentBookmark(); break;
+            case Keys.Control | Keys.Shift | Keys.O when bookmarks is not null: OpenBookmarks(); break;
             case Keys.Control | Keys.L: address.Focus(); address.SelectAll(); break;
             case Keys.Control | Keys.T: NewTab(BrowserPolicy.DiagnosticsUrl); break;
             case Keys.Control | Keys.W: CloseTab(); break;
@@ -518,7 +594,7 @@ public sealed class MainForm : Form
     }
 }
 
-internal sealed class BrowserKeys(Action<Keys> dispatch) : CefSharp.Handler.KeyboardHandler
+internal sealed class BrowserKeys(Action<Keys> dispatch, bool bookmarksEnabled) : CefSharp.Handler.KeyboardHandler
 {
     protected override bool OnPreKeyEvent(IWebBrowser control, IBrowser browser, KeyType type,
         int windowsKeyCode, int nativeKeyCode, CefEventFlags modifiers, bool isSystemKey, ref bool isKeyboardShortcut)
@@ -528,7 +604,8 @@ internal sealed class BrowserKeys(Action<Keys> dispatch) : CefSharp.Handler.Keyb
         if (modifiers.HasFlag(CefEventFlags.ControlDown)) keys |= Keys.Control;
         if (modifiers.HasFlag(CefEventFlags.AltDown)) keys |= Keys.Alt;
         if (modifiers.HasFlag(CefEventFlags.ShiftDown)) keys |= Keys.Shift;
-        Keys[] shortcuts = [Keys.Control | Keys.L, Keys.Control | Keys.T, Keys.Control | Keys.W,
+        if (!bookmarksEnabled && (keys == (Keys.Control | Keys.D) || keys == (Keys.Control | Keys.Shift | Keys.O))) return false;
+        Keys[] shortcuts = [Keys.Control | Keys.D, Keys.Control | Keys.Shift | Keys.O, Keys.Control | Keys.L, Keys.Control | Keys.T, Keys.Control | Keys.W,
             Keys.Control | Keys.Tab, Keys.F12, Keys.F5, Keys.Escape, Keys.Alt | Keys.Left, Keys.Alt | Keys.Right];
         if (!shortcuts.Contains(keys)) return false;
         dispatch(keys);
