@@ -84,3 +84,21 @@ attempt returned Win32 error 87 for both the collision and the non-colliding
 target. The negative case is therefore not evidence of no-replace semantics;
 the positive control also failed. A separate native-system-call comparison is
 needed. Neither observation authorizes production staging or publication.
+
+The [separate native comparison](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45354017317)
+on `d37a330005c98d233e2b98f38fe892fefe0dd8cf` used
+`NtSetInformationFile(FileRenameInformation)` with a destination directory
+handle and `ReplaceIfExists=false`: the existing fixture destination returned
+`STATUS_OBJECT_NAME_COLLISION`, while the positive rename preserved the source
+file ID and SHA-256. This was a test-owned same-volume fixture, not a production
+publication implementation or a test of destination substitution.
+
+In the [list-access comparison](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45354235226),
+commit `6eeb37539b36f96b9ed9b45ecf156614236761c6`, handles requesting
+`FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES` without delete sharing blocked
+leaf deletion and rename and a held-parent rename with sharing violations.
+Rename and deletion of the same owned fixture objects succeeded after the
+handles were released. These observations differ from the metadata-only handle
+above; they do not establish that CEF can write while all required ancestor
+handles are held, or cover pre-existing handles, ACL mutation, reparse races,
+other filesystems or a same-user attacker.
