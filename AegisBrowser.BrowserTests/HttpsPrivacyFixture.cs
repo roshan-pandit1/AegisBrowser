@@ -204,15 +204,17 @@ internal static partial class Program
         private readonly ConcurrentBag<Task> clients = new();
         private readonly ConcurrentDictionary<string, ConcurrentQueue<HttpsCookieObservation>> observations = new();
         private readonly Task[] loops;
+        private readonly Action<string, int>? onRequest;
         private int accepted, requests, cancelled, tlsErrors, ioErrors;
         public int Port { get; }
         public string TopA => $"https://127.0.0.1:{Port}/";
         public string TopB => $"https://[::1]:{Port}/";
         public string Third => $"https://localhost:{Port}/";
 
-        public PrivacyHttpsServer(X509Certificate2 certificate, int port = 0)
+        public PrivacyHttpsServer(X509Certificate2 certificate, int port = 0, Action<string, int>? onRequest = null)
         {
             this.certificate = certificate;
+            this.onRequest = onRequest;
             ipv4 = new TcpListener(IPAddress.Loopback, port); ipv4.Start();
             Port = ((IPEndPoint)ipv4.LocalEndpoint).Port;
             try
@@ -267,6 +269,7 @@ internal static partial class Program
                     if (parts.Length < 2 || parts[0] != "GET") return;
                     Interlocked.Increment(ref requests);
                     var path = parts[1].Split('?')[0];
+                    onRequest?.Invoke(path, ((IPEndPoint)client.Client.RemoteEndPoint!).Port);
                     var normal = false; var httpOnly = false; var lax = false; var strict = false; var set = false;
                     var chipA = false; var chipB = false; var authSession = false;
                     for (var i = 0; i < 100; i++)

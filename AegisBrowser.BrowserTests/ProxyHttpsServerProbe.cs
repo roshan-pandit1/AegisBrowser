@@ -68,16 +68,29 @@ internal static partial class Program
         public int ApplicationRequests => Volatile.Read(ref applicationRequests);
         public X509Certificate2 Certificate { get; }
 
-        public SecureProxyFixture()
+        private readonly bool ownsCertificate;
+        private readonly int? forwardPort;
+        private readonly ConcurrentQueue<int> upstreamPorts = new();
+        public int[] UpstreamPorts => upstreamPorts.ToArray();
+
+        public SecureProxyFixture(X509Certificate2? certificate = null, int? forwardPort = null)
+        {
+            this.forwardPort = forwardPort;
+            ownsCertificate = certificate is null;
+            Certificate = certificate ?? CreateUntrustedCertificate();
+            listener.Start(); Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            loop = Task.Run(AcceptLoop);
+        }
+
+        private static X509Certificate2 CreateUntrustedCertificate()
         {
             using var key = RSA.Create(2048);
             var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-            var names = new SubjectAlternativeNameBuilder(); names.AddIpAddress(IPAddress.Loopback);
+            var names = new SubjectAlternativeNameBuilder();
+            names.AddIpAddress(IPAddress.Loopback);
             request.CertificateExtensions.Add(names.Build());
             using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(10));
-            Certificate = new X509Certificate2(generated.Export(X509ContentType.Pfx), (string?)null, X509KeyStorageFlags.UserKeySet);
-            listener.Start(); Port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            loop = Task.Run(AcceptLoop);
+            return X509CertificateLoader.LoadPkcs12(generated.Export(X509ContentType.Pfx), null, X509KeyStorageFlags.UserKeySet);
         }
 
         private async Task AcceptLoop()
@@ -106,7 +119,17 @@ internal static partial class Program
                     await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = Certificate }, token);
                     using var request = new StreamReader(tls, Encoding.ASCII, false, 4096, leaveOpen: true);
                     var first = await request.ReadLineAsync(token);
-                    if (first is not null) Interlocked.Increment(ref applicationRequests);
+                    if (first is null) return;
+                    Interlocked.Increment(ref applicationRequests);
+                    if (forwardPort is not int port ||
+                        first != $"GET http://aegis-secure-proxy.invalid:{port}/trusted-proxy HTTP/1.1") return;
+                    using var upstream = new TcpClient(AddressFamily.InterNetwork);
+                    await upstream.ConnectAsync(IPAddress.Loopback, port, token);
+                    upstreamPorts.Enqueue(((IPEndPoint)upstream.Client.LocalEndPoint!).Port);
+                    Console.WriteLine($"PROXY_TLS_RECEIPT: mode=https_proxy tls=completed target=aegis-secure-proxy.invalid:{port} utc={DateTimeOffset.UtcNow:O}");
+                    using var upstreamStream = upstream.GetStream();
+                    await upstreamStream.WriteAsync("GET /trusted-proxy HTTP/1.1\r\nHost: aegis-secure-proxy.invalid\r\nX-Aegis-Test-Proxy: yes\r\nConnection: close\r\n\r\n"u8.ToArray(), token);
+                    await upstreamStream.CopyToAsync(tls, token);
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -120,7 +143,8 @@ internal static partial class Program
         {
             stop.Cancel(); listener.Stop(); loop.GetAwaiter().GetResult();
             Task.WhenAll(clients.ToArray()).GetAwaiter().GetResult();
-            Certificate.Dispose(); stop.Dispose();
+            if (ownsCertificate) Certificate.Dispose();
+            stop.Dispose();
         }
     }
 }

@@ -270,9 +270,42 @@ jobs:
         timeout-minutes: 3
         run: |
           $profileRoot = Join-Path $env:RUNNER_TEMP ('aegis-proxy-probe-' + [guid]::NewGuid().ToString('N'))
-          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-probe $profileRoot 2>&1
-          $code = $LASTEXITCODE
-          $output | Write-Output
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'A disposable hosted runner is required' }
+          $trustDir = Join-Path $env:RUNNER_TEMP ('aegis-proxy-trust-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $trustDir -ErrorAction Stop | Out-Null
+          "AEGIS_PROXY_TRUST_DIR=$trustDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          $dnsChannel = 'Microsoft-Windows-DNS-Client/Operational'
+          $dnsStarted = Get-Date
+          $dnsWasEnabled = $false
+          $dnsEnabled = $false
+          try {
+            $dnsWasEnabled = (Get-WinEvent -ListLog $dnsChannel -ErrorAction Stop).IsEnabled
+            if (!$dnsWasEnabled) { wevtutil sl $dnsChannel /e:true }
+            $dnsEnabled = (Get-WinEvent -ListLog $dnsChannel -ErrorAction Stop).IsEnabled
+          } catch { Write-Warning 'Windows DNS event collection is unavailable.' }
+          try {
+            $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe proxy-probe $profileRoot $trustDir 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if ($dnsEnabled) {
+              $control = 'dns-control-' + [guid]::NewGuid().ToString('N') + '.invalid'
+              Resolve-DnsName -Name $control -Type A -DnsOnly -NoHostsFile -ErrorAction SilentlyContinue | Out-Null
+              $events = @(Get-WinEvent -FilterHashtable @{ LogName=$dnsChannel; StartTime=$dnsStarted } -ErrorAction SilentlyContinue |
+                ForEach-Object { $_.ToXml() })
+              $positive = @($events | Select-String -SimpleMatch $control).Count
+              foreach ($line in @($output | Select-String 'PROXY_HOSTNAME: mode=(http|socks5) host=([a-z0-9-]+\.invalid)')) {
+                $match = $line.Matches[0]
+                $count = @($events | Select-String -SimpleMatch $match.Groups[2].Value).Count
+                $status = if ($positive -eq 0) { 'UNVERIFIED' } else { 'PASS' }
+                "PROXY_DNS_OBSERVER: mode=$($match.Groups[1].Value) status=$status windows_dns_events=$count positive_control_events=$positive"
+              }
+            } else { 'PROXY_DNS_OBSERVER: status=UNVERIFIED channel unavailable' }
+          } finally {
+            if ($dnsEnabled -and !$dnsWasEnabled) {
+              wevtutil sl $dnsChannel /e:false
+              if ($LASTEXITCODE -ne 0) { throw 'Could not restore the disposable DNS event channel state.' }
+            }
+          }
           if (($output -join "`n") -match 'Check failed:') { throw 'Native Chromium assertion detected' }
           if ($code -ne 0 -or !(($output -join "`n") -match 'PASS: \d+ CEF proxy probe checks')) { throw 'CEF proxy probe failed or incomplete' }
           if (!(($output -join "`n") -match 'PASS: CEF proxy probe shutdown completed')) { throw 'CEF proxy probe did not complete native shutdown' }
@@ -283,6 +316,13 @@ jobs:
                                'explicit SOCKS rejection did not reach the independently reachable origin')) {
             if (($output -join "`n") -notmatch [regex]::Escape("PASS: $check")) { throw "Missing SOCKS negative check: $check" }
           }
+          foreach ($marker in @('PROXY_TLS_DESTINATION: mode=connect', 'PROXY_TLS_DESTINATION: mode=https_proxy', 'P403_TRUST: temporary user root removed')) {
+            if (($output -join "`n") -notmatch [regex]::Escape($marker)) { throw "Missing trusted proxy observation: $marker" }
+          }
+      - name: Verify removal of disposable proxy test trust
+        if: ${{ always() && env.AEGIS_PROXY_TRUST_DIR != '' }}
+        timeout-minutes: 2
+        run: ./tests/acceptance/p403-cleanup-test-ca.ps1 -TrustDirectory $env:AEGIS_PROXY_TRUST_DIR
       - name: Controlled CEF proxy authentication probe
         timeout-minutes: 3
         run: |

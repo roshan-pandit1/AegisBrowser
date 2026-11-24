@@ -16,7 +16,8 @@ internal static partial class Program
     {
         using var origin = new LocalHttpFixture("socks fixture", onRequest: () =>
             trace.Add("DESTINATION_EVENT", "HTTP_REQUEST_RECEIVED"));
-        using var proxy = new SocksFixture(trace, originPort: origin.Port);
+        var hostname = $"socks-{Guid.NewGuid():N}.invalid";
+        using var proxy = new SocksFixture(trace, originPort: origin.Port, destinationHost: hostname);
         CheckProxyInstallerFailures();
         var draft = new ProxyDraft(ProxyProtocol.Socks5, "127.0.0.1", proxy.Port, false, null, "", true);
         Check(ChromiumProxyInstaller.ApplyOnUiThread(context, draft).Status == ChromiumProxyInstaller.Outcome.WrongThread,
@@ -28,7 +29,7 @@ internal static partial class Program
             "CEF UI-thread proxy preference installation accepted");
         trace.Add("PROXY_EVENT", "PREFERENCE_APPLIED");
 
-        var url = $"http://aegis-socks.invalid:{origin.Port}/fixture";
+        var url = $"http://{hostname}:{origin.Port}/fixture";
         trace.Add("NAVIGATION_EVENT", "FORWARD_LOAD_REQUESTED");
         await LoadReady(browser, url);
         await Wait(() => proxy.FixtureRequests > 0, "CEF request through controlled SOCKS5 fixture");
@@ -36,6 +37,8 @@ internal static partial class Program
             "CEF uses an unauthenticated SOCKS5 tunnel and supplies the controlled destination hostname");
         Check(origin.SawViaProxy("/fixture") && !origin.SawDirect("/fixture"),
             "SOCKS5 fixture forwarded to the independent loopback origin");
+        Check(origin.OnlyFrom(proxy.UpstreamPorts), "SOCKS5 hostname destination accepted only observed proxy sockets");
+        Console.WriteLine($"PROXY_HOSTNAME: mode=socks5 host={hostname} utc={DateTimeOffset.UtcNow:O}");
         Check(proxy.PasswordMethodOffers == 0, "CEF did not offer SOCKS5 username/password in the observed greeting");
         var unsupported = draft with { AuthenticationRequired = true, CredentialId = Guid.NewGuid() };
         var unsupportedResult = await Cef.UIThreadTaskFactory.StartNew(() =>
@@ -321,6 +324,9 @@ internal static partial class Program
         private readonly bool holdRequest;
         private readonly int? rejectPort;
         private readonly int? originPort;
+        private readonly string destinationHost;
+        private readonly ConcurrentQueue<int> upstreamPorts = new();
+        public int[] UpstreamPorts => upstreamPorts.ToArray();
         internal TaskCompletionSource<bool> HeldRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource<bool> RejectionSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int domainConnects, fixtureRequests, passwordMethodOffers;
@@ -330,12 +336,12 @@ internal static partial class Program
         public int DomainConnects => Volatile.Read(ref domainConnects);
         public int FixtureRequests => Volatile.Read(ref fixtureRequests);
 
-        public SocksFixture(SocksTrace trace, bool holdRequest = false, int? rejectPort = null, int? originPort = null)
+        public SocksFixture(SocksTrace trace, bool holdRequest = false, int? rejectPort = null, int? originPort = null, string destinationHost = "aegis-socks.invalid")
         {
             this.trace = trace;
             this.holdRequest = holdRequest;
             this.rejectPort = rejectPort;
-            this.originPort = originPort;
+            this.originPort = originPort; this.destinationHost = destinationHost;
             listener.Start(); Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             trace.Add("PROXY_EVENT", "LISTENER_READY");
             loop = Task.Run(AcceptLoop);
@@ -399,7 +405,7 @@ internal static partial class Program
                         RejectionSent.TrySetResult(true);
                         return;
                     }
-                    if (host != "aegis-socks.invalid" || destinationPort != (originPort ?? 80) || header[3] != 3) return;
+                    if (host != destinationHost || destinationPort != (originPort ?? 80) || header[3] != 3) return;
                     Interlocked.Increment(ref domainConnects);
                     trace.Add("PROXY_EVENT", "SOCKS_DESTINATION_ACCEPTED");
                     await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 127, 0, 0, 1, 0, 0 }, token);
@@ -424,6 +430,7 @@ internal static partial class Program
                     if (originPort is not int origin) return;
                     using var upstream = new TcpClient(AddressFamily.InterNetwork);
                     await upstream.ConnectAsync(IPAddress.Loopback, origin, token);
+                    upstreamPorts.Enqueue(((IPEndPoint)upstream.Client.LocalEndPoint!).Port);
                     using var upstreamStream = upstream.GetStream();
                     // Map only the synthetic hostname and fixture path validated above.
                     await upstreamStream.WriteAsync(

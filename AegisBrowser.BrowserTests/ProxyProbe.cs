@@ -12,11 +12,14 @@ namespace AegisBrowser.BrowserTests;
 // Research-only fixture: the production application still blocks required proxies.
 internal static partial class Program
 {
-    private static int ProxyProbe(string profileRoot)
+    private static int ProxyProbe(string profileRoot, string? trustDirectory)
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(profileRoot); Directory.CreateDirectory(root);
+        if (trustDirectory is not null) DisposableRunnerTrust.RequireHostedRunner();
+        using var certificates = trustDirectory is null ? null : new PrivacyCertificates();
+        using var trust = certificates is null ? null : new DisposableRunnerTrust(certificates.Root, trustDirectory!, certificates.Id);
         var initialized = false; var result = 0;
         var socksTrace = new SocksTrace();
         try
@@ -39,9 +42,9 @@ internal static partial class Program
                 BrowserView? browser = null;
                 try
                 {
-                    async Task Configure(bool removeLoopbackBypass)
+                    async Task Configure(bool removeLoopbackBypass, int? port = null)
                     {
-                        var draft = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", proxy.Port, false, null, "", true);
+                        var draft = new ProxyDraft(ProxyProtocol.Http, "127.0.0.1", port ?? proxy.Port, false, null, "", true);
                         var configuration = ChromiumProxyPreference.Create(draft);
                         // Test only. Chromium documents security consequences of proxying localhost.
                         if (removeLoopbackBypass) configuration["bypass_list"] = "<-loopback>";
@@ -75,6 +78,19 @@ internal static partial class Program
                     Check(!origin.SawDirect("/proxied") && await Js(browser, "document.title") == "proxy",
                         "CEF test-only bypass override routed HTTP through the local proxy to its origin");
 
+                    var hostname = $"http-{Guid.NewGuid():N}.invalid";
+                    using (var namedOrigin = new LocalHttpFixture("hostname origin"))
+                    using (var namedProxy = new LocalHttpFixture("hostname proxy", namedOrigin.Port, allowedHost: hostname))
+                    {
+                        await Configure(false, namedProxy.Port);
+                        await LoadReady(browser, $"http://{hostname}:{namedOrigin.Port}/named-http");
+                        Check(namedProxy.Saw(hostname) && namedOrigin.SawViaProxy("/named-http"),
+                            "HTTP proxy received the unique destination hostname and forwarded its request");
+                        Check(namedOrigin.OnlyFrom(namedProxy.UpstreamPorts),
+                            "HTTP hostname destination accepted only observed proxy sockets");
+                        Console.WriteLine($"PROXY_HOSTNAME: mode=http host={hostname} utc={DateTimeOffset.UtcNow:O}");
+                    }
+                    await Configure(true);
                     await LoadReady(browser, baseUrl + "/proxy-page");
                     await Wait(() => proxy.Saw("/proxy-page") && origin.SawViaProxy("/proxy-page") &&
                         proxy.Saw("/proxy-script.js") && origin.SawViaProxy("/proxy-script.js"), "proxied script subresource");
@@ -121,6 +137,7 @@ internal static partial class Program
                     await ObserveSocksThroughProxy(browser, context, socksTrace);
                     await ObserveSocksCancellation(browser, context, socksTrace);
                     await ObserveHttpsProxyCertificate(browser, context);
+                    if (certificates is not null) await ObserveTrustedProxyRoutes(browser, context, certificates);
                     Console.WriteLine($"PASS: {checks} CEF proxy probe checks");
                 }
                 catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
@@ -169,13 +186,19 @@ internal static partial class Program
         private readonly string label;
         private readonly int? allowedOriginPort;
         private readonly Action? onRequest;
+        private readonly string allowedHost;
+        private readonly ConcurrentQueue<int> inboundPorts = new();
+        private readonly ConcurrentQueue<int> upstreamPorts = new();
+        public int[] UpstreamPorts => upstreamPorts.ToArray();
+        public bool OnlyFrom(int[] proxyPorts) =>
+            !inboundPorts.IsEmpty && inboundPorts.All(proxyPorts.Contains);
         private readonly Task loop;
         private bool stopped;
         public int Port { get; }
 
-        public LocalHttpFixture(string label, int? allowedOriginPort = null, Action? onRequest = null)
+        public LocalHttpFixture(string label, int? allowedOriginPort = null, Action? onRequest = null, string allowedHost = "127.0.0.1")
         {
-            this.label = label; this.allowedOriginPort = allowedOriginPort; this.onRequest = onRequest;
+            this.label = label; this.allowedOriginPort = allowedOriginPort; this.onRequest = onRequest; this.allowedHost = allowedHost;
             listener.Start(); Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             loop = Task.Run(AcceptLoop);
         }
@@ -191,6 +214,7 @@ internal static partial class Program
                 while (!cancellation.IsCancellationRequested)
                 {
                     var client = await listener.AcceptTcpClientAsync(cancellation.Token);
+                    inboundPorts.Enqueue(((IPEndPoint)client.Client.RemoteEndPoint!).Port);
                     clients.Add(Serve(client, cancellation.Token));
                 }
             }
@@ -223,10 +247,11 @@ internal static partial class Program
                     {
                         var parts = first.Split(' ', 3);
                         if (parts.Length != 3 || parts[0] != "GET" || !Uri.TryCreate(parts[1], UriKind.Absolute, out var target) ||
-                            target.Scheme != "http" || target.Host != "127.0.0.1" || target.Port != port)
+                            target.Scheme != "http" || target.Host != allowedHost || target.Port != port)
                             return; // Never act as a general forwarding service.
                         using var upstream = new TcpClient(AddressFamily.InterNetwork);
                         await upstream.ConnectAsync(IPAddress.Loopback, port, token);
+                        upstreamPorts.Enqueue(((IPEndPoint)upstream.Client.LocalEndPoint!).Port);
                         using var upstreamStream = upstream.GetStream();
                         // Forward only the controlled path, not browser headers or credentials.
                         var request = Encoding.ASCII.GetBytes("GET " + target.PathAndQuery + " HTTP/1.1\r\nHost: 127.0.0.1:" + port +

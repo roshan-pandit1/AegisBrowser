@@ -32,7 +32,7 @@ internal static partial class Program
         if (args.Length == 2 && args[0] == "appcontainer-observer") return AppContainerCefProbe(args[1], true);
         if (args.Length == 2 && args[0] == "packet-control-client") return PacketControlProbe(args[1]);
         if (args.Length == 2 && args[0] == "private-network-control-client") return PrivateNetworkControlProbe(args[1]);
-        if (args.Length == 2 && args[0] == "proxy-probe") return ProxyProbe(args[1]);
+        if (args.Length is 2 or 3 && args[0] == "proxy-probe") return ProxyProbe(args[1], args.Length == 3 ? args[2] : null);
         if (args.Length == 2 && args[0] is "webrtc-baseline" or "webrtc-restrict") return WebRtcStartupProbe(args[1], args[0] == "webrtc-restrict");
         if (args.Length == 2 && args[0] == "external-egress-probe") return ExternalEgressProbe(args[1]);
         if (args.Length == 2 && args[0] == "hwnd-repro") return NativeWindowRepro(args[1]);
