@@ -43,6 +43,11 @@ internal sealed class PackageSmokeTrace(string file, string fixtureUrl)
 
     internal bool Matches(string? url) => string.Equals(url, fixtureUrl, StringComparison.Ordinal);
 
+    internal static bool IsHttpControl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == "http" &&
+        uri.Host == "127.0.0.1" && uri.AbsolutePath == "/aegis-rc1-smoke" &&
+        uri.Query.Length == 0 && uri.Fragment.Length == 0;
+
     internal void Record(string stage, string detail = "none")
     {
         lock (gate)

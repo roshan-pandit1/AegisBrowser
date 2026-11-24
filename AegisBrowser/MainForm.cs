@@ -420,7 +420,14 @@ public sealed class MainForm : Form
         browser.DownloadHandler = new DenyDownloads(Report);
         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
-        browser.LoadingStateChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
+        browser.LoadingStateChanged += (_, e) => Post(() =>
+        {
+            if (tabs.SelectedTab != page) return;
+            UpdateNavigation();
+            if (packageSmoke is not null && !e.IsLoading && !browser.IsLoading &&
+                PackageSmokeTrace.IsHttpControl(browser.Address))
+                packageSmoke.Record("http_ui_settled");
+        });
         browser.TitleChanged += (_, e) => Post(() =>
         {
             if (page.IsDisposed) return;

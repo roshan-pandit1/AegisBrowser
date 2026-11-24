@@ -250,6 +250,20 @@ public static class AegisSmokeInput {
     Write-Output 'PASS: launched browser requested the controlled loopback HTTP page.'
 
     if ($httpsUrl) {
+        # The HTTP listener can see a request before CEF posts its final address
+        # update. Wait for that update on the UI thread within the HTTP budget.
+        $browserTrace = Join-Path $httpsControl 'browser.trace'
+        $httpUiSettled = $false
+        while ($watch.ElapsedMilliseconds -lt 15000) {
+            if ((Test-Path -LiteralPath $browserTrace) -and
+                (Select-String -LiteralPath $browserTrace -Quiet -Pattern 'source=browser stage=http_ui_settled detail=none$')) {
+                $httpUiSettled = $true
+                break
+            }
+            if ($process.HasExited) { throw "Browser exited while settling HTTP navigation: $($process.ExitCode)" }
+            Start-Sleep -Milliseconds 50
+        }
+        if (!$httpUiSettled) { throw 'The HTTP control navigation did not finish updating the browser address.' }
         if (![AegisSmokeInput]::IsOwnedBy($addressHandle, $process.Id)) { throw 'Browser address control no longer belongs to the test process.' }
         $messageResult = [IntPtr]::Zero
         if ([AegisSmokeInput]::SendTextTimeout($addressHandle, 0x000C, [IntPtr]::Zero, $httpsUrl,
