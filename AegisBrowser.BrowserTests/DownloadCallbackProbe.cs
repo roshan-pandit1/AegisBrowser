@@ -13,7 +13,7 @@ internal static partial class Program
     // Test-only probe. Production continues to use DenyDownloads.
     private static int DownloadCallbackProbe(string profileRoot, string mode)
     {
-        if (mode is not ("decline" or "accept" or "cancel" or "interrupt")) return 2;
+        if (mode is not ("decline" or "accept" or "cancel" or "interrupt" or "close-tab")) return 2;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(profileRoot);
@@ -33,14 +33,15 @@ internal static partial class Program
             await using var stream = client.GetStream();
             using var reader = new StreamReader(stream, Encoding.ASCII, false, 1024, leaveOpen: true);
             while (await reader.ReadLineAsync() is { Length: > 0 }) { }
-            var bodyLength = mode is "cancel" or "interrupt" ? 1024 * 1024 : payload.Length;
+            var bodyLength = mode is "cancel" or "interrupt" or "close-tab" ? 1024 * 1024 : payload.Length;
             var headers = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=fixture.txt\r\nContent-Length: " + bodyLength + "\r\nConnection: close\r\n\r\n");
             await stream.WriteAsync(headers);
-            await stream.WriteAsync(mode is "cancel" or "interrupt" ? new byte[65536] : payload);
+            await stream.WriteAsync(mode is "cancel" or "interrupt" or "close-tab" ? new byte[65536] : payload);
             await stream.FlushAsync();
             if (mode == "interrupt") listener.Stop();
             responseServed.TrySetResult(true);
-            if (mode == "cancel") await releaseBody.Task;
+            if (mode is "cancel" or "close-tab") await releaseBody.Task;
+            if (mode == "close-tab") await stream.WriteAsync(new byte[1024 * 1024 - 65536]);
         });
         var handler = new CallbackProbeHandler(mode, target, port);
         var initialized = false;
@@ -59,6 +60,7 @@ internal static partial class Program
             {
                 var web = new BrowserView("about:blank") { Dock = DockStyle.Fill, LifeSpanHandler = new SafePopups(_ => { }), DownloadHandler = handler };
                 form.Controls.Add(web);
+                var webClosed = false;
                 try
                 {
                     await Ready(web);
@@ -88,6 +90,19 @@ internal static partial class Program
                     {
                         await handler.Interrupted.Task.WaitAsync(TimeSpan.FromSeconds(25));
                     }
+                    else if (mode == "close-tab")
+                    {
+                        await handler.Partial.Task.WaitAsync(TimeSpan.FromSeconds(25));
+                        await CloseWeb(web);
+                        webClosed = true;
+                        form.Controls.Remove(web);
+                        web.Dispose();
+                        releaseBody.TrySetResult(true);
+                        await server.WaitAsync(TimeSpan.FromSeconds(25));
+                        Console.WriteLine("DOWNLOAD_FIXTURE_BODY_WRITTEN: true");
+                        var terminal = await Task.WhenAny(handler.Complete.Task, handler.Cancelled.Task, handler.Interrupted.Task).WaitAsync(TimeSpan.FromSeconds(25));
+                        Console.WriteLine("DOWNLOAD_TAB_CLOSE_RESULT: " + (terminal == handler.Complete.Task ? "COMPLETED" : terminal == handler.Cancelled.Task ? "CANCELLED" : "INTERRUPTED"));
+                    }
                     result = 0;
                 }
                 catch (Exception ex) { Console.Error.WriteLine(ex); }
@@ -97,9 +112,7 @@ internal static partial class Program
                     try
                     {
                         await Cef.UIThreadTaskFactory.StartNew(handler.ReleaseRetained);
-                        await CloseWeb(web);
-                        form.Controls.Remove(web);
-                        web.Dispose();
+                        if (!webClosed) { await CloseWeb(web); form.Controls.Remove(web); web.Dispose(); }
                     }
                     catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
                     form.Close();
@@ -140,13 +153,14 @@ internal static partial class Program
             using (callback)
             {
                 Suggested = item.SuggestedFileName;
-                if (mode is "accept" or "cancel" or "interrupt") callback.Continue(target, false);
+                if (mode is "accept" or "cancel" or "interrupt" or "close-tab") callback.Continue(target, false);
             }
             Before.TrySetResult(true);
             return true;
         }
         protected override void OnDownloadUpdated(IWebBrowser control, IBrowser browser, DownloadItem item, IDownloadItemCallback callback)
         {
+            if (mode == "close-tab" && item.IsInProgress && item.ReceivedBytes > 0) Partial.TrySetResult(item.FullPath);
             if (mode == "cancel" && item.IsInProgress && item.ReceivedBytes > 0 && Interlocked.CompareExchange(ref retainedOnce, 1, 0) == 0)
             {
                 retained = callback;
