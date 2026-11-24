@@ -100,7 +100,7 @@ internal static partial class Program
         await Configure($"https://127.0.0.1:{secureProxy.Port}");
         await LoadReady(browser, $"http://aegis-secure-proxy.invalid:{httpOrigin.Port}/trusted-proxy");
         Check(secureProxy.ApplicationRequests > 0 && httpOrigin.SawViaProxy("/trusted-proxy") &&
-            httpOrigin.OnlyFrom(secureProxy.UpstreamPorts),
+            httpOrigin.OnlyFrom(() => secureProxy.UpstreamPorts),
             "trusted HTTPS proxy request reached independent HTTP origin");
     }
 
@@ -170,8 +170,7 @@ internal static partial class Program
                     if (forwardPort is int port)
                     {
                         using var upstream = new TcpClient(AddressFamily.InterNetwork);
-                        await upstream.ConnectAsync(IPAddress.Loopback, port, token);
-                        upstreamPorts.Enqueue(((IPEndPoint)upstream.Client.LocalEndPoint!).Port);
+                        await ConnectObservedLoopback(upstream, port, upstreamPorts, token);
                         using var upstreamStream = upstream.GetStream();
                         Console.WriteLine($"PROXY_TLS_RECEIPT: {expectedConnect} utc={DateTimeOffset.UtcNow:O}");
                         await network.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), token);

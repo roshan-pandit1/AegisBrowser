@@ -86,7 +86,7 @@ internal static partial class Program
                         await LoadReady(browser, $"http://{hostname}:{namedOrigin.Port}/named-http");
                         Check(namedProxy.Saw(hostname) && namedOrigin.SawViaProxy("/named-http"),
                             "HTTP proxy received the unique destination hostname and forwarded its request");
-                        Check(namedOrigin.OnlyFrom(namedProxy.UpstreamPorts),
+                        Check(namedOrigin.OnlyFrom(() => namedProxy.UpstreamPorts),
                             "HTTP hostname destination accepted only observed proxy sockets");
                         Console.WriteLine($"PROXY_HOSTNAME: mode=http host={hostname} utc={DateTimeOffset.UtcNow:O}");
                     }
@@ -177,6 +177,16 @@ internal static partial class Program
         return result;
     }
 
+    private static async Task ConnectObservedLoopback(TcpClient upstream, int destinationPort,
+        ConcurrentQueue<int> upstreamPorts, CancellationToken token)
+    {
+        // A listener can accept as soon as ConnectAsync starts. Publish the
+        // bound source port first so a speculative connection cannot race it.
+        upstream.Client.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        upstreamPorts.Enqueue(((IPEndPoint)upstream.Client.LocalEndPoint!).Port);
+        await upstream.ConnectAsync(IPAddress.Loopback, destinationPort, token);
+    }
+
     private sealed class LocalHttpFixture : IDisposable
     {
         private readonly TcpListener listener = new(IPAddress.Loopback, 0);
@@ -190,8 +200,15 @@ internal static partial class Program
         private readonly ConcurrentQueue<int> inboundPorts = new();
         private readonly ConcurrentQueue<int> upstreamPorts = new();
         public int[] UpstreamPorts => upstreamPorts.ToArray();
-        public bool OnlyFrom(int[] proxyPorts) =>
-            !inboundPorts.IsEmpty && inboundPorts.All(proxyPorts.Contains);
+        public bool OnlyFrom(Func<int[]> proxyPorts)
+        {
+            var accepted = inboundPorts.ToArray();
+            var expected = proxyPorts();
+            var unexpected = accepted.Except(expected).ToArray();
+            if (unexpected.Length > 0)
+                Console.WriteLine($"PROXY_UNEXPECTED_INBOUND: source_ports={string.Join(',', unexpected)} destination_port={Port} utc={DateTimeOffset.UtcNow:O}");
+            return accepted.Length > 0 && unexpected.Length == 0;
+        }
         private readonly Task loop;
         private bool stopped;
         public int Port { get; }
@@ -250,8 +267,7 @@ internal static partial class Program
                             target.Scheme != "http" || target.Host != allowedHost || target.Port != port)
                             return; // Never act as a general forwarding service.
                         using var upstream = new TcpClient(AddressFamily.InterNetwork);
-                        await upstream.ConnectAsync(IPAddress.Loopback, port, token);
-                        upstreamPorts.Enqueue(((IPEndPoint)upstream.Client.LocalEndPoint!).Port);
+                        await ConnectObservedLoopback(upstream, port, upstreamPorts, token);
                         using var upstreamStream = upstream.GetStream();
                         // Forward only the controlled path, not browser headers or credentials.
                         var request = Encoding.ASCII.GetBytes("GET " + target.PathAndQuery + " HTTP/1.1\r\nHost: 127.0.0.1:" + port +

@@ -37,7 +37,7 @@ internal static partial class Program
             "CEF uses an unauthenticated SOCKS5 tunnel and supplies the controlled destination hostname");
         Check(origin.SawViaProxy("/fixture") && !origin.SawDirect("/fixture"),
             "SOCKS5 fixture forwarded to the independent loopback origin");
-        Check(origin.OnlyFrom(proxy.UpstreamPorts), "SOCKS5 hostname destination accepted only observed proxy sockets");
+        Check(origin.OnlyFrom(() => proxy.UpstreamPorts), "SOCKS5 hostname destination accepted only observed proxy sockets");
         Console.WriteLine($"PROXY_HOSTNAME: mode=socks5 host={hostname} utc={DateTimeOffset.UtcNow:O}");
         Check(proxy.PasswordMethodOffers == 0, "CEF did not offer SOCKS5 username/password in the observed greeting");
         var unsupported = draft with { AuthenticationRequired = true, CredentialId = Guid.NewGuid() };
@@ -429,8 +429,7 @@ internal static partial class Program
                     trace.Add("PROXY_EVENT", "FIXTURE_REQUEST_RECEIVED");
                     if (originPort is not int origin) return;
                     using var upstream = new TcpClient(AddressFamily.InterNetwork);
-                    await upstream.ConnectAsync(IPAddress.Loopback, origin, token);
-                    upstreamPorts.Enqueue(((IPEndPoint)upstream.Client.LocalEndPoint!).Port);
+                    await ConnectObservedLoopback(upstream, origin, upstreamPorts, token);
                     using var upstreamStream = upstream.GetStream();
                     // Map only the synthetic hostname and fixture path validated above.
                     await upstreamStream.WriteAsync(

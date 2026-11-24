@@ -124,8 +124,7 @@ internal static partial class Program
                     if (forwardPort is not int port ||
                         first != $"GET http://aegis-secure-proxy.invalid:{port}/trusted-proxy HTTP/1.1") return;
                     using var upstream = new TcpClient(AddressFamily.InterNetwork);
-                    await upstream.ConnectAsync(IPAddress.Loopback, port, token);
-                    upstreamPorts.Enqueue(((IPEndPoint)upstream.Client.LocalEndPoint!).Port);
+                    await ConnectObservedLoopback(upstream, port, upstreamPorts, token);
                     Console.WriteLine($"PROXY_TLS_RECEIPT: mode=https_proxy tls=completed target=aegis-secure-proxy.invalid:{port} utc={DateTimeOffset.UtcNow:O}");
                     using var upstreamStream = upstream.GetStream();
                     await upstreamStream.WriteAsync("GET /trusted-proxy HTTP/1.1\r\nHost: aegis-secure-proxy.invalid\r\nX-Aegis-Test-Proxy: yes\r\nConnection: close\r\n\r\n"u8.ToArray(), token);
