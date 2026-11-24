@@ -17,10 +17,14 @@ internal static partial class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(profileRoot);
-        var downloads = Path.Combine(root, "approved-output");
+        // This is an owned test staging location, never a user-selected path.
+        // It is not the qualified production staging implementation.
+        var downloads = Path.Combine(root, "test-owned-staging");
         Directory.CreateDirectory(downloads);
         var target = Path.Combine(downloads, "chosen.txt");
         if (Directory.EnumerateFileSystemEntries(downloads).Any()) throw new IOException("Probe output must start empty.");
+        var marker = Path.Combine(downloads, ".aegis-fixture-owner");
+        using (new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) { }
         var payload = Encoding.UTF8.GetBytes("Aegis owned download callback fixture\n");
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -124,7 +128,8 @@ internal static partial class Program
         finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
         if (result == 0)
         {
-            var files = Directory.EnumerateFileSystemEntries(downloads).ToArray();
+            if (!File.Exists(marker)) { Console.Error.WriteLine("FAIL: fixture ownership marker disappeared"); return 1; }
+            var files = Directory.EnumerateFileSystemEntries(downloads).Where(path => path != marker).ToArray();
             if (mode is "decline" or "cancel" or "interrupt" && files.Length != 0)
             {
                 foreach (var file in files) Console.Error.WriteLine("DOWNLOAD_REMAINING_FILE: " + Path.GetFileName(file));
