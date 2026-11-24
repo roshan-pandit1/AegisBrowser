@@ -18,6 +18,11 @@ if (args.Length == 1 && args[0] == "--download-publication-observation")
     DownloadPublicationObservationTests.RunDisposable();
     return;
 }
+if (args.Length == 1 && args[0] == "--download-publication-native-observation")
+{
+    DownloadPublicationObservationTests.RunDisposable(native: true);
+    return;
+}
 
 // A child process proves that the OS lease is exclusive beyond this process.
 if (args.Length == 2 && args[0] == "--probe-lock")
