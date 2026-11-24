@@ -3,6 +3,12 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
 
+if (args.Length == 1 && args[0] == "--download-directory-sharing-observation")
+{
+    DownloadDirectoryObservationTests.RunDisposableSharingObservation();
+    return;
+}
+
 // A child process proves that the OS lease is exclusive beyond this process.
 if (args.Length == 2 && args[0] == "--probe-lock")
 {
@@ -69,6 +75,8 @@ ViewportZoomQueryTests.Run();
 AddressTests.Run();
 DownloadFileNameTests.Run();
 DownloadHistoryTests.Run();
+DownloadCloseBarrierTests.Run();
+DownloadDirectoryObservationTests.Run();
 ProfileCatalogTests.Run();
 ProfileRepositoryTests.Run();
 ProfileDashboardTests.Run();

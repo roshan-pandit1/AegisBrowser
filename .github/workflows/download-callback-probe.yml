@@ -20,6 +20,14 @@ jobs:
         run: git rev-parse HEAD
       - name: Build native fixture
         run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Build directory observation fixture
+        run: dotnet build AegisBrowser.Tests -c Release -r win-x64
+      - name: Observe owned directory sharing on this disposable runner
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-directory-sharing-observation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test native CEF download callbacks on loopback
         run: |
           $exe = './AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe'
