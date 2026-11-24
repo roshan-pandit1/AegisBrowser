@@ -22,7 +22,14 @@ internal static partial class Program
 
             using var certificates = new PrivacyCertificates();
             using var trust = new DisposableRunnerTrust(certificates.Root, trustDirectory, certificates.Id);
-            using var server = new PrivacyHttpsServer(certificates.Server);
+            var remaining = 96;
+            void Trace(string stage, string detail = "none")
+            {
+                if (Interlocked.Decrement(ref remaining) >= 0)
+                    Console.WriteLine($"PACKAGE_HTTPS qpc={Stopwatch.GetTimestamp()} source=helper stage={stage} detail={detail}");
+            }
+            using var server = new PrivacyHttpsServer(certificates.Server, trace: Trace);
+            Trace("listener_ready", server.Port.ToString());
             // Publish the URL only after the test root and listener are ready.
             PublishMarker(control, "ready.txt", server.TopA + "rc1-package-https");
             var watch = Stopwatch.StartNew();
@@ -31,15 +38,25 @@ internal static partial class Program
             var subresourceObserved = false;
             while (watch.Elapsed < TimeSpan.FromSeconds(120))
             {
-                if (!pageObserved) pageObserved = server.Take("/rc1-package-https").Length > 0;
-                if (!subresourceObserved) subresourceObserved = server.Take("/rc1-package-rendered").Length > 0;
+                if (!pageObserved && server.Take("/rc1-package-https").Length > 0)
+                {
+                    pageObserved = true;
+                    Trace("main_observed");
+                }
+                if (!subresourceObserved && server.Take("/rc1-package-rendered").Length > 0)
+                {
+                    subresourceObserved = true;
+                    Trace("image_observed");
+                }
                 if (!observed && pageObserved && subresourceObserved)
                 {
                     observed = true;
                     PublishMarker(control, "observed.txt", "https-request-observed");
+                    Trace("marker_published");
                 }
                 if (File.Exists(Path.Combine(control, "stop.txt")))
                 {
+                    Trace("shutdown_requested");
                     if (!observed) throw new InvalidOperationException("The controlled HTTPS request was not observed.");
                     Console.WriteLine("PASS: controlled HTTPS server observed the package navigation");
                     return 0;

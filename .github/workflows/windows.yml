@@ -462,7 +462,16 @@ jobs:
           "P403_PACKAGE_TRUST_DIR=$trustDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Package and verify portable ZIP
         timeout-minutes: 8
-        run: ./scripts/package-portable.ps1
+        env:
+          AEGIS_PACKAGE_HTTPS_EVIDENCE: ${{ runner.temp }}/package-https-evidence
+        run: ./scripts/package-portable.ps1 -SmokeRuns 20
+      - name: Upload redacted portable HTTPS failure traces
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: AegisBrowser-portable-https-failures
+          path: ${{ runner.temp }}/package-https-evidence/
+          if-no-files-found: ignore
       - name: Remove and verify disposable package HTTPS test root
         if: ${{ always() }}
         timeout-minutes: 2

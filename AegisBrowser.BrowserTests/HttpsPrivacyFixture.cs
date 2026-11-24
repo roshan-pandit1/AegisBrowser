@@ -204,6 +204,7 @@ internal static partial class Program
         private readonly ConcurrentBag<Task> clients = new();
         private readonly ConcurrentDictionary<string, ConcurrentQueue<HttpsCookieObservation>> observations = new();
         private readonly Task[] loops;
+        private readonly Action<string, string>? trace;
         private readonly Action<string, int>? onRequest;
         private int accepted, requests, cancelled, tlsErrors, ioErrors;
         public int Port { get; }
@@ -211,10 +212,11 @@ internal static partial class Program
         public string TopB => $"https://[::1]:{Port}/";
         public string Third => $"https://localhost:{Port}/";
 
-        public PrivacyHttpsServer(X509Certificate2 certificate, int port = 0, Action<string, int>? onRequest = null)
+        public PrivacyHttpsServer(X509Certificate2 certificate, int port = 0, Action<string, int>? onRequest = null, Action<string, string>? trace = null)
         {
             this.certificate = certificate;
             this.onRequest = onRequest;
+            this.trace = trace;
             ipv4 = new TcpListener(IPAddress.Loopback, port); ipv4.Start();
             Port = ((IPEndPoint)ipv4.LocalEndpoint).Port;
             try
@@ -244,6 +246,7 @@ internal static partial class Program
                         client.Dispose();
                         throw new InvalidOperationException("HTTPS fixture connection limit exceeded.");
                     }
+                    trace?.Invoke("tcp_accept", ((IPEndPoint)client.Client.RemoteEndPoint!).Port.ToString());
                     clients.Add(Serve(client));
                 }
             }
@@ -256,12 +259,15 @@ internal static partial class Program
         {
             using (client)
             {
+                var tlsComplete = false;
                 try
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
                     timeout.CancelAfter(TimeSpan.FromSeconds(8));
                     using var stream = new SslStream(client.GetStream());
                     await stream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate }, timeout.Token);
+                    tlsComplete = true;
+                    trace?.Invoke("tls_ok", "none");
                     using var reader = new StreamReader(stream, Encoding.ASCII, false, 1024, leaveOpen: true);
                     var line = await reader.ReadLineAsync(timeout.Token);
                     if (line is null) return;
@@ -269,6 +275,12 @@ internal static partial class Program
                     if (parts.Length < 2 || parts[0] != "GET") return;
                     Interlocked.Increment(ref requests);
                     var path = parts[1].Split('?')[0];
+                    trace?.Invoke("http_request", path switch
+                    {
+                        "/rc1-package-https" => "main",
+                        "/rc1-package-rendered" => "image",
+                        _ => "other"
+                    });
                     onRequest?.Invoke(path, ((IPEndPoint)client.Client.RemoteEndPoint!).Port);
                     var normal = false; var httpOnly = false; var lax = false; var strict = false; var set = false;
                     var chipA = false; var chipB = false; var authSession = false;
@@ -351,10 +363,26 @@ internal static partial class Program
                     var prefix = Encoding.ASCII.GetBytes(headers + "Content-Length: " + bytes.Length + "\r\n\r\n");
                     await stream.WriteAsync(prefix, timeout.Token); await stream.WriteAsync(bytes, timeout.Token);
                 }
-                catch (OperationCanceledException) { Interlocked.Increment(ref cancelled); }
-                catch (AuthenticationException) { Interlocked.Increment(ref tlsErrors); }
-                catch (IOException) { Interlocked.Increment(ref ioErrors); }
-                catch (SocketException) { Interlocked.Increment(ref ioErrors); }
+                catch (OperationCanceledException ex)
+                {
+                    Interlocked.Increment(ref cancelled);
+                    trace?.Invoke(tlsComplete ? "http_error" : "tls_error", ex.GetType().Name + "_" + ex.HResult.ToString("X8"));
+                }
+                catch (AuthenticationException ex)
+                {
+                    Interlocked.Increment(ref tlsErrors);
+                    trace?.Invoke(tlsComplete ? "http_error" : "tls_error", ex.GetType().Name + "_" + ex.HResult.ToString("X8"));
+                }
+                catch (IOException ex)
+                {
+                    Interlocked.Increment(ref ioErrors);
+                    trace?.Invoke(tlsComplete ? "http_error" : "tls_error", ex.GetType().Name + "_" + ex.HResult.ToString("X8"));
+                }
+                catch (SocketException ex)
+                {
+                    Interlocked.Increment(ref ioErrors);
+                    trace?.Invoke(tlsComplete ? "http_error" : "tls_error", ex.GetType().Name + "_" + ex.HResult.ToString("X8"));
+                }
             }
         }
 
