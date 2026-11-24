@@ -58,7 +58,18 @@ internal static class BookmarkTests
         Check(store.ReadImport(export).Items.Single().Title == "Edited", "JSON interchange round trip");
         Reject(() => store.Export(export), "export never replaces existing file");
         Reject(() => store.Export(Path.Combine(Path.GetTempPath(), "outside.json")), "export confined to profile");
+        var retained = OperatingSystem.IsWindows() ? BookmarkDirectoryObservation.Open(root, lease) : null;
         lease.Dispose();
+        if (retained is not null)
+        {
+            Reject(() => retained.ReadHeldIdentity(), "revocation closes the retained directory observation");
+            retained.Dispose(); retained.Dispose();
+            var moved = root + "-after-release";
+            var didMove = false;
+            try { Directory.Move(root, moved); didMove = true; }
+            finally { if (didMove) Directory.Move(moved, root); }
+            Check(didMove, "released lease and observation do not retain the directory");
+        }
         Reject(() => store.Save(store.Snapshot()), "released lease rejects save");
         if (OperatingSystem.IsWindows()) Reject(() => BookmarkDirectoryObservation.Open(root, lease), "released lease rejects directory observation");
         using var lease2 = new ProfileLease(root);

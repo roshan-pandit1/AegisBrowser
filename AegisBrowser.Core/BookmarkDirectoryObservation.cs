@@ -16,9 +16,12 @@ internal sealed class BookmarkDirectoryObservation : IDisposable
     private const uint OpenReparsePoint = 0x00200000;
     private const uint UnsupportedAttributes = 0x400 | 0x1000 | 0x40000 | 0x400000;
     private readonly SafeFileHandle handle;
+    private readonly ProfileLease lease;
+    private IDisposable? revocation;
+    private int disposed;
 
-    private BookmarkDirectoryObservation(SafeFileHandle handle, Identity identity, string finalPath)
-        => (this.handle, DirectoryIdentity, FinalPath) = (handle, identity, finalPath);
+    private BookmarkDirectoryObservation(SafeFileHandle handle, ProfileLease lease, Identity identity, string finalPath)
+        => (this.handle, this.lease, DirectoryIdentity, FinalPath) = (handle, lease, identity, finalPath);
 
     internal readonly record struct Identity(ulong VolumeSerial, ulong Low, ulong High);
     internal Identity DirectoryIdentity { get; }
@@ -54,15 +57,33 @@ internal sealed class BookmarkDirectoryObservation : IDisposable
                 var finalPath = final.ToString();
                 if (!finalPath.StartsWith(@"\\?\", StringComparison.Ordinal) || finalPath.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
                     throw new IOException("The opened directory is not on a local DOS volume.");
-                result = new BookmarkDirectoryObservation(candidate, ReadIdentity(candidate), finalPath);
+                var observation = new BookmarkDirectoryObservation(candidate, lease, ReadIdentity(candidate), finalPath);
+                // Registration occurs inside the lease gate, so revocation cannot
+                // occur between opening the handle and attaching its lifetime.
+                observation.revocation = lease.RegisterRevocation(observation.Dispose);
+                result = observation;
             }
             catch { candidate.Dispose(); throw; }
         })) throw new IOException("A live profile lease is required.");
         return result!;
     }
 
-    internal Identity ReadHeldIdentity() => ReadIdentity(handle);
-    public void Dispose() => handle.Dispose();
+    internal Identity ReadHeldIdentity()
+    {
+        Identity result = default;
+        if (!lease.TryInvokeWhileHeld(() =>
+        {
+            if (Volatile.Read(ref disposed) != 0) throw new IOException("The directory observation is closed.");
+            result = ReadIdentity(handle);
+        })) throw new IOException("A live profile lease is required.");
+        return result;
+    }
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        Interlocked.Exchange(ref revocation, null)?.Dispose();
+        handle.Dispose();
+    }
 
     private static Identity ReadIdentity(SafeFileHandle file)
     {
