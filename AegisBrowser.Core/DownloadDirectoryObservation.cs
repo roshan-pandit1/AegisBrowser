@@ -33,7 +33,13 @@ public sealed class DownloadDirectoryObservation : IDisposable
     public string FinalPath { get; }
     public DirectoryIdentity Identity { get; }
 
-    public static DownloadDirectoryObservation OpenExistingLocalNtfs(string path)
+    public static DownloadDirectoryObservation OpenExistingLocalNtfs(string path) => OpenDirectoryForObservation(path, FileReadAttributes);
+
+    // Separate disposable-fixture candidate: a metadata-only handle can have
+    // different sharing behavior. This is still not an authorization primitive.
+    internal static DownloadDirectoryObservation OpenWithListAccessForTest(string path) => OpenDirectoryForObservation(path, FileReadAttributes | 0x1);
+
+    private static DownloadDirectoryObservation OpenDirectoryForObservation(string path, uint access)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows is required.");
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || path.StartsWith("\\\\", StringComparison.Ordinal))
@@ -41,7 +47,7 @@ public sealed class DownloadDirectoryObservation : IDisposable
         var fullPath = Path.GetFullPath(path);
         var root = Path.GetPathRoot(fullPath) ?? throw new IOException("Directory root is unavailable.");
         if (GetDriveTypeW(root) != 3) throw new IOException("The volume is not a fixed local drive.");
-        var directory = CreateFileW(fullPath, FileReadAttributes, ShareReadWrite, IntPtr.Zero, OpenExisting,
+        var directory = CreateFileW(fullPath, access, ShareReadWrite, IntPtr.Zero, OpenExisting,
             BackupSemantics | OpenReparsePoint, IntPtr.Zero);
         if (directory.IsInvalid)
         {

@@ -13,6 +13,11 @@ if (args.Length == 1 && args[0] == "--download-directory-delete-diagnostic")
     DownloadDirectoryObservationTests.RunDisposableDeleteDiagnostic();
     return;
 }
+if (args.Length == 1 && args[0] == "--download-directory-list-access-diagnostic")
+{
+    DownloadDirectoryObservationTests.RunDisposableListAccessDiagnostic();
+    return;
+}
 if (args.Length == 1 && args[0] == "--download-publication-observation")
 {
     DownloadPublicationObservationTests.RunDisposable();

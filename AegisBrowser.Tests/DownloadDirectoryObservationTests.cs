@@ -115,6 +115,38 @@ internal static class DownloadDirectoryObservationTests
         // Preserve all test-owned objects until the disposable runner is discarded.
     }
 
+    internal static void RunDisposableListAccessDiagnostic()
+    {
+        RequireDisposable();
+        var runnerTemp = Environment.GetEnvironmentVariable("RUNNER_TEMP") ?? throw new IOException("Runner temporary directory is unavailable.");
+        var root = Path.Combine(Path.GetFullPath(runnerTemp), "aegis-list-access-" + Guid.NewGuid().ToString("N"));
+        var parent = Path.Combine(root, "parent"); var movedParent = Path.Combine(root, "moved-parent");
+        var leaf = Path.Combine(parent, "leaf"); var movedLeaf = Path.Combine(parent, "moved-leaf");
+        Directory.CreateDirectory(leaf);
+        DirectoryIdentity identity;
+        using (var heldParent = DownloadDirectoryObservation.OpenWithListAccessForTest(parent))
+        using (var heldLeaf = DownloadDirectoryObservation.OpenWithListAccessForTest(leaf))
+        {
+            identity = heldLeaf.Identity;
+            static void ExpectBlocked(Action operation, string label)
+            {
+                try { operation(); throw new Exception("FAIL: " + label + " succeeded while handle held"); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                { Console.WriteLine("LIST_ACCESS_OBSERVATION: " + label + " blocked hresult=" + ex.HResult); }
+            }
+            ExpectBlocked(() => Directory.Delete(leaf), "leaf delete");
+            ExpectBlocked(() => Directory.Move(leaf, movedLeaf), "leaf rename");
+            ExpectBlocked(() => Directory.Move(parent, movedParent), "parent rename");
+            if (heldLeaf.ReadHeldIdentity() != identity) throw new Exception("FAIL: held leaf identity changed");
+        }
+        using (var reopened = DownloadDirectoryObservation.OpenWithListAccessForTest(leaf))
+            if (reopened.Identity != identity) throw new Exception("FAIL: fixture path changed identity");
+        Directory.Move(leaf, movedLeaf); Directory.Move(movedLeaf, leaf); Directory.Delete(leaf);
+        Directory.Move(parent, movedParent); Directory.Move(movedParent, parent);
+        Console.WriteLine("LIST_ACCESS_OBSERVATION: rename and delete controls succeeded after release");
+        Console.WriteLine("PASS: scoped list-access directory sharing experiment; CEF writes and ACLs not assessed");
+    }
+
     private static void RequireDisposable()
     {
         if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
