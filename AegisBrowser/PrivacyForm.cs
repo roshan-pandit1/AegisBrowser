@@ -7,14 +7,19 @@ internal sealed class PrivacyForm : Form
     private readonly PrivacySession session;
     private readonly ComboBox mode = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly CheckBox customList = new() { Text = "Use tracking list in Custom", AutoSize = true };
-    private readonly CheckBox unknownSiteRules = new() { Name = "UnknownSiteRules", Text = "Apply third-party rules when site is unknown (may block content)", AutoSize = true };
-    private readonly CheckBox blockThirdPartyCookies = new() { Name = "BlockThirdPartyCookies", Text = "Block third-party cookies (restart profile to apply)", AutoSize = true };
-    private readonly CheckBox restrictWebRtcUdp = new() { Name = "RestrictWebRtcNonProxiedUdp", Text = "Restrict non-proxied WebRTC UDP (restart; calls may fail)", AutoSize = true };
-    private readonly CheckBox letterboxWebContent = new() { Name = "LetterboxWebContent", Text = "Letterbox page viewport (restart profile; may reduce available space)", AutoSize = true };
-    private readonly CheckBox disableWebGl = new() { Name = "DisableWebGl", Text = "Restrict WebGL (restart; 3D graphics and some sites may fail)", AutoSize = true };
-    private readonly CheckBox disableRemoteFonts = new() { Name = "DisableRemoteFonts", Text = "Block remote web fonts (restart; typography may change)", AutoSize = true };
+    private readonly CheckBox unknownSiteRules = new() { Name = "UnknownSiteRules", Text = "Apply third-party rules for unknown sites", AutoSize = true };
+    private readonly CheckBox blockThirdPartyCookies = new() { Name = "BlockThirdPartyCookies", Text = "Block third-party cookies", AutoSize = true };
+    private readonly CheckBox restrictWebRtcUdp = new() { Name = "RestrictWebRtcNonProxiedUdp", Text = "Restrict non-proxied WebRTC UDP", AutoSize = true };
+    private readonly CheckBox letterboxWebContent = new() { Name = "LetterboxWebContent", Text = "Letterbox the page viewport", AutoSize = true };
+    private readonly CheckBox disableWebGl = new() { Name = "DisableWebGl", Text = "Restrict WebGL", AutoSize = true };
+    private readonly CheckBox disableRemoteFonts = new() { Name = "DisableRemoteFonts", Text = "Block remote web fonts", AutoSize = true };
     private readonly TextBox blocks = Editor(), allows = Editor(), sites = Editor(), rules = Editor(), list = Editor(), unsupported = Editor();
     private readonly Label summary = new() { AutoSize = true };
+    private readonly Label saveFeedback = new()
+    {
+        Dock = DockStyle.Bottom, AutoSize = true, AccessibleName = "Privacy settings messages",
+        Padding = new Padding(12, 4, 12, 4), Visible = false
+    };
     private readonly DataGridView network = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false,
         AllowUserToDeleteRows = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, RowHeadersVisible = false };
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1000 };
@@ -62,10 +67,10 @@ internal sealed class PrivacyForm : Form
             Text = "Current cookie policy: " + cookiePolicyStatus + ". Viewport letterboxing at startup: "
                 + (letterboxingActive ? "On" : "Off") + ". WebGL restriction at startup: "
                 + (webGlRestrictionActive ? "On" : "Off") + ". Remote web fonts restriction: "
-                + (remoteFontRestrictionActive ? "On" : "Off") + ". WebRTC setting: " + webRtcPolicyStatus + ". Changes apply after restarting this profile. "
-                + "Turning this off restores Chromium's default, which may still block some cookies. "
-                + "Blocking can affect embedded sign-in, payments and media. Restricting WebRTC UDP may break calls; TCP can still expose network addresses and this is not a firewall or proxy containment. Letterboxing adjusts the tab size for page zoom and may reduce available space. Display scaling and scrollbars can change the observed viewport; native popups are not letterboxed. It does not hide screen dimensions. WebGL restrictions can break 3D content and do not cover all OffscreenCanvas contexts in pages or workers. Disabling remote fonts does not conceal installed local fonts. None of these options hides your IP or prevents all fingerprinting." };
-        var pause = new CheckBox { Text = "Pause filtering until resumed or browser exit", AutoSize = true, Checked = session.Paused };
+                + (remoteFontRestrictionActive ? "On" : "Off") + ". WebRTC setting: " + webRtcPolicyStatus + ". Cookie, WebRTC, viewport, WebGL and font settings apply after restarting this profile. "
+                + "Applying third-party rules for unknown sites may block content. Turning off cookie blocking restores Chromium's default, which may still block some cookies. "
+                + "Blocking can affect embedded sign-in, payments and media. Restricting WebRTC UDP may break calls; TCP can still expose network addresses and this is not a firewall or proxy containment. Letterboxing adjusts the tab size for page zoom and may reduce available space. Display scaling and scrollbars can change the observed viewport; native popups are not letterboxed. It does not hide screen dimensions. WebGL restrictions can break 3D content and do not cover all OffscreenCanvas contexts in pages or workers. Disabling remote fonts may change typography and does not conceal installed local fonts. None of these options hides your IP or prevents all fingerprinting." };
+        var pause = new CheckBox { Text = "Pause filtering for this session", AutoSize = true, Checked = session.Paused };
         pause.CheckedChanged += (_, _) => session.Paused = pause.Checked;
         controls.Controls.Add(pause);
         var host = SiteClassifier.Host(currentUrl);
@@ -114,7 +119,9 @@ internal sealed class PrivacyForm : Form
         };
         footer.Controls.AddRange([cancel, save]);
         Controls.Add(pages);
+        Controls.Add(saveFeedback);
         Controls.Add(footer);
+        ClientSizeChanged += (_, _) => saveFeedback.MaximumSize = new Size(Math.Max(1, ClientSize.Width), 0);
         CancelButton = cancel;
         timer.Tick += (_, _) => RefreshInspector(); timer.Start();
         FormClosed += (_, _) => timer.Dispose();
@@ -178,10 +185,12 @@ internal sealed class PrivacyForm : Form
         {
             ApplyEdits();
             RefreshInspector();
-            MessageBox.Show(this, $"Network rules apply to new requests. Restart this profile for cookie, WebRTC, viewport or fingerprint-surface settings.\n{session.RuleCount} active rules; {session.Unsupported.Count} unsupported rules skipped.", "Privacy settings");
+            saveFeedback.Text = $"Saved. Network rules apply to new requests. Restart this profile for cookie, WebRTC, viewport or fingerprint-surface settings. " +
+                $"{session.RuleCount} active rules. {session.Unsupported.Count} unsupported rules skipped.";
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
-        { MessageBox.Show(this, ex.Message, "Settings were not applied"); }
+        { saveFeedback.Text = "Settings were not saved. " + ex.Message; }
+        saveFeedback.Visible = true;
     }
     internal void RefreshInspector()
     {

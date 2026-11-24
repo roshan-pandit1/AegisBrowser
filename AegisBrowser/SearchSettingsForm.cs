@@ -14,7 +14,7 @@ internal sealed class SearchSettingsForm : Form
         Text = "Search settings";
         DesktopStyle.Apply(this);
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(440, 225); MinimumSize = new Size(340, 240);
+        ClientSize = new Size(520, 325); MinimumSize = new Size(340, 250);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 5 };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -27,7 +27,7 @@ internal sealed class SearchSettingsForm : Form
         layout.Controls.Add(engines, 0, 1);
         current.Text = "Current engine: " + SearchEngines.Get(settings.EngineId).Name;
         layout.Controls.Add(current, 0, 2);
-        layout.Controls.Add(new Label { Text = "Searches are sent only when you press Enter.\nThis setting applies to this browser profile.", AutoSize = true }, 0, 3);
+        layout.Controls.Add(new Label { Text = "Searches are sent on Enter.\nApplies to this profile.", AutoSize = true }, 0, 3);
         var button = new Button { Name = "SaveSearchSettings", Text = "Save", AutoSize = true };
         var cancel = new Button { Text = "Cancel", AutoSize = true };
         cancel.Click += (_, _) => Close();
@@ -38,7 +38,11 @@ internal sealed class SearchSettingsForm : Form
         layout.Controls.Remove(information);
         var messages = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         messages.Controls.AddRange([information, feedback]);
-        messages.ClientSizeChanged += (_, _) => feedback.MaximumSize = new Size(Math.Max(1, messages.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 8), 0);
+        messages.ClientSizeChanged += (_, _) =>
+        {
+            var width = Math.Max(1, messages.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 8);
+            information.MaximumSize = feedback.MaximumSize = new Size(width, 0);
+        };
         layout.Controls.Add(messages, 0, 3);
         button.Click += (_, _) =>
         {
