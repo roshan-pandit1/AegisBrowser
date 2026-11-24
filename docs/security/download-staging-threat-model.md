@@ -62,3 +62,25 @@ verify handle identities and the final published hash. Test cancellation and
 its terminal callback before closing the originating browser, including popup,
 initialization and shutdown races. Passing individual fixture checks does not
 establish the full activation gate.
+
+## Initial disposable-runner observations
+
+On commit `6753fe73676bb4cb4668154650b61cd19d8a2eeb`, both the
+[push](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45352334580)
+and [PR](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45352343838)
+sharing checks **FAILED**: deleting the test-owned directory returned success
+while its existing read-attributes handle omitted `FILE_SHARE_DELETE`.
+
+The [separate diagnostic](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45353265612)
+on commit `093c22d26732bb1bc420dbc39a9ad022ea8059e9` observed an unheld delete control, then a successful delete of the held
+directory, `DeletePending=true` on the retained original handle, and a newly
+created directory at the same path with a different file ID. This did not
+involve CEF writes or establish attacker privileges. It disproves the proposed
+assumption that this particular held handle keeps the staging pathname bound to
+its original object. The existing failing assertion remains in CI.
+
+On the same run, the test-only `SetFileInformationByHandle(FileRenameInfo)`
+attempt returned Win32 error 87 for both the collision and the non-colliding
+target. The negative case is therefore not evidence of no-replace semantics;
+the positive control also failed. A separate native-system-call comparison is
+needed. Neither observation authorizes production staging or publication.
