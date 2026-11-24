@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using AegisBrowser;
+using AegisBrowser.Core;
 using CefSharp;
 using CefSharp.Handler;
 using CefSharp.WinForms;
@@ -13,7 +14,7 @@ internal static partial class Program
     // Test-only probe. Production continues to use DenyDownloads.
     private static int DownloadCallbackProbe(string profileRoot, string mode)
     {
-        if (mode is not ("decline" or "accept" or "cancel" or "interrupt" or "close-tab")) return 2;
+        if (mode is not ("decline" or "accept" or "cancel" or "interrupt" or "close-tab" or "held-staging")) return 2;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(profileRoot);
@@ -25,6 +26,8 @@ internal static partial class Program
         if (Directory.EnumerateFileSystemEntries(downloads).Any()) throw new IOException("Probe output must start empty.");
         var marker = Path.Combine(downloads, ".aegis-fixture-owner");
         using (new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) { }
+        using var stagingHandle = mode == "held-staging" ? DownloadDirectoryObservation.OpenWithListAccessForTest(downloads) : null;
+        var stagingIdentity = stagingHandle?.Identity;
         var payload = Encoding.UTF8.GetBytes("Aegis owned download callback fixture\n");
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -72,13 +75,15 @@ internal static partial class Program
                     await responseServed.Task.WaitAsync(TimeSpan.FromSeconds(25));
                     await handler.Before.Task.WaitAsync(TimeSpan.FromSeconds(25));
                     Check(handler.Suggested == "fixture.txt", "Content-Disposition suggested filename reaches native callback");
-                    if (mode == "accept")
+                    if (mode is "accept" or "held-staging")
                     {
                         await handler.Complete.Task.WaitAsync(TimeSpan.FromSeconds(25));
                         Check(File.Exists(target) && File.ReadAllBytes(target).SequenceEqual(payload), "native download wrote exact fixture bytes");
                         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(target)));
                         Check(hash == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)), "native download SHA-256 matches fixture");
                         Console.WriteLine("DOWNLOAD_FIXTURE_SHA256: " + hash);
+                        if (stagingHandle is not null)
+                            Check(stagingHandle.ReadHeldIdentity() == stagingIdentity, "held staging directory identity remains stable while CEF writes");
                     }
                     else if (mode == "cancel")
                     {
@@ -135,7 +140,7 @@ internal static partial class Program
                 foreach (var file in files) Console.Error.WriteLine("DOWNLOAD_REMAINING_FILE: " + Path.GetFileName(file));
                 Console.Error.WriteLine("FAIL: unsuccessful download left output files"); return 1;
             }
-            if (mode == "accept" && (files.Length != 1 || files[0] != target)) { Console.Error.WriteLine("FAIL: unexpected output files"); return 1; }
+            if (mode is "accept" or "held-staging" && (files.Length != 1 || files[0] != target)) { Console.Error.WriteLine("FAIL: unexpected output files"); return 1; }
             Console.WriteLine($"PASS: native download callback probe ({mode}), CEF shutdown and output listing");
         }
         return result;
@@ -158,7 +163,7 @@ internal static partial class Program
             using (callback)
             {
                 Suggested = item.SuggestedFileName;
-                if (mode is "accept" or "cancel" or "interrupt" or "close-tab") callback.Continue(target, false);
+                if (mode is "accept" or "cancel" or "interrupt" or "close-tab" or "held-staging") callback.Continue(target, false);
             }
             Before.TrySetResult(true);
             return true;
