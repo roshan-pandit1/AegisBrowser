@@ -88,27 +88,31 @@ public sealed class MainForm : Form
         ClientSize = new(1150, 740);
         MinimumSize = new(570, 340);
 
-        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
-        shell.RowStyles.Add(new(SizeType.Absolute, 48));
-        shell.RowStyles.Add(new(SizeType.Absolute, 52));
-        shell.RowStyles.Add(new(SizeType.Percent, 100));
+        var shell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1, RowCount = 2, Margin = Padding.Empty
+        };
+        shell.RowStyles.Add(new(SizeType.AutoSize));
+        shell.RowStyles.Add(new(SizeType.AutoSize));
         var tabActions = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new(8, 4, 8, 4),
-            WrapContents = false, BackColor = DesktopStyle.Header
+            WrapContents = false, AutoSize = true, BackColor = DesktopStyle.Header
         };
-        tabActions.Controls.Add(MakeButton("New tab", "New tab (Ctrl+T)", () => NewTab(BrowserPolicy.DiagnosticsUrl)));
-        tabActions.Controls.Add(MakeButton("Close tab", "Close current tab (Ctrl+W)", CloseTab));
+        var newTab = MakeButton("New tab", "New tab (Ctrl+T)", () => NewTab(BrowserPolicy.DiagnosticsUrl));
+        var closeTab = MakeButton("Close tab", "Close current tab (Ctrl+W)", CloseTab);
+        DesktopStyle.Button(newTab, primary: true);
+        closeTab.BackColor = SystemColors.Control;
+        tabActions.Controls.AddRange([newTab, closeTab]);
         shell.Controls.Add(tabActions, 0, 0);
 
         var bar = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 7, RowCount = 1, Margin = Padding.Empty,
+            Dock = DockStyle.Fill, ColumnCount = 7, RowCount = 1, Margin = Padding.Empty, AutoSize = true,
             Padding = new(8, 4, 8, 4), BackColor = DesktopStyle.Surface
         };
-        bar.ColumnStyles.Add(new(SizeType.Absolute, 42));
-        bar.ColumnStyles.Add(new(SizeType.Absolute, 42));
-        bar.ColumnStyles.Add(new(SizeType.Absolute, 68));
+        for (var i = 0; i < 3; i++) bar.ColumnStyles.Add(new(SizeType.AutoSize));
         bar.ColumnStyles.Add(new(SizeType.Percent, 100));
         for (var i = 0; i < 3; i++) bar.ColumnStyles.Add(new(SizeType.AutoSize));
         back = MakeButton("←", "Back (Alt+Left)", () => Current?.Back());
@@ -134,7 +138,7 @@ public sealed class MainForm : Form
         });
         bar.Controls.Add(profiles, 5, 0);
         var menu = new ContextMenuStrip();
-        var more = MakeButton("More ▾", "More browser actions", () => menu.Show(bar.GetControlFromPosition(6, 0)!, new Point(0, bar.Height - bar.Padding.Top)));
+        var more = MakeButton("More ▾", "More browser actions", () => menu.Show(bar.GetControlFromPosition(6, 0)!, new Point(0, bar.GetControlFromPosition(6, 0)!.Height)));
         menu.Items.Add("Diagnostics", null, (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl)).Name = "OpenDiagnostics";
         menu.Items.Add("Developer tools (F12)", null, (_, _) => Current?.ShowDevTools());
         menu.Items.Add("Search settings", null, (_, _) =>
@@ -154,10 +158,6 @@ public sealed class MainForm : Form
         bar.Controls.Add(more, 6, 0);
         Disposed += (_, _) => menu.Dispose();
         shell.Controls.Add(bar, 0, 1);
-        shell.Dock = DockStyle.Top;
-        shell.Height = 100;
-        shell.RowCount = 2;
-        shell.RowStyles.RemoveAt(2);
         tabs.Margin = Padding.Empty;
         address.Name = "BrowserAddress";
         address.AccessibleName = "Search or enter address";
@@ -175,6 +175,7 @@ public sealed class MainForm : Form
         Controls.Add(tabs);
         Controls.Add(shell);
         Controls.Add(bottom);
+        UpdateNavigation();
         tabs.SelectedIndexChanged += (_, _) =>
         {
             UpdateNavigation();
@@ -248,6 +249,7 @@ public sealed class MainForm : Form
     {
         var button = new Button { Text = text, Dock = DockStyle.Fill, AccessibleName = accessibleName, AutoSize = true };
         DesktopStyle.Button(button);
+        button.Padding = new Padding(4, 0, 4, 0);
         button.Click += (_, _) => action();
         return button;
     }
