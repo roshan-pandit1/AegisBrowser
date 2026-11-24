@@ -67,6 +67,7 @@ PrivacyTests.Run();
 ViewportLetterboxingTests.Run();
 ViewportZoomQueryTests.Run();
 AddressTests.Run();
+DownloadFileNameTests.Run();
 ProfileCatalogTests.Run();
 ProfileRepositoryTests.Run();
 ProfileDashboardTests.Run();
