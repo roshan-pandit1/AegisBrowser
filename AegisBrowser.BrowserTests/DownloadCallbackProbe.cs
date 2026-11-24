@@ -127,13 +127,24 @@ internal static partial class Program
                 finally
                 {
                     releaseBody.TrySetResult(true);
-                    try
+                    if (mode == "barrier-close" && handler.PendingNative)
                     {
-                        await Cef.UIThreadTaskFactory.StartNew(handler.ReleaseRetained);
-                        if (!webClosed) { await CloseWeb(web); form.Controls.Remove(web); web.Dispose(); }
+                        // The test has failed, but closing this form would destroy
+                        // the browser while CEF still has a tracked download. Keep
+                        // it alive until the disposable runner is torn down.
+                        result = 1;
+                        Console.Error.WriteLine("FAILED: download terminal state unconfirmed; native browser retained");
                     }
-                    catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
-                    form.Close();
+                    else
+                    {
+                        try
+                        {
+                            await Cef.UIThreadTaskFactory.StartNew(handler.ReleaseRetained);
+                            if (!webClosed) { await CloseWeb(web); form.Controls.Remove(web); web.Dispose(); }
+                        }
+                        catch (Exception ex) { result = 1; Console.Error.WriteLine(ex); }
+                        form.Close();
+                    }
                 }
             };
             Application.Run(form);
@@ -167,6 +178,7 @@ internal static partial class Program
         private DownloadCloseBarrier? closeBarrier;
         private int browserId;
         private int downloadId;
+        internal volatile bool PendingNative;
         internal string? Suggested { get; private set; }
         protected override bool CanDownload(IWebBrowser control, IBrowser browser, string url, string method) =>
             Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttp && uri.Host == "127.0.0.1" && uri.Port == port;
@@ -181,6 +193,7 @@ internal static partial class Program
                     downloadId = item.Id;
                     closeBarrier = new DownloadCloseBarrier();
                     if (!closeBarrier.TryRegister(browserId, downloadId, CancelRetained)) throw new InvalidOperationException("Could not register fixture download.");
+                    PendingNative = true;
                 }
                 if (mode is "accept" or "cancel" or "interrupt" or "close-tab" or "held-staging" or "barrier-close") callback.Continue(target, false);
             }
@@ -203,7 +216,10 @@ internal static partial class Program
                 else if (item.IsInterrupted) { Interrupted.TrySetResult(true); Complete.TrySetException(new IOException("Native download did not complete.")); }
             }
             if (mode == "barrier-close" && (item.IsComplete || item.IsCancelled || item.IsInterrupted))
+            {
+                PendingNative = false;
                 closeBarrier?.ObserveTerminal(browser.Identifier, item.Id);
+            }
         }
         internal void CancelRetained()
         {
