@@ -145,7 +145,7 @@ public static class AegisSmokeInput {
     Add-PackageTrace 'browser_started' $process.Id
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     $browserHandle = [IntPtr]::Zero
-    $expectedTitle = 'Aegis Browser ' + [char]0x2014 + ' ' + $profile
+    $expectedTitle = 'DEVELOPMENT PREVIEW ' + [char]0x2014 + ' Aegis Browser ' + [char]0x2014 + ' ' + $profile
     do {
         Start-Sleep -Milliseconds 250
         $process.Refresh()
