@@ -83,13 +83,14 @@ public sealed class SessionHistoryService
     public bool UpdateTitle(Guid tabId, long navigationId, string? title)
     {
         var cleaned = SanitizeTitle(title);
-        if (cleaned.Length == 0) return false;
         lock (gate)
         {
             if (paused || !tabs.TryGetValue(tabId, out var nav) || !nav.Allowed || nav.Generation != navigationId || nav.EntryId is not Guid id) return false;
             var index = entries.FindIndex(entry => entry.Id == id);
-            if (index < 0 || entries[index].Title == cleaned) return false;
-            entries[index] = entries[index] with { Title = cleaned };
+            if (index < 0) return false;
+            var display = cleaned.Length == 0 ? new Uri(entries[index].Url).Host : cleaned;
+            if (entries[index].Title == display) return false;
+            entries[index] = entries[index] with { Title = display };
         }
         NotifyChanged();
         return true;

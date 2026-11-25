@@ -19,6 +19,8 @@ internal static class SessionHistoryTests
         Check(!history.CompleteNavigation(tab, first, "https://example.com/a", 200), "duplicate completion ignored");
         Check(history.UpdateTitle(tab, first, "  A\u202eB\u0001 "), "title update accepted");
         Check(history.Snapshot().Single().Title == "AB", "title controls and bidi removed");
+        Check(history.UpdateTitle(tab, first, "") && history.Snapshot().Single().Title == "example.com", "empty title restores hostname");
+        Check(history.UpdateTitle(tab, first, "AB"), "nonempty title can replace the hostname");
         Check(history.Snapshot("ab").Count == 1 && history.Snapshot("EXAMPLE.COM").Count == 1 && history.Snapshot("missing").Count == 0, "bounded case-insensitive search");
         var second = history.BeginNavigation(tab);
         Check(!history.UpdateTitle(tab, first, "late"), "old navigation cannot change title");
@@ -65,6 +67,23 @@ internal static class SessionHistoryTests
         Check(SessionHistoryService.SanitizeTitle(new string('a', 255) + "😀").Length == 255, "title truncation preserves surrogate pairs");
         Check(SessionHistoryService.SanitizeTitle(new string('\u0001', 2048) + "tail") == "", "title processing has a bounded input scan");
         Check(SessionHistoryService.SanitizeTitle("<b>text</b>") == "<b>text</b>", "markup-like title remains plain text");
+        foreach (var invalidLimit in new[] { 0, SessionHistoryService.DefaultEntryLimit + 1 })
+        {
+            try { _ = new SessionHistoryService(entryLimit: invalidLimit); throw new Exception("Invalid history limit was accepted."); }
+            catch (ArgumentOutOfRangeException) { count++; }
+        }
+
+        var notificationProbe = new SessionHistoryService();
+        var concurrentReaderCompleted = false;
+        notificationProbe.Changed += (_, _) =>
+        {
+            var reader = Task.Run(() => notificationProbe.Snapshot().Count);
+            concurrentReaderCompleted = reader.Wait(TimeSpan.FromSeconds(25)) && reader.Result == 1;
+        };
+        var notificationTab = Guid.NewGuid();
+        var notificationNavigation = notificationProbe.BeginNavigation(notificationTab);
+        Check(notificationProbe.CompleteNavigation(notificationTab, notificationNavigation, "https://example.org/fixture", 200), "notification fixture visit recorded");
+        Check(concurrentReaderCompleted, "notification permits a concurrent reader before the handler returns");
 
         var concurrent = new SessionHistoryService(entryLimit: 1000);
         Parallel.For(0, 1200, _ =>

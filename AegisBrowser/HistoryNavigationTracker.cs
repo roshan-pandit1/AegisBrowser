@@ -68,13 +68,18 @@ internal sealed class HistoryNavigationTracker(SessionHistoryService history)
         // Notifications happen outside the tracker lock. pushState can change
         // the frame URL before load-end; record the committed source once.
         var recorded = history.CompleteNavigation(tab, generation, committed, e.HttpStatusCode);
+        var latest = committed;
         lock (gate)
         {
             if (closed || !browsers.TryGetValue(browserId, out var state) || state.Generation != generation) return;
             state.Ending = false;
             state.Completed = recorded;
             if (!recorded) { state.Committed = null; state.LatestAddress = null; }
+            else latest = state.LatestAddress ?? committed;
         }
+        // CEF may report the title before load-end and not send it again.
+        // Query the current document once the corresponding visit exists.
+        if (recorded) QueryCurrentTitle(e.Browser, tab, generation, committed, latest);
     }
 
     internal void Address(AddressChangedEventArgs e)
@@ -110,9 +115,14 @@ internal sealed class HistoryNavigationTracker(SessionHistoryService history)
             if (closed || !browsers.TryGetValue(e.Browser.Identifier, out var state) || !state.Completed || state.Committed is null) return;
             (tab, generation, expected, latest) = (state.Tab, state.Generation, state.Committed, state.LatestAddress ?? state.Committed);
         }
+        QueryCurrentTitle(e.Browser, tab, generation, expected, latest);
+    }
+
+    private void QueryCurrentTitle(IBrowser browser, Guid tab, long generation, string expected, string latest)
+    {
         try
         {
-            using var frame = e.Browser.MainFrame;
+            using var frame = browser.MainFrame;
             if (!SessionHistoryService.TrySanitizeUrl(frame.Url, out var current) || (current != expected && current != latest)) return;
             // A title callback has no navigation ID. Query the current document
             // rather than attributing its possibly late event payload to a page.
