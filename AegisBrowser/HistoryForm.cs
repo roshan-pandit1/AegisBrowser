@@ -20,8 +20,11 @@ internal sealed class HistoryForm : Form
         Text = "Session history";
         AccessibleName = "Session history";
         DesktopStyle.Apply(this);
-        ClientSize = new Size(900, 600);
-        MinimumSize = new Size(520, 320);
+        var lineHeight = Math.Max(1, Font.Height);
+        var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
+        var available = new Size(Math.Max(1, workingArea.Width * 9 / 10), Math.Max(1, workingArea.Height * 9 / 10));
+        ClientSize = new Size(Math.Min(lineHeight * 60, available.Width), Math.Min(lineHeight * 40, available.Height));
+        MinimumSize = new Size(Math.Min(lineHeight * 34, available.Width), Math.Min(lineHeight * 22, available.Height));
         list.Columns.Add("Visited"); list.Columns.Add("Title"); list.Columns.Add("Site");
         list.Name = "HistoryList";
         search.Name = "HistorySearch";
@@ -54,12 +57,19 @@ internal sealed class HistoryForm : Form
         main.Controls.Add(actions, 0, 2);
         var notice = new Label
         {
-            AutoSize = true, Dock = DockStyle.Fill, MaximumSize = new Size(900, 0),
+            AutoSize = true, Dock = DockStyle.Fill,
             Text = "Session-only history is not private browsing. Clearing it does not clear Chromium caches or cookies, or hide activity from websites, the network or the operating system.",
             AccessibleName = "Session history privacy information"
         };
         main.Controls.Add(notice, 0, 3);
+        void FitNotice()
+        {
+            var width = Math.Max(1, main.ClientSize.Width - main.Padding.Horizontal);
+            if (notice.MaximumSize.Width != width) notice.MaximumSize = new Size(width, 0);
+        }
+        main.ClientSizeChanged += (_, _) => FitNotice();
         Controls.Add(main);
+        FitNotice();
         search.TextChanged += (_, _) => RefreshEntries();
         list.DoubleClick += (_, _) => Open(false);
         list.Resize += (_, _) => ResizeColumns();
@@ -99,6 +109,7 @@ internal sealed class HistoryForm : Form
         pause.AccessibleName = pause.Text;
         pause.AccessibleDescription = history.IsPaused ? "History recording is paused." : "History recording is active.";
         recording.Text = history.IsPaused ? "Recording: paused" : "Recording: active";
+        recording.AccessibleName = recording.Text;
         recording.AccessibleDescription = recording.Text;
         ResizeColumns();
     }
@@ -106,7 +117,7 @@ internal sealed class HistoryForm : Form
     private void ResizeColumns()
     {
         if (list.Columns.Count != 3) return;
-        var width = Math.Max(180, list.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
+        var width = Math.Max(0, list.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
         list.Columns[0].Width = width * 35 / 100;
         list.Columns[1].Width = width * 35 / 100;
         list.Columns[2].Width = width * 30 / 100;

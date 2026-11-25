@@ -522,7 +522,8 @@ public sealed class MainForm : Form
                 var resolved = AddressInputResolver.Resolve(url, searchSettings.EngineId);
                 if (resolved.Kind != AddressInputKind.Rejected && resolved.Url is not null) NewTab(resolved.Url);
             });
-        historyWindow.Show(this);
+        if (!historyWindow.Visible) historyWindow.Show(this);
+        if (historyWindow.WindowState == FormWindowState.Minimized) historyWindow.WindowState = FormWindowState.Normal;
         historyWindow.BringToFront();
     }
 
