@@ -36,7 +36,10 @@ internal static partial class Program
         var target = Path.Combine(downloads, "chosen.txt");
         if (Directory.EnumerateFileSystemEntries(downloads).Any()) throw new IOException("Probe output must start empty.");
         var marker = Path.Combine(downloads, ".aegis-fixture-owner");
-        using (new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) { }
+        using var heldMarker = mode == "held-ancestor-staging"
+            ? new FileStream(marker, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read)
+            : null;
+        if (heldMarker is null) using (new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) { }
         using var stagingHandle = mode == "held-staging" ? DownloadDirectoryObservation.OpenWithListAccessForTest(downloads) : null;
         using var ancestorHandles = mode == "held-ancestor-staging" ? HeldDirectoryChain.Open(downloads) : null;
         var stagingIdentity = stagingHandle?.Identity;
@@ -99,7 +102,7 @@ internal static partial class Program
                         if (ancestorHandles is not null)
                         {
                             ancestorHandles.Verify();
-                            Console.WriteLine("ANCESTOR_CHAIN_OBSERVATION: held_count=" + ancestorHandles.Count + " retained_and_reopened_identities_match=true");
+                            Console.WriteLine("ANCESTOR_CHAIN_OBSERVATION: held_count=" + ancestorHandles.Count + " retained_and_reopened_identities_match=true marker_handle_held=true");
                         }
                     }
                     else if (mode == "cancel")
