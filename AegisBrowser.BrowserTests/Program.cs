@@ -29,6 +29,7 @@ internal static partial class Program
     {
         if (args.Length == 2 && args[0] == "history-navigation-observe") return HistoryNavigationObserve(args[1]);
         if (args.Length == 2 && args[0] == "history-ui") return HistoryUiProbe(args[1]);
+        if (args.Length == 2 && args[0] == "history-bounds") return HistoryUiProbe(args[1], bounds: true);
         if (args.Length == 3 && args[0] == "history-https") return HistoryHttpsProbe(args[1], args[2]);
         if (args.Length == 3 && args[0] is "history-privacy-write" or "history-privacy-read") return HistoryPrivacyProbe(args[1], args[0], args[2]);
         if (args.Length == 6 && args[0] == "history-privacy-pair") return HistoryPrivacyProbe(args[1], args[0], args[2], args[3], args[4], args[5]);

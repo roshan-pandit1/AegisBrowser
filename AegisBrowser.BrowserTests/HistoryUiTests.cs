@@ -11,7 +11,7 @@ namespace AegisBrowser.BrowserTests;
 
 internal static partial class Program
 {
-    private static int HistoryUiProbe(string root)
+    private static int HistoryUiProbe(string root, bool bounds = false)
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -31,9 +31,9 @@ internal static partial class Program
             {
                 try
                 {
-                    await HistoryUi(root);
+                    if (bounds) await HistoryBounds(root); else await HistoryUi(root);
                     using (var reopened = new ProfileLease(Path.Combine(root, "history-profile"))) Check(true, "history fixture lease released");
-                    Console.WriteLine($"PASS: {checks} native history checks");
+                    Console.WriteLine(bounds ? $"PASS: {checks} native history bounds checks" : $"PASS: {checks} native history checks");
                 }
                 catch (Exception ex) { outcome = 1; Console.Error.WriteLine(ex); }
                 finally { host.Close(); }
@@ -43,6 +43,68 @@ internal static partial class Program
         finally { if (initialized) { Cef.WaitForBrowsersToClose(10000); Cef.Shutdown(); } }
         if (outcome == 0) Console.WriteLine("PASS: CEF shutdown completed (history)");
         return outcome;
+    }
+
+    private static async Task HistoryBounds(string root)
+    {
+        var profile = Path.Combine(root, "history-profile");
+        Directory.CreateDirectory(profile);
+        using var lease = new ProfileLease(profile);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var cancel = new CancellationTokenSource();
+        var server = ServeHistoryFixture(listener, cancel.Token);
+        var origin = "http://127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var form = new MainForm("history-bounds-fixture", profile);
+        try
+        {
+            form.Show();
+            var tabs = form.Controls.OfType<TabControl>().Single();
+            await Wait(() => tabs.TabCount == 1, "history bounds tab");
+            var web = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();
+            await Ready(web);
+            var history = form.HistoryForTests;
+            Check(history.Snapshot().Count == 0, "history bounds fixture starts empty");
+            for (var i = 0; i <= SessionHistoryService.DefaultEntryLimit; i++)
+            {
+                var target = origin + "/bound/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var recorded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                EventHandler changed = (_, _) =>
+                {
+                    if (history.Snapshot().FirstOrDefault()?.Url == target) recorded.TrySetResult();
+                };
+                history.Changed += changed;
+                try
+                {
+                    await LoadReady(web, target);
+                    await recorded.Task.WaitAsync(TimeSpan.FromSeconds(25));
+                }
+                finally { history.Changed -= changed; }
+                if (i == SessionHistoryService.DefaultEntryLimit - 1)
+                {
+                    var atLimit = history.Snapshot();
+                    Check(atLimit.Count == SessionHistoryService.DefaultEntryLimit &&
+                        atLimit.First().Url.EndsWith("/bound/999", StringComparison.Ordinal) &&
+                        atLimit.Last().Url.EndsWith("/bound/0", StringComparison.Ordinal), "real browser retains exactly 1000 visits at the limit");
+                }
+            }
+            var afterEviction = history.Snapshot();
+            Check(afterEviction.Count == SessionHistoryService.DefaultEntryLimit &&
+                afterEviction.First().Url.EndsWith("/bound/1000", StringComparison.Ordinal) &&
+                afterEviction.Last().Url.EndsWith("/bound/1", StringComparison.Ordinal), "real browser evicts the oldest visit after 1001 navigations");
+            form.Close();
+            await Wait(() => form.IsDisposed, "history bounds shutdown");
+        }
+        finally
+        {
+            if (!form.IsDisposed)
+            {
+                form.Close();
+                await Wait(() => form.IsDisposed, "history bounds cleanup");
+            }
+            cancel.Cancel(); listener.Stop();
+            try { await server; } catch (OperationCanceledException) { }
+        }
     }
 
     private static async Task HistoryUi(string root)

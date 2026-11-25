@@ -65,6 +65,18 @@ jobs:
               ($output -join "`n") -notmatch 'PASS: CEF shutdown completed \(history\)') {
             throw "History accessibility fixture failed; exit code $code."
           }
+      - name: Verify the history limit in the real browser
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP ('aegis-history-bounds-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe history-bounds $root 2>&1
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { [regex]::Replace([string]$_, 'https?://\S+', '[redacted]') }
+          if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:|FATAL:|ASSERTION FAILED' -or
+              ($output -join "`n") -notmatch 'PASS: real browser evicts the oldest visit after 1001 navigations' -or
+              ($output -join "`n") -notmatch 'PASS: CEF shutdown completed \(history\)') {
+            throw "History bounds fixture failed; exit code $code."
+          }
       - name: Upload history accessibility screenshots
         if: always()
         uses: actions/upload-artifact@v4
