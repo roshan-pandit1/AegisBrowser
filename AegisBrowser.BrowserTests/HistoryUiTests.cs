@@ -161,24 +161,12 @@ internal static partial class Program
             form.Activate();
             var address = (TextBox)form.Controls.Find("BrowserAddress", true).Single();
             var cefControlL = 0; var handledControlL = 0; var focusedWhenHandled = false;
-            var selectProbeAttempted = false; var selectProbeFocused = false;
             var addressEntered = 0; var addressLeft = 0;
             ((BrowserKeys)web.KeyboardHandler).ShortcutObservedForTests = keys =>
             {
                 if (keys == (Keys.Control | Keys.L)) Interlocked.Increment(ref cefControlL);
             };
-            form.ControlLHandledForTests = focused =>
-            {
-                handledControlL++; focusedWhenHandled = focused;
-                if (!focused)
-                {
-                    // A diagnostic comparison only: failure of the original focus
-                    // request still fails the test even if Select succeeds here.
-                    selectProbeAttempted = true;
-                    address.Select();
-                    selectProbeFocused = address.Focused;
-                }
-            };
+            form.ControlLHandledForTests = focused => { handledControlL++; focusedWhenHandled = focused; };
             address.Enter += (_, _) => addressEntered++;
             address.Leave += (_, _) => addressLeft++;
             address.Focus();
@@ -199,14 +187,15 @@ internal static partial class Program
                     {
                         await Wait(() => address.Focused, "existing Ctrl+L shortcut");
                         if (handledControlL > 0 && !focusedWhenHandled)
-                            throw new InvalidOperationException("The original Ctrl+L focus request failed; the Select comparison is diagnostic only.");
+                            throw new InvalidOperationException("The Ctrl+L handler did not focus the address field.");
                     }
                     catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
                     {
-                        Console.Error.WriteLine($"HISTORY_SHORTCUT_DIAGNOSTIC: cef_control_l={Volatile.Read(ref cefControlL)} handled_control_l={handledControlL} focused_when_handled={(focusedWhenHandled ? 1 : 0)} select_probe_attempted={(selectProbeAttempted ? 1 : 0)} select_probe_focused={(selectProbeFocused ? 1 : 0)} address_entered_after={addressEntered - enteredBeforeShortcut} address_left_after={addressLeft - leftBeforeShortcut} address_can_focus={(address.CanFocus ? 1 : 0)} foreground={(HistoryForegroundWindow() == form.Handle ? 1 : 0)} browser_focused={(web.ContainsFocus ? 1 : 0)}");
+                        Console.Error.WriteLine($"HISTORY_SHORTCUT_DIAGNOSTIC: cef_control_l={Volatile.Read(ref cefControlL)} handled_control_l={handledControlL} focused_when_handled={(focusedWhenHandled ? 1 : 0)} address_entered_after={addressEntered - enteredBeforeShortcut} address_left_after={addressLeft - leftBeforeShortcut} address_can_focus={(address.CanFocus ? 1 : 0)} foreground={(HistoryForegroundWindow() == form.Handle ? 1 : 0)} browser_focused={(web.ContainsFocus ? 1 : 0)}");
                         throw;
                     }
                     Check(true, "Ctrl+L still focuses the address field");
+                    Check(address.TextLength > 0 && address.SelectionLength == address.TextLength, "Ctrl+L selects the address text");
                     SendKeys.SendWait("^t");
                     await Wait(() => tabs.TabCount == 2, "existing Ctrl+T shortcut");
                     var created = tabs.SelectedTab!.Controls.OfType<ChromiumWebBrowser>().Single();

@@ -50,8 +50,11 @@ Additional callback races and same-document cases remain unverified.
 
 Existing Ctrl+L, Ctrl+T, Ctrl+W and Ctrl+Tab are handled both by the form and
 the CefSharp keyboard handler, which is intended to handle the key before page
-handling. Actual shortcut behavior depends on a focused interactive window and
-must be reported as NOT_RUN when that focus is unavailable. Popup
+handling. Ctrl+L uses the WinForms control selection path before selecting the
+address text: in a native fixture the previous low-level focus call failed while
+the selection path focused the same field. Actual shortcut behavior depends on a
+focused interactive window and must be reported as NOT_RUN when that focus is
+unavailable. Popup
 windows are CEF-owned through `SafePopups`; explicit load/display handlers observe
 their callbacks without taking ownership. A loopback fixture observed a popup
 visit. The existing WinForms address update leaves

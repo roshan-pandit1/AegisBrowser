@@ -537,7 +537,7 @@ public sealed class MainForm : Form
         {
             case Keys.Control | Keys.H: OpenHistory(); break;
             case Keys.Control | Keys.L:
-                address.Focus(); address.SelectAll();
+                address.Select(); address.SelectAll();
                 ControlLHandledForTests?.Invoke(address.Focused);
                 break;
             case Keys.Control | Keys.T: NewTab(BrowserPolicy.DiagnosticsUrl); break;
