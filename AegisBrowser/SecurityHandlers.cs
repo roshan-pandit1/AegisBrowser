@@ -45,7 +45,7 @@ internal sealed class OriginPermissions(Action<string> report) : PermissionHandl
 }
 
 internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, FilterDecision>? filter = null, Action<NetworkRequest, FilterDecision>? observe = null,
-    ProxyAuthenticationSession? proxyAuthentication = null) : RequestHandler
+    ProxyAuthenticationSession? proxyAuthentication = null, Action<int, bool>? navigationObserver = null) : RequestHandler
 {
     // During document replacement CEF can expose an empty MainFrame.Url to early
     // subresource callbacks. Keep only URL strings, never native frame wrappers.
@@ -83,6 +83,8 @@ internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, F
         if (BrowserPolicy.IsWebUrl(request.Url) || request.Url == "about:blank")
         {
             navigationSites[browser.Identifier] = request.Url;
+            try { navigationObserver?.Invoke(browser.Identifier, isRedirect); }
+            catch (Exception) { /* History observation must not alter navigation policy. */ }
             return false;
         }
         report("Navigation blocked: unsupported scheme or embedded credentials.");
@@ -111,7 +113,7 @@ internal sealed class SafeRequests(Action<string> report, Func<NetworkRequest, F
     }
 }
 
-internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null) : LifeSpanHandler
+internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady = null, Action<int>? browserClosed = null) : LifeSpanHandler
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> popups = new();
     private volatile bool closing;
@@ -161,6 +163,8 @@ internal sealed class SafePopups(Action<string> report, Action? ownerCloseReady 
 
     protected override void OnBeforeClose(IWebBrowser control, IBrowser browser)
     {
+        try { browserClosed?.Invoke(browser.Identifier); }
+        catch (Exception) { /* History cleanup must not change CEF shutdown. */ }
         if (browser.IsPopup)
         {
             popups.TryRemove(browser.Identifier, out _);

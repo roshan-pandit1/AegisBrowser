@@ -64,6 +64,7 @@ Console.WriteLine($"PASS: core tests run on .NET {Environment.Version}, process 
 
 DependencyUpgradeTests.Run();
 PrivacyTests.Run();
+SessionHistoryTests.Run();
 ViewportLetterboxingTests.Run();
 ViewportZoomQueryTests.Run();
 AddressTests.Run();

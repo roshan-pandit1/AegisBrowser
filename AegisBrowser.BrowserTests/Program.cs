@@ -27,6 +27,12 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "history-navigation-observe") return HistoryNavigationObserve(args[1]);
+        if (args.Length == 2 && args[0] == "history-ui") return HistoryUiProbe(args[1]);
+        if (args.Length == 2 && args[0] == "history-bounds") return HistoryUiProbe(args[1], bounds: true);
+        if (args.Length == 3 && args[0] == "history-https") return HistoryHttpsProbe(args[1], args[2]);
+        if (args.Length == 3 && args[0] is "history-privacy-write" or "history-privacy-read") return HistoryPrivacyProbe(args[1], args[0], args[2]);
+        if (args.Length == 6 && args[0] == "history-privacy-pair") return HistoryPrivacyProbe(args[1], args[0], args[2], args[3], args[4], args[5]);
         if (args.Length == 2 && args[0] == "dashboard-launch") return DashboardApplication(args[1]);
         if (args.Length == 2 && args[0] == "appcontainer-probe") return AppContainerCefProbe(args[1]);
         if (args.Length == 2 && args[0] == "appcontainer-observer") return AppContainerCefProbe(args[1], true);
@@ -101,7 +107,7 @@ internal static partial class Program
             {
                 try
                 {
-                    if (args[0] == "write") { await TabsAndRenderer(); await DashboardUi(root); }
+                    if (args[0] == "write") { await TabsAndRenderer(); await HistoryUi(root); await DashboardUi(root); }
                     await Storage(host, root, args[0]);
                     if (args[0] == "write") await RejectUntrustedTls(host);
                     Console.WriteLine($"PASS: {checks} browser integration checks ({args[0]})");
@@ -363,11 +369,11 @@ internal static partial class Program
         try
         {
             await Wait(() => browser.IsBrowserInitialized && browser.CanExecuteJavascriptInMainFrame && !browser.IsLoading,
-                "browser ready (" + browser.Address + ")");
+                "browser ready");
         }
         catch
         {
-            Console.Error.WriteLine($"Readiness: initialized={browser.IsBrowserInitialized}, javascript={browser.CanExecuteJavascriptInMainFrame}, loading={browser.IsLoading}, address={browser.Address}");
+            Console.Error.WriteLine($"Readiness: initialized={browser.IsBrowserInitialized}, javascript={browser.CanExecuteJavascriptInMainFrame}, loading={browser.IsLoading}");
             throw;
         }
         // A completed JS round trip also proves the live renderer is responsive.

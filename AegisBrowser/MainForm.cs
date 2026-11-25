@@ -13,6 +13,11 @@ public sealed class MainForm : Form
     private readonly Button forward;
     private readonly Button reload;
     private readonly PackageSmokeTrace? packageSmoke;
+    private readonly SessionHistoryService sessionHistory = new();
+    internal SessionHistoryService HistoryForTests => sessionHistory;
+    internal Action<bool>? ControlLHandledForTests;
+    private readonly HistoryNavigationTracker historyTracker;
+    private HistoryForm? historyWindow;
     private bool closing;
     private bool closeComplete;
     private readonly PrivacySession privacy;
@@ -45,6 +50,7 @@ public sealed class MainForm : Form
     internal MainForm(string profile, string? profilePath, Func<ChromiumWebBrowser, Task<double>>? zoomQuery,
         Action<string>? privacyLoadWarning = null)
     {
+        historyTracker = new HistoryNavigationTracker(sessionHistory);
         packageSmoke = PackageSmokeTrace.Create(profile);
         letterboxZoomQuery = zoomQuery ?? (browser =>
             (browser.GetBrowserHost() ?? throw new InvalidOperationException("CEF browser host unavailable.")).GetZoomLevelAsync());
@@ -155,6 +161,10 @@ public sealed class MainForm : Form
             searchWindow.Show(this); searchWindow.BringToFront();
         });
         menu.Items[^1].Name = "OpenSearchSettings";
+        menu.Items.Add("History (Ctrl+H)", null, (_, _) => OpenHistory()).Name = "OpenHistory";
+        var pauseHistory = menu.Items.Add("Pause history recording", null, (_, _) => sessionHistory.SetPaused(!sessionHistory.IsPaused));
+        pauseHistory.Name = "PauseHistory";
+        menu.Opening += (_, _) => pauseHistory.Text = sessionHistory.IsPaused ? "Resume history recording (paused)" : "Pause history recording (active)";
         more.Name = "BrowserMore";
         more.ContextMenuStrip = menu;
         bar.Controls.Add(more, 6, 0);
@@ -213,6 +223,9 @@ public sealed class MainForm : Form
             e.Cancel = true;
             if (closing) return;
             closing = true;
+            historyWindow?.Close();
+            historyTracker.Close();
+            sessionHistory.Clear();
             letterboxZoomTimer.Stop();
             foreach (var query in letterboxZoomQueries.Values) query.Retire();
             letterboxZoomQueries.Clear();
@@ -392,7 +405,7 @@ public sealed class MainForm : Form
             if (tabs.SelectedTab == page) status.Text = message;
         });
         browser.PermissionHandler = new OriginPermissions(Report);
-        browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate);
+        browser.RequestHandler = new SafeRequests(Report, privacy.Evaluate, navigationObserver: historyTracker.BeforeBrowse);
         var popups = new SafePopups(Report, () => PostLifetime(async () =>
         {
             try { await browser.ReleaseNativeHostAsync(); }
@@ -409,16 +422,23 @@ public sealed class MainForm : Form
             tabs.TabPages.Remove(page);
             page.Dispose();
             if (tabs.TabCount == 0) NewTab(BrowserPolicy.DiagnosticsUrl);
-        }));
+        }), historyTracker.BrowserClosed);
         browser.IsBrowserInitializedChanged += (_, _) => PostLifetime(() =>
         {
             if (retiring.Contains(page) && browser.IsBrowserInitialized)
                 browser.GetBrowserHost().CloseBrowser(true);
         });
         browser.LifeSpanHandler = popups;
+        browser.LoadHandler = new HistoryPopupLoadHandler(historyTracker);
+        browser.DisplayHandler = new HistoryPopupDisplayHandler(historyTracker);
         page.Disposed += (_, _) => popups.ClosePopups();
         browser.DownloadHandler = new DenyDownloads(Report);
         browser.KeyboardHandler = new BrowserKeys(key => Post(() => HandleShortcut(key)));
+        browser.TitleChanged += (_, e) => historyTracker.Title(e);
+        browser.AddressChanged += (_, e) => historyTracker.Address(e);
+        browser.FrameLoadStart += (_, e) => historyTracker.Start(e);
+        browser.FrameLoadEnd += (_, e) => historyTracker.End(e);
+        browser.LoadError += (_, e) => historyTracker.Error(e);
         browser.AddressChanged += (_, _) => Post(() => { if (tabs.SelectedTab == page) UpdateNavigation(); });
         browser.LoadingStateChanged += (_, e) => Post(() =>
         {
@@ -494,6 +514,20 @@ public sealed class MainForm : Form
         if (browser.IsBrowserInitialized) browser.GetBrowserHost().CloseBrowser(true);
     }
 
+    private void OpenHistory()
+    {
+        if (closing || IsDisposed) return;
+        if (historyWindow is null || historyWindow.IsDisposed)
+            historyWindow = new HistoryForm(sessionHistory, url => SubmitAddress(url), url =>
+            {
+                var resolved = AddressInputResolver.Resolve(url, searchSettings.EngineId);
+                if (resolved.Kind != AddressInputKind.Rejected && resolved.Url is not null) NewTab(resolved.Url);
+            });
+        if (!historyWindow.Visible) historyWindow.Show(this);
+        if (historyWindow.WindowState == FormWindowState.Minimized) historyWindow.WindowState = FormWindowState.Normal;
+        historyWindow.BringToFront();
+    }
+
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>
         HandleShortcut(keyData) || base.ProcessCmdKey(ref msg, keyData);
 
@@ -501,7 +535,11 @@ public sealed class MainForm : Form
     {
         switch (keys)
         {
-            case Keys.Control | Keys.L: address.Focus(); address.SelectAll(); break;
+            case Keys.Control | Keys.H: OpenHistory(); break;
+            case Keys.Control | Keys.L:
+                address.Select(); address.SelectAll();
+                ControlLHandledForTests?.Invoke(address.Focused);
+                break;
             case Keys.Control | Keys.T: NewTab(BrowserPolicy.DiagnosticsUrl); break;
             case Keys.Control | Keys.W: CloseTab(); break;
             case Keys.F12: Current?.ShowDevTools(); break;
@@ -520,6 +558,8 @@ public sealed class MainForm : Form
 
 internal sealed class BrowserKeys(Action<Keys> dispatch) : CefSharp.Handler.KeyboardHandler
 {
+    internal Action<Keys>? ShortcutObservedForTests { get; set; }
+
     protected override bool OnPreKeyEvent(IWebBrowser control, IBrowser browser, KeyType type,
         int windowsKeyCode, int nativeKeyCode, CefEventFlags modifiers, bool isSystemKey, ref bool isKeyboardShortcut)
     {
@@ -528,9 +568,10 @@ internal sealed class BrowserKeys(Action<Keys> dispatch) : CefSharp.Handler.Keyb
         if (modifiers.HasFlag(CefEventFlags.ControlDown)) keys |= Keys.Control;
         if (modifiers.HasFlag(CefEventFlags.AltDown)) keys |= Keys.Alt;
         if (modifiers.HasFlag(CefEventFlags.ShiftDown)) keys |= Keys.Shift;
-        Keys[] shortcuts = [Keys.Control | Keys.L, Keys.Control | Keys.T, Keys.Control | Keys.W,
+        Keys[] shortcuts = [Keys.Control | Keys.H, Keys.Control | Keys.L, Keys.Control | Keys.T, Keys.Control | Keys.W,
             Keys.Control | Keys.Tab, Keys.F12, Keys.F5, Keys.Escape, Keys.Alt | Keys.Left, Keys.Alt | Keys.Right];
         if (!shortcuts.Contains(keys)) return false;
+        ShortcutObservedForTests?.Invoke(keys);
         dispatch(keys);
         return true;
     }

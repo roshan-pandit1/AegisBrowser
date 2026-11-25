@@ -1,0 +1,122 @@
+name: Focused session history
+on:
+  push:
+    branches: ['feature/session-history']
+  pull_request:
+    branches: ['feature/proxy-native-routing']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  history:
+    if: github.event_name != 'pull_request' || github.head_ref == 'feature/session-history'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify source revision
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = git rev-parse HEAD
+          Write-Output "Source SHA: $actual"
+          if ($actual -ne $expected) { throw 'Checkout does not match the requested source SHA.' }
+      - name: Build native fixture
+        id: native_build
+        run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Observe navigation events and real history controls
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
+        timeout-minutes: 4
+        run: |
+          $exe = './AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe'
+          foreach ($mode in @('history-navigation-observe', 'history-ui')) {
+            $root = Join-Path $env:RUNNER_TEMP ('aegis-history-' + $mode + '-' + [guid]::NewGuid().ToString('N'))
+            $output = & $exe $mode $root 2>&1
+            $code = $LASTEXITCODE
+            $output | ForEach-Object { [regex]::Replace([string]$_, 'https?://\S+', '[redacted]') }
+            if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:|FATAL:|ASSERTION FAILED') {
+              throw "History fixture $mode failed; exit code $code."
+            }
+            $expected = if ($mode -eq 'history-ui') { 'PASS: \d+ native history checks' } else { 'PASS: controlled history navigation observation' }
+            if (($output -join "`n") -notmatch $expected) { throw "History fixture $mode did not complete." }
+          }
+      - name: Observe history accessibility and current monitor scale
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
+        timeout-minutes: 4
+        run: |
+          $exe = './AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe'
+          $root = Join-Path $env:RUNNER_TEMP ('aegis-history-uia-' + [guid]::NewGuid().ToString('N'))
+          $env:AEGIS_HISTORY_LIFECYCLE_ONLY = '1'
+          $env:AEGIS_HISTORY_UIA_HELPER = (Resolve-Path './tests/acceptance/session-history-accessibility.ps1').Path
+          $env:AEGIS_HISTORY_UIA_EVIDENCE = Join-Path $env:RUNNER_TEMP 'aegis-history-uia-evidence'
+          $output = & $exe history-ui $root 2>&1
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { [regex]::Replace([string]$_, 'https?://\S+', '[redacted]') }
+          if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:|FATAL:|ASSERTION FAILED' -or
+              ($output -join "`n") -notmatch 'PASS: UI Automation observed 9 named, enabled and onscreen history controls in the active state' -or
+              ($output -join "`n") -notmatch 'PASS: UI Automation observed 2 named, enabled and onscreen history controls in the paused state' -or
+              ($output -join "`n") -notmatch 'PASS: CEF shutdown completed \(history\)') {
+            throw "History accessibility fixture failed; exit code $code."
+          }
+      - name: Verify the history limit in the real browser
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP ('aegis-history-bounds-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe history-bounds $root 2>&1
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { [regex]::Replace([string]$_, 'https?://\S+', '[redacted]') }
+          if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:|FATAL:|ASSERTION FAILED' -or
+              ($output -join "`n") -notmatch 'PASS: real browser evicts the oldest visit after 1001 navigations' -or
+              ($output -join "`n") -notmatch 'PASS: CEF shutdown completed \(history\)') {
+            throw "History bounds fixture failed; exit code $code."
+          }
+      - name: Upload history accessibility screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-history-accessibility
+          path: ${{ runner.temp }}/aegis-history-uia-evidence/
+          if-no-files-found: ignore
+      - name: Run history canary and restart checks
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
+        timeout-minutes: 4
+        run: ./tests/acceptance/session-history-privacy.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Verify simultaneous profile isolation
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
+        timeout-minutes: 4
+        run: ./tests/acceptance/session-history-profile-isolation.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Prepare disposable history HTTPS trust directory
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:CI -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'A disposable hosted runner is required.' }
+          $trust = Join-Path $env:RUNNER_TEMP ('aegis-history-trust-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $trust -ErrorAction Stop | Out-Null
+          "AEGIS_HISTORY_TRUST_DIR=$trust" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Verify trusted and rejected HTTPS history navigation
+        if: ${{ always() && env.AEGIS_HISTORY_TRUST_DIR != '' && steps.native_build.outcome == 'success' }}
+        timeout-minutes: 4
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP ('aegis-history-https-' + [guid]::NewGuid().ToString('N'))
+          $output = & ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe history-https $root $env:AEGIS_HISTORY_TRUST_DIR 2>&1
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { [regex]::Replace([string]$_, 'https?://\S+', '[redacted]') }
+          if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:|FATAL:|ASSERTION FAILED' -or
+              ($output -join "`n") -notmatch 'PASS: trusted and rejected HTTPS history fixture completed, shut down and removed its test root' -or
+              ($output -join "`n") -notmatch 'P403_TRUST: temporary user root removed') {
+            throw "History HTTPS fixture failed; exit code $code."
+          }
+      - name: Remove and verify disposable history HTTPS test root
+        if: ${{ always() && env.AEGIS_HISTORY_TRUST_DIR != '' && steps.native_build.outcome == 'success' }}
+        timeout-minutes: 2
+        run: ./tests/acceptance/p403-cleanup-test-ca.ps1 -TrustDirectory $env:AEGIS_HISTORY_TRUST_DIR
+      - name: Run fresh-process history lifecycle checks
+        if: ${{ always() && steps.native_build.outcome == 'success' }}
+        timeout-minutes: 10
+        run: ./tests/acceptance/session-history-cycles.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe -Cycles 20
