@@ -109,6 +109,7 @@ internal static partial class Program
                 form.Activate(); web.Focus();
                 if (HistoryForegroundWindow() == form.Handle && web.ContainsFocus)
                 {
+                    await FocusHistoryContent(form, web);
                     SendKeys.SendWait("^l");
                     await Wait(() => address.Focused, "existing Ctrl+L shortcut");
                     Check(true, "Ctrl+L still focuses the address field");
@@ -118,13 +119,14 @@ internal static partial class Program
                     await Ready(created);
                     Check(true, "Ctrl+T still opens a tab");
                     tabs.SelectedIndex = 0; form.Activate(); web.Focus();
+                    await FocusHistoryContent(form, web);
                     SendKeys.SendWait("^{TAB}");
                     await Wait(() => tabs.SelectedIndex == 1, "existing Ctrl+Tab shortcut");
                     Check(true, "Ctrl+Tab still switches tabs");
-                    created.Focus(); SendKeys.SendWait("^w");
+                    await FocusHistoryContent(form, created); SendKeys.SendWait("^w");
                     await Wait(() => tabs.TabCount == 1, "existing Ctrl+W shortcut");
                     Check(true, "Ctrl+W still closes the current tab");
-                    form.Activate(); web.Focus();
+                    await FocusHistoryContent(form, web);
                     SendKeys.SendWait("^h");
                     await Wait(() => form.OwnedForms.OfType<HistoryForm>().Any(), "web content Ctrl+H");
                     Check(true, "Ctrl+H opens history from Chromium focus");
@@ -376,6 +378,18 @@ internal static partial class Program
 
     [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
     private static extern IntPtr HistoryForegroundWindow();
+
+    private static async Task FocusHistoryContent(MainForm form, ChromiumWebBrowser browser)
+    {
+        form.Activate(); browser.Focus();
+        var documentFocus = browser.EvaluateScriptAsPromiseAsync(
+            "return new Promise(resolve => { if (document.hasFocus()) resolve(true); else window.addEventListener('focus', () => resolve(true), { once: true }); });",
+            TimeSpan.FromSeconds(25));
+        await Cef.UIThreadTaskFactory.StartNew(() => browser.GetBrowserHost().SetFocus(true));
+        var response = await documentFocus.WaitAsync(TimeSpan.FromSeconds(25));
+        if (!response.Success || response.Result is not true || HistoryForegroundWindow() != form.Handle || !browser.ContainsFocus)
+            throw new InvalidOperationException("The fixture did not establish focused Chromium content before sending a shortcut.");
+    }
 
     // A separate UI Automation process inspects this live window in each
     // recording state. The fixture passes only a window handle and process ID.
