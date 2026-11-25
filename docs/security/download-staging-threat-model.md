@@ -102,3 +102,19 @@ handles were released. These observations differ from the metadata-only handle
 above; they do not establish that CEF can write while all required ancestor
 handles are held, or cover pre-existing handles, ACL mutation, reparse races,
 other filesystems or a same-user attacker.
+
+On `df8d6f4a8aa54ccc2252aa2bde376817b5361a52`, a separate process using the
+same user identity added an explicit deny ACE to an empty, test-owned staging
+directory while a list-access handle and an independently retained DACL
+restoration handle remained open. Both the
+[push](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45546412028)
+and [PR](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45546417007)
+observed a new list-access open fail with `ERROR_ACCESS_DENIED` (5), while
+`GetFileAttributesW` still returned the directory attribute. Consequently the
+tested CEF-source fallback predicate was not reached in this specific setup.
+The fixture independently restored and compared the original DACL and its
+protection flag, verified the retained and reopened object identity, and
+verified access again. It did not start CEF, trace file writes, or test ACL
+changes to ancestors or an active transfer. A native transfer with controlled
+access revocation and an independent file-I/O trace remains necessary; this
+observation does not qualify staging.
