@@ -1,8 +1,9 @@
 using AegisBrowser;
 using AegisBrowser.Core;
 using CefSharp;
+using CefSharp.Internals;
 using CefSharp.WinForms;
-using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -23,7 +24,8 @@ internal static partial class Program
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         using var stop = new CancellationTokenSource();
-        var server = ServeHistoryFixture(listener, stop.Token);
+        var abortRequest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = ServeHistoryFixture(listener, stop.Token, abortRequest: abortRequest);
         var initialized = false;
         var outcome = 0;
         try
@@ -43,7 +45,14 @@ internal static partial class Program
                 TaskCompletionSource? settled = null;
                 TaskCompletionSource<CefErrorCode>? failed = null;
                 TaskCompletionSource? addressChanged = null;
-                void Trace(string name) => Console.WriteLine($"HISTORY_EVENT qpc={Stopwatch.GetTimestamp()} phase={Volatile.Read(ref phase)} {name}");
+                var subframeEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var formThread = Environment.CurrentManagedThreadId;
+                var observations = new ConcurrentQueue<(string Kind, bool CefUi, bool FormsUi)>();
+                void Trace(string name)
+                {
+                    var kind = name.Split([' ', '='], 2)[0];
+                    observations.Enqueue((kind, CefThread.CurrentlyOnUiThread, Environment.CurrentManagedThreadId == formThread));
+                }
                 var web = new BrowserView("about:blank") { Dock = DockStyle.Fill };
                 web.LifeSpanHandler = new SafePopups(_ => { });
                 web.RequestHandler = new SafeRequests(_ => { }, navigationObserver: (id, redirect) => Trace("before-browse browser=" + id + " redirect=" + redirect));
@@ -67,7 +76,7 @@ internal static partial class Program
                 web.FrameLoadStart += (_, e) => { if (e.Frame.IsMain) Trace("main-start transition=" + e.TransitionType); else Trace("subframe-start"); };
                 web.FrameLoadEnd += (_, e) =>
                 {
-                    if (!e.Frame.IsMain) { Trace("subframe-end status=" + e.HttpStatusCode); return; }
+                    if (!e.Frame.IsMain) { Trace("subframe-end status=" + e.HttpStatusCode); subframeEnded.TrySetResult(); return; }
                     Trace("main-end status=" + e.HttpStatusCode + " changed-url=" + e.Url.Contains("/changed?fixture=1", StringComparison.Ordinal));
                     if (Volatile.Read(ref phase) == "initial") initialDone.TrySetResult();
                     Volatile.Read(ref ended)?.TrySetResult(e.HttpStatusCode);
@@ -101,6 +110,7 @@ internal static partial class Program
                     var origin = "http://127.0.0.1:" + port;
                     await Navigate("success", () => web.Load(origin + "/page"), 200);
                     await Navigate("redirect", () => web.Load(origin + "/redirect"), 200);
+                    await Navigate("server-error", () => web.Load(origin + "/server-error"), 500);
                     await Navigate("http-error", () => web.Load(origin + "/error"), 404);
                     await Navigate("other", () => web.Load(origin + "/other"), 200);
                     await Navigate("reload", () => web.Reload(), 200);
@@ -112,6 +122,8 @@ internal static partial class Program
                     await Navigate("same-document", () => web.Load(origin + "/same"), 200);
                     await changed.Task.WaitAsync(TimeSpan.FromSeconds(25));
                     Volatile.Write(ref addressChanged, null);
+                    await Navigate("subframe", () => web.Load(origin + "/iframe-parent"), 200);
+                    await subframeEnded.Task.WaitAsync(TimeSpan.FromSeconds(25));
                     phase = "connection-reset";
                     var failure = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
                     var failureSettled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -123,6 +135,17 @@ internal static partial class Program
                     await failureSettled.Task.WaitAsync(TimeSpan.FromSeconds(25));
                     Volatile.Write(ref failed, null);
                     Volatile.Write(ref settled, null);
+                    phase = "aborted";
+                    var abortSeen = new TaskCompletionSource<CefErrorCode>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    Volatile.Write(ref failed, abortSeen);
+                    web.Load(origin + "/slow-abort");
+                    await abortRequest.Task.WaitAsync(TimeSpan.FromSeconds(25));
+                    web.Stop();
+                    if (await abortSeen.Task.WaitAsync(TimeSpan.FromSeconds(25)) != CefErrorCode.Aborted)
+                        throw new InvalidOperationException("Stopping the fixture did not report an aborted navigation.");
+                    Volatile.Write(ref failed, null);
+                    foreach (var group in observations.ToArray().GroupBy(item => item.Kind).OrderBy(group => group.Key))
+                        Console.WriteLine($"HISTORY_CALLBACK_COUNT kind={group.Key} total={group.Count()} cef_ui={group.Count(item => item.CefUi)} forms_ui={group.Count(item => item.FormsUi)}");
                     Console.WriteLine("PASS: controlled history navigation observation");
                 }
                 catch (Exception ex) { outcome = 1; Console.Error.WriteLine("History observation failed: " + ex.GetType().Name + " phase=" + phase + " javascript-ready=" + web.CanExecuteJavascriptInMainFrame); }
@@ -191,7 +214,7 @@ internal static partial class Program
                     await untilCancelled.Task.WaitAsync(token);
                     return;
                 }
-                var code = path == "/error" ? "404 Not Found" : path == "/redirect" ? "302 Found" : "200 OK";
+                var code = path == "/error" ? "404 Not Found" : path == "/server-error" ? "500 Internal Server Error" : path == "/redirect" ? "302 Found" : "200 OK";
                 var script = path == "/same" ? "<script>history.pushState({}, '', '/changed?fixture=1');</script>" :
                     "<script>window.fixtureReady=true;document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.key.toLowerCase()==='h'){window.historyKeyConsumed=true;e.preventDefault();}});</script>";
                 var title = path.StartsWith("/canary-", StringComparison.Ordinal) && path.Length == 40 && path[8..].All(Uri.IsHexDigit)

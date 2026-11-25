@@ -29,6 +29,7 @@ internal static partial class Program
     {
         if (args.Length == 2 && args[0] == "history-navigation-observe") return HistoryNavigationObserve(args[1]);
         if (args.Length == 2 && args[0] == "history-ui") return HistoryUiProbe(args[1]);
+        if (args.Length == 3 && args[0] == "history-https") return HistoryHttpsProbe(args[1], args[2]);
         if (args.Length == 3 && args[0] is "history-privacy-write" or "history-privacy-read") return HistoryPrivacyProbe(args[1], args[0], args[2]);
         if (args.Length == 6 && args[0] == "history-privacy-pair") return HistoryPrivacyProbe(args[1], args[0], args[2], args[3], args[4], args[5]);
         if (args.Length == 2 && args[0] == "dashboard-launch") return DashboardApplication(args[1]);
@@ -367,11 +368,11 @@ internal static partial class Program
         try
         {
             await Wait(() => browser.IsBrowserInitialized && browser.CanExecuteJavascriptInMainFrame && !browser.IsLoading,
-                "browser ready (" + browser.Address + ")");
+                "browser ready");
         }
         catch
         {
-            Console.Error.WriteLine($"Readiness: initialized={browser.IsBrowserInitialized}, javascript={browser.CanExecuteJavascriptInMainFrame}, loading={browser.IsLoading}, address={browser.Address}");
+            Console.Error.WriteLine($"Readiness: initialized={browser.IsBrowserInitialized}, javascript={browser.CanExecuteJavascriptInMainFrame}, loading={browser.IsLoading}");
             throw;
         }
         // A completed JS round trip also proves the live renderer is responsive.

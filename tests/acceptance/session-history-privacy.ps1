@@ -26,7 +26,7 @@ try {
             $relative = if ($file.FullName.StartsWith($profileDir + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
                 $file.FullName.Substring($profileDir.Length + 1)
             } else { 'isolated-temp' + [IO.Path]::DirectorySeparatorChar + $file.Name }
-            if ($relative -match '^(Cache|Default|segmentation_platform)[\\/]|^chromium\.log$|^Local State$') {
+            if ($relative -match '^(Default[\\/]History(?:-wal|-shm)?|Default[\\/]Cache[\\/]Cache_Data[\\/].+|segmentation_platform[\\/]ukm_db(?:-wal|-shm)?)$') {
                 $chromiumHits++
                 Write-Output ('CHROMIUM_CANARY_FILE: ' + $relative)
             } else {
