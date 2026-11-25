@@ -3,6 +3,19 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
 
+if (args.Length == 1 && args[0] == "--download-acl-race-observation")
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows is required.");
+    await DownloadAclRaceObservationTests.RunDisposable();
+    return;
+}
+if (args.Length == 6 && args[0] == "--download-acl-race-worker")
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows is required.");
+    await DownloadAclRaceObservationTests.RunWorker(args);
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--download-directory-sharing-observation")
 {
     DownloadDirectoryObservationTests.RunDisposableSharingObservation();

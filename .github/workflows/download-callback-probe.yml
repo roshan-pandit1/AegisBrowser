@@ -42,6 +42,13 @@ jobs:
         run: |
           & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-directory-list-access-diagnostic
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Observe same-user ACL mutation while a staging handle is held
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-acl-race-observation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Observe handle-relative no-replace publication
         if: always()
         env:

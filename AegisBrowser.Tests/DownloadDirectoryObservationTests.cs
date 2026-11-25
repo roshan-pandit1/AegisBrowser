@@ -147,7 +147,7 @@ internal static class DownloadDirectoryObservationTests
         Console.WriteLine("PASS: scoped list-access directory sharing experiment; CEF writes and ACLs not assessed");
     }
 
-    private static void RequireDisposable()
+    internal static void RequireDisposable()
     {
         if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
             Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted" ||
