@@ -118,3 +118,24 @@ verified access again. It did not start CEF, trace file writes, or test ACL
 changes to ancestors or an active transfer. A native transfer with controlled
 access revocation and an independent file-I/O trace remains necessary; this
 observation does not qualify staging.
+
+On `5f52794a04274ff128093d8a5dd5928f9e90a944`, the disposable Windows
+[push](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45549164943)
+and [PR](https://github.com/roshan-pandit1/AegisBrowser/actions/runs/45549173424)
+fixtures tested a same-user process setting a mount-point reparse tag on two
+test-owned directories while list-access handles remained held. A marker file
+held open without delete sharing blocked deletion, and setting the junction on
+that nonempty directory returned `ERROR_DIR_NOT_EMPTY` (145). In the empty
+directory, setting the junction succeeded without changing the retained
+directory file ID; opening the path followed it to the separately held target,
+and a test-created file was observed there with matching file identity. Both
+directory paths and identities were restored and rechecked. The experiment did
+not start CEF. A marker that is closed or removed cannot establish pathname
+safety; even the held-marker result is limited to this operation and ordering.
+
+The same jobs completed a native CEF fixture download while five ancestors from
+the volume root through the stage had list-access handles held. Each held and
+reopened directory identity matched after the transfer and the downloaded
+fixture hash matched. The marker in that version of the fixture was closed,
+and no competing reparse, ACL or file-I/O trace was active. These results do
+not validate ancestor ownership, ACLs, destination identity or publication.
