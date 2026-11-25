@@ -554,6 +554,8 @@ public sealed class MainForm : Form
 
 internal sealed class BrowserKeys(Action<Keys> dispatch) : CefSharp.Handler.KeyboardHandler
 {
+    internal Action<Keys>? ShortcutObservedForTests { get; set; }
+
     protected override bool OnPreKeyEvent(IWebBrowser control, IBrowser browser, KeyType type,
         int windowsKeyCode, int nativeKeyCode, CefEventFlags modifiers, bool isSystemKey, ref bool isKeyboardShortcut)
     {
@@ -565,6 +567,7 @@ internal sealed class BrowserKeys(Action<Keys> dispatch) : CefSharp.Handler.Keyb
         Keys[] shortcuts = [Keys.Control | Keys.H, Keys.Control | Keys.L, Keys.Control | Keys.T, Keys.Control | Keys.W,
             Keys.Control | Keys.Tab, Keys.F12, Keys.F5, Keys.Escape, Keys.Alt | Keys.Left, Keys.Alt | Keys.Right];
         if (!shortcuts.Contains(keys)) return false;
+        ShortcutObservedForTests?.Invoke(keys);
         dispatch(keys);
         return true;
     }

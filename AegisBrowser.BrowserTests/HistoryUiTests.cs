@@ -98,6 +98,13 @@ internal static partial class Program
             var requestsBeforeOpening = Volatile.Read(ref requests);
             form.Activate();
             var address = (TextBox)form.Controls.Find("BrowserAddress", true).Single();
+            var cefControlL = 0; var addressEntered = 0; var addressLeft = 0;
+            ((BrowserKeys)web.KeyboardHandler).ShortcutObservedForTests = keys =>
+            {
+                if (keys == (Keys.Control | Keys.L)) Interlocked.Increment(ref cefControlL);
+            };
+            address.Enter += (_, _) => addressEntered++;
+            address.Leave += (_, _) => addressLeft++;
             address.Focus();
             if (!exerciseKeyboard) { }
             else if (HistoryForegroundWindow() == form.Handle && address.Focused)
@@ -111,7 +118,12 @@ internal static partial class Program
                 {
                     await FocusHistoryContent(form, web);
                     SendKeys.SendWait("^l");
-                    await Wait(() => address.Focused, "existing Ctrl+L shortcut");
+                    try { await Wait(() => address.Focused, "existing Ctrl+L shortcut"); }
+                    catch (TimeoutException)
+                    {
+                        Console.Error.WriteLine($"HISTORY_SHORTCUT_DIAGNOSTIC: cef_control_l={Volatile.Read(ref cefControlL)} address_entered={addressEntered} address_left={addressLeft} foreground={(HistoryForegroundWindow() == form.Handle ? 1 : 0)} browser_focused={(web.ContainsFocus ? 1 : 0)}");
+                        throw;
+                    }
                     Check(true, "Ctrl+L still focuses the address field");
                     SendKeys.SendWait("^t");
                     await Wait(() => tabs.TabCount == 2, "existing Ctrl+T shortcut");
@@ -282,6 +294,57 @@ internal static partial class Program
             await Wait(() => form.HistoryForTests.Snapshot().Count == beforeSameDocument + 1, "same-document source visit");
             Check(!form.HistoryForTests.Snapshot().Any(entry => entry.Url.Contains("/changed", StringComparison.Ordinal)),
                 "same-document address changes are not separately recorded");
+            await Ready(web);
+            var sameDocumentCount = form.HistoryForTests.Snapshot().Count;
+            async Task SameDocumentNavigation(Func<Task> action, string expectedPath, string expectedFragment)
+            {
+                var observed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var addressEvents = 0; var expectedPathEvents = 0; var sourcePathEvents = 0; var fragmentEvents = 0;
+                EventHandler<AddressChangedEventArgs> changed = (_, e) =>
+                {
+                    Interlocked.Increment(ref addressEvents);
+                    if (!Uri.TryCreate(e.Address, UriKind.Absolute, out var addressValue)) return;
+                    if (addressValue.AbsolutePath == expectedPath) Interlocked.Increment(ref expectedPathEvents);
+                    if (addressValue.AbsolutePath == "/same") Interlocked.Increment(ref sourcePathEvents);
+                    if (addressValue.Fragment.Length != 0) Interlocked.Increment(ref fragmentEvents);
+                    if (addressValue.AbsolutePath == expectedPath && addressValue.Fragment == expectedFragment) observed.TrySetResult();
+                };
+                web.AddressChanged += changed;
+                try { await action(); await observed.Task.WaitAsync(TimeSpan.FromSeconds(25)); }
+                catch (TimeoutException)
+                {
+                    Console.Error.WriteLine($"HISTORY_SAME_DOCUMENT_DIAGNOSTIC: address_events={addressEvents} expected_path={expectedPathEvents} source_path={sourcePathEvents} fragment={fragmentEvents} can_back={web.CanGoBack} can_forward={web.CanGoForward}");
+                    throw;
+                }
+                finally { web.AddressChanged -= changed; }
+                await Cef.UIThreadTaskFactory.StartNew(() => { });
+            }
+            await SameDocumentNavigation(async () => { await Js(web, "location.hash = 'history-fixture'"); }, "/changed", "#history-fixture");
+            Check(form.HistoryForTests.Snapshot().Count == sameDocumentCount, "fragment navigation does not add a visit");
+            var browserHistoryBeforePush = int.Parse(await Js(web, "history.length"), System.Globalization.CultureInfo.InvariantCulture);
+            // Chromium's back/forward intervention skips entries created without user activation.
+            // Give both fixture operations a user gesture so the browser controls visit them.
+            Task PushWithGesture(string path) => Cef.UIThreadTaskFactory.StartNew(() =>
+                web.GetBrowserHost().ExecuteDevToolsMethod(0, "Runtime.evaluate", new Dictionary<string, object>
+                {
+                    ["expression"] = "window.fixtureGestureObserved = navigator.userActivation.isActive; history.pushState({fixture:1}, '', '" + path + "')",
+                    ["userGesture"] = true
+                }));
+            await SameDocumentNavigation(() => PushWithGesture("/same-step-a"), "/same-step-a", "");
+            Check(await Js(web, "window.fixtureGestureObserved === true") == "True", "same-document fixture observes user activation");
+            await SameDocumentNavigation(() => PushWithGesture("/same-step-b"), "/same-step-b", "");
+            Check(int.Parse(await Js(web, "history.length"), System.Globalization.CultureInfo.InvariantCulture) == browserHistoryBeforePush + 2 &&
+                form.HistoryForTests.Snapshot().Count == sameDocumentCount, "post-load pushState creates browser entries without recording visits");
+            var nativeEntries = (await web.GetBrowserHost().GetNavigationEntriesAsync(false)).ToList();
+            var currentEntry = nativeEntries.FindIndex(entry => entry.IsCurrent);
+            var previousIsSameDocument = currentEntry > 0 && Uri.TryCreate(nativeEntries[currentEntry - 1].Url, UriKind.Absolute, out var previousEntry) &&
+                previousEntry.AbsolutePath == "/same-step-a" && previousEntry.Fragment.Length == 0;
+            Console.WriteLine($"HISTORY_NATIVE_ENTRY_COUNTS: total={nativeEntries.Count} current_index={currentEntry} expected_predecessor={(previousIsSameDocument ? 1 : 0)}");
+            Check(previousIsSameDocument, "Chromium navigation list confirms the same-document predecessor");
+            await SameDocumentNavigation(() => { web.Back(); return Task.CompletedTask; }, "/same-step-a", "");
+            Check(form.HistoryForTests.Snapshot().Count == sameDocumentCount, "same-document back does not add a visit");
+            await SameDocumentNavigation(() => { web.Forward(); return Task.CompletedTask; }, "/same-step-b", "");
+            Check(form.HistoryForTests.Snapshot().Count == sameDocumentCount, "same-document forward does not add a visit");
             var beforeFailure = form.HistoryForTests.Snapshot().Count;
             var failureSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var failureSettled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -382,12 +445,17 @@ internal static partial class Program
     private static async Task FocusHistoryContent(MainForm form, ChromiumWebBrowser browser)
     {
         form.Activate(); browser.Focus();
-        var documentFocus = browser.EvaluateScriptAsPromiseAsync(
-            "return new Promise(resolve => { if (document.hasFocus()) resolve(true); else window.addEventListener('focus', () => resolve(true), { once: true }); });",
-            TimeSpan.FromSeconds(25));
-        await Cef.UIThreadTaskFactory.StartNew(() => browser.GetBrowserHost().SetFocus(true));
-        var response = await documentFocus.WaitAsync(TimeSpan.FromSeconds(25));
-        if (!response.Success || response.Result is not true || HistoryForegroundWindow() != form.Handle || !browser.ContainsFocus)
+        if (await Js(browser, "document.hasFocus()") != "True")
+        {
+            var documentFocus = browser.EvaluateScriptAsPromiseAsync(
+                "return new Promise(resolve => { if (document.hasFocus()) resolve(true); else window.addEventListener('focus', () => resolve(true), { once: true }); });",
+                TimeSpan.FromSeconds(25));
+            await Cef.UIThreadTaskFactory.StartNew(() => browser.GetBrowserHost().SetFocus(true));
+            var response = await documentFocus.WaitAsync(TimeSpan.FromSeconds(25));
+            if (!response.Success || response.Result is not true)
+                throw new InvalidOperationException("The fixture did not observe focused Chromium content.");
+        }
+        if (HistoryForegroundWindow() != form.Handle || !browser.ContainsFocus)
             throw new InvalidOperationException("The fixture did not establish focused Chromium content before sending a shortcut.");
     }
 

@@ -9,8 +9,9 @@ profile cache and may persist history independently of this feature.
 
 Only successful main-frame HTTP(S) loads below 400 are candidates. Redirects
 use the final committed URL. Failed, aborted and HTTP error loads are excluded.
-Reload does not create or update an entry; back and forward each create a visit.
-Same-document changes, including hash and pushState, are not recorded. Userinfo,
+Reload does not create or update an entry; back and forward that load a different
+document each create a visit. Same-document changes, including hash, pushState,
+and back or forward within the document, are not recorded. Userinfo,
 query strings and fragments are removed; revisiting a saved entry therefore
 does not restore its query. Entries use a hostname when no trustworthy title
 is available. Repeated completion for one navigation generation is ignored.
