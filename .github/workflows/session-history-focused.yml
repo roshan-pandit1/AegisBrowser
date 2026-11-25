@@ -1,0 +1,41 @@
+name: Focused session history
+on:
+  push:
+    branches: ['feature/session-history']
+  pull_request:
+    branches: ['feature/proxy-native-routing']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  history:
+    if: github.event_name != 'pull_request' || github.head_ref == 'feature/session-history'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify source revision
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = git rev-parse HEAD
+          Write-Output "Source SHA: $actual"
+          if ($actual -ne $expected) { throw 'Checkout does not match the requested source SHA.' }
+      - name: Build native fixture
+        run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Run history canary and restart checks
+        timeout-minutes: 4
+        run: ./tests/acceptance/session-history-privacy.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Verify simultaneous profile isolation
+        timeout-minutes: 4
+        run: ./tests/acceptance/session-history-profile-isolation.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe
+      - name: Run fresh-process history lifecycle checks
+        timeout-minutes: 10
+        run: ./tests/acceptance/session-history-cycles.ps1 -BrowserTestsExe ./AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe -Cycles 20
