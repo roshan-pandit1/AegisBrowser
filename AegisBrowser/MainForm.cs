@@ -85,7 +85,7 @@ public sealed class MainForm : Form
                 ? "\n\nNo browser tabs will open. Disable the setting in Privacy and restart this profile."
                 : "\n\nThe existing Chromium WebRTC policy could not be restored to the default."),
             "WebRTC privacy setting could not be applied");
-        Text = $"Aegis Browser — {profile}";
+        Text = $"{PreviewStatus.Label} — Aegis Browser — {profile}";
         DesktopStyle.Apply(this);
         ClientSize = new(1150, 740);
         MinimumSize = new(570, 340);
@@ -141,6 +141,10 @@ public sealed class MainForm : Form
         bar.Controls.Add(profiles, 5, 0);
         var menu = new ContextMenuStrip();
         var more = MakeButton("More ▾", "More browser actions", () => menu.Show(bar.GetControlFromPosition(6, 0)!, new Point(0, bar.GetControlFromPosition(6, 0)!.Height)));
+        var previewStatus = menu.Items.Add("Preview security status", null, (_, _) =>
+            MessageBox.Show(this, PreviewStatus.Details, PreviewStatus.Label, MessageBoxButtons.OK, MessageBoxIcon.Information));
+        previewStatus.Name = "PreviewSecurityStatus";
+        previewStatus.AccessibleName = "Development preview security status";
         menu.Items.Add("Diagnostics", null, (_, _) => NewTab(BrowserPolicy.DiagnosticsUrl)).Name = "OpenDiagnostics";
         menu.Items.Add("Developer tools (F12)", null, (_, _) => Current?.ShowDevTools());
         menu.Items.Add("Search settings", null, (_, _) =>
@@ -172,6 +176,11 @@ public sealed class MainForm : Form
         };
         address.Leave += (_, _) => UpdateNavigation();
         var bottom = new StatusStrip();
+        bottom.Items.Add(new ToolStripStatusLabel(PreviewStatus.Label)
+        {
+            Name = "DevelopmentPreviewStatus", AccessibleName = "Development preview",
+            ToolTipText = PreviewStatus.Details
+        });
         bottom.Items.Add(new ToolStripStatusLabel($"Profile: {profile} | Permissions: ask by origin |"));
         bottom.Items.Add(status);
         Controls.Add(tabs);

@@ -1,0 +1,1465 @@
+{
+    "schemaVersion":  1,
+    "cef":  "154.0.34+g14c5a08+chromium-154.0.8037.98",
+    "cefSharp":  "154.0.340",
+    "source":  "Official NuGet catalog SHA-512 and repository signatures verified 2026-11-25 UTC",
+    "packages":  [
+                     {
+                         "sha256":  "84A649927A79B94472ECA01C41A601B6A72E118DF623F6ACC95065F7544F1AF7",
+                         "id":  "chromiumembeddedframework.runtime.win-x64",
+                         "version":  "154.0.34"
+                     },
+                     {
+                         "sha256":  "05D534D8BFBF71B0B038792B6FF93CA3116A12C0B763082A900029ACFB1C6142",
+                         "id":  "cefsharp.common.netcore",
+                         "version":  "154.0.340"
+                     },
+                     {
+                         "sha256":  "D6E220A21CFDD8014A3664E40475886DE7027A46EBBB7DE0F95B20FA1F063637",
+                         "id":  "cefsharp.winforms.netcore",
+                         "version":  "154.0.340"
+                     }
+                 ],
+    "files":  [
+                  {
+                      "path":  "CefSharp.BrowserSubprocess.Core.dll",
+                      "sha256":  "AE6EE5F188ED79968677303417A4D54AA32B08BFEC25CFB327E3BE0D7E9F5C8D",
+                      "package":  "cefsharp.common.netcore",
+                      "entry":  "runtimes/win-x64/native/CefSharp.BrowserSubprocess.Core.dll"
+                  },
+                  {
+                      "path":  "CefSharp.BrowserSubprocess.dll",
+                      "sha256":  "A0D2FBD62448EF4CEFEF1D396CEDA93944C108EB2BB7DB68A12AD895B4D3EFE3",
+                      "package":  "cefsharp.common.netcore",
+                      "entry":  "runtimes/win-x64/native/CefSharp.BrowserSubprocess.dll"
+                  },
+                  {
+                      "path":  "CefSharp.BrowserSubprocess.exe",
+                      "sha256":  "CA0F20A27A27C73A63130A433A85D51E8F58C18A76EDABE91036DAB3B77E46D6",
+                      "package":  "cefsharp.common.netcore",
+                      "entry":  "runtimes/win-x64/native/CefSharp.BrowserSubprocess.exe"
+                  },
+                  {
+                      "path":  "CefSharp.Core.dll",
+                      "sha256":  "5CCEF708E9EE6C8AA65D63DC353F30463B96C6750398F17FE88B07509D0E1204",
+                      "package":  "cefsharp.common.netcore",
+                      "entry":  "runtimes/win-x64/lib/net6.0/CefSharp.Core.dll"
+                  },
+                  {
+                      "path":  "CefSharp.Core.Runtime.dll",
+                      "sha256":  "2B4329C6D48A58194C4E4AC198E82990E4F1DCF63559B6F3357F9EA19781BFF0",
+                      "package":  "cefsharp.common.netcore",
+                      "entry":  "runtimes/win-x64/lib/net6.0/CefSharp.Core.Runtime.dll"
+                  },
+                  {
+                      "path":  "CefSharp.dll",
+                      "sha256":  "A9F9788B933F852081DB340646A35BC9CFEB8AB817B5AA34EA1F695DB9EA1D1C",
+                      "package":  "cefsharp.common.netcore",
+                      "entry":  "runtimes/win-x64/lib/net6.0/CefSharp.dll"
+                  },
+                  {
+                      "path":  "CefSharp.WinForms.dll",
+                      "sha256":  "4AD5790A6E1CAF97E3417F4D11DEA6B3AF14E7EE2F15A75F181E34DD8E389440",
+                      "package":  "cefsharp.winforms.netcore",
+                      "entry":  "lib/net6.0-windows7.0/CefSharp.WinForms.dll"
+                  },
+                  {
+                      "path":  "chrome_100_percent.pak",
+                      "sha256":  "04FE059B62E211571307EF2937B2C966E6A7B0E58E9D2149FFDA618679E65FAD",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/chrome_100_percent.pak"
+                  },
+                  {
+                      "path":  "chrome_200_percent.pak",
+                      "sha256":  "4B0802784C08FEAA31DC3DCA8953BE8E217CF2E7F53D5AB8751BA998F391EECF",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/chrome_200_percent.pak"
+                  },
+                  {
+                      "path":  "chrome_elf.dll",
+                      "sha256":  "F26656BFE38E1B78E42F292B6A8BE1B5F0B5DB15395AC571D6E20A1DEDF698FB",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/chrome_elf.dll"
+                  },
+                  {
+                      "path":  "d3dcompiler_47.dll",
+                      "sha256":  "F5C95E919B4FFA1AC71049CD45B9F986D2965E6888395CA2806337985334FA56",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/d3dcompiler_47.dll"
+                  },
+                  {
+                      "path":  "dxcompiler.dll",
+                      "sha256":  "D2BCDAAB7772D60D2F2C53781BF4449DDE9E6491EC82B24DA3F581C21C12D110",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/dxcompiler.dll"
+                  },
+                  {
+                      "path":  "dxil.dll",
+                      "sha256":  "0850398076E9E30CD9AC28FC7D56A7D350EA755B0F3B6B2FC8F35A930888C845",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/dxil.dll"
+                  },
+                  {
+                      "path":  "icudtl.dat",
+                      "sha256":  "495C45CC7A65562EC461F860C310C6B66E006ACD96833F61D1AA31F77FE18CF1",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/icudtl.dat"
+                  },
+                  {
+                      "path":  "libcef.dll",
+                      "sha256":  "E3DA6707A840A8F33F565E011542169FD51AAA5218603EB7A89039FB16D79AE7",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/libcef.dll"
+                  },
+                  {
+                      "path":  "locales/af.pak",
+                      "sha256":  "DA089D66C3A92EC31312BB5D3F00823530CB632BB1DCFF159F04EBF1618BA9AA",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/af.pak"
+                  },
+                  {
+                      "path":  "locales/af_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/af_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/af_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/af_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/af_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/af_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/am.pak",
+                      "sha256":  "67F67CCBB6B0BC176E8E410319BDD2C3AD7B2E9EAABF4D9357D789A623770129",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/am.pak"
+                  },
+                  {
+                      "path":  "locales/am_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/am_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/am_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/am_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/am_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/am_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ar.pak",
+                      "sha256":  "0BEFE8BD70559417BCDC703C69CAADB8584A5A4FE17CDD0C78BA8E5C251FBA29",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ar.pak"
+                  },
+                  {
+                      "path":  "locales/ar_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ar_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ar_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ar_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ar_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ar_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/bg.pak",
+                      "sha256":  "867EF6EB8B6688DF0E40732A6A0111708E576964CB264F0E5A174CB975D82E88",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/bg.pak"
+                  },
+                  {
+                      "path":  "locales/bg_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/bg_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/bg_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/bg_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/bg_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/bg_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/bn.pak",
+                      "sha256":  "00F78C349529C7B879A8515D3AD249DAFFA434C21A4771899D8ABD756F6F4B87",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/bn.pak"
+                  },
+                  {
+                      "path":  "locales/bn_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/bn_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/bn_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/bn_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/bn_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/bn_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ca.pak",
+                      "sha256":  "EB5F4270DCFDFF18D7AE3CB718D95050C8BC21A01351148BE98426E752B77AC1",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ca.pak"
+                  },
+                  {
+                      "path":  "locales/ca_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ca_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ca_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ca_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ca_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ca_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/cs.pak",
+                      "sha256":  "E795914C094D7F09D9C4946AD233DBCAC00E078A06DF5541C10661E99234FB58",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/cs.pak"
+                  },
+                  {
+                      "path":  "locales/cs_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/cs_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/cs_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/cs_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/cs_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/cs_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/da.pak",
+                      "sha256":  "5A042BD93DA7A5055A70C8E665060FEA6FE559DF1964524C212327985715DCE2",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/da.pak"
+                  },
+                  {
+                      "path":  "locales/da_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/da_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/da_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/da_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/da_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/da_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/de.pak",
+                      "sha256":  "877DD2868138DD5AEFD0DFBADC36AD522DFC77720125B335863BCC14F3A88898",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/de.pak"
+                  },
+                  {
+                      "path":  "locales/de_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/de_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/de_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/de_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/de_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/de_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/el.pak",
+                      "sha256":  "743DF29BE94E25D438A36CBB20943AE7B294A83EFA681DF6852EADC2B9458DC0",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/el.pak"
+                  },
+                  {
+                      "path":  "locales/el_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/el_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/el_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/el_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/el_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/el_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/en-GB.pak",
+                      "sha256":  "109F0EC5C8E40A6F2E2DAF20B7F393F9D40FDB5BF7A53E3766E43D6599ABCF35",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/en-GB.pak"
+                  },
+                  {
+                      "path":  "locales/en-GB_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/en-GB_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/en-GB_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/en-GB_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/en-GB_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/en-GB_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/en-US.pak",
+                      "sha256":  "283F125719E3954D24DE78A41329840A281E5B255379DAF77CB66CBF2887A920",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/en-US.pak"
+                  },
+                  {
+                      "path":  "locales/en-US_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/en-US_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/en-US_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/en-US_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/en-US_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/en-US_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/es.pak",
+                      "sha256":  "5E76D0E482E98835089A13405C56A385525B2D742067C886AC1284FAC26D6500",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/es.pak"
+                  },
+                  {
+                      "path":  "locales/es_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/es_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/es_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/es_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/es_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/es_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/es-419.pak",
+                      "sha256":  "F6008754E3B4A96E5E68DAA5644F570BD8B6DFF909E596C185C0117EFDE510E8",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/es-419.pak"
+                  },
+                  {
+                      "path":  "locales/es-419_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/es-419_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/es-419_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/es-419_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/es-419_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/es-419_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/et.pak",
+                      "sha256":  "20735BE1275B9495AE11B6BD0F80672FF46A3D165CF1142A80C5FDB79CA8025A",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/et.pak"
+                  },
+                  {
+                      "path":  "locales/et_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/et_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/et_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/et_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/et_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/et_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/fa.pak",
+                      "sha256":  "FB95367F21B35B023B444EC6A4A50EC041E35B385B7774745B7D7E39263254D1",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fa.pak"
+                  },
+                  {
+                      "path":  "locales/fa_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fa_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/fa_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fa_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/fa_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fa_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/fi.pak",
+                      "sha256":  "D5441E66E3CBC8822A2EBB2FBECB8C202F78012CA32B2ACB76A63108043C3F46",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fi.pak"
+                  },
+                  {
+                      "path":  "locales/fi_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fi_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/fi_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fi_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/fi_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fi_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/fil.pak",
+                      "sha256":  "6AA782C7B61F9FAA88A63CB54CD27343E164F2C0EEE9D92BE329AE1D734FCE4F",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fil.pak"
+                  },
+                  {
+                      "path":  "locales/fil_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fil_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/fil_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fil_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/fil_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fil_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/fr.pak",
+                      "sha256":  "83998CC0D26E643E544D412C0665D73164A4D4F380F82F116CDDFC1EBF251E2B",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fr.pak"
+                  },
+                  {
+                      "path":  "locales/fr_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fr_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/fr_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fr_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/fr_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/fr_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/gu.pak",
+                      "sha256":  "E884133FEA71686E7A7A030DF6A09B8E7FA6974DCD195665C268A56BB8C3B724",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/gu.pak"
+                  },
+                  {
+                      "path":  "locales/gu_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/gu_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/gu_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/gu_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/gu_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/gu_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/he.pak",
+                      "sha256":  "BF1899893CF01F6A3ACD0BC10F02CCE3F94A1FB4841B53F5B96A6A744F018C46",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/he.pak"
+                  },
+                  {
+                      "path":  "locales/he_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/he_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/he_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/he_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/he_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/he_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/hi.pak",
+                      "sha256":  "32BB2CA0287C01B8113B0DC28E546753351BDEC3BAA0E1E9A2799D5F79D44FDD",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hi.pak"
+                  },
+                  {
+                      "path":  "locales/hi_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hi_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/hi_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hi_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/hi_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hi_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/hr.pak",
+                      "sha256":  "2F8DEADF269AC6DA86BB5E5A6B298222A4FE1C2B52CCC76D3766ABE730AB4C74",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hr.pak"
+                  },
+                  {
+                      "path":  "locales/hr_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hr_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/hr_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hr_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/hr_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hr_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/hu.pak",
+                      "sha256":  "5F9E8D7CB56A392EB717478D8C51F94BEE775E4A921D915E04DBC001EA44E717",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hu.pak"
+                  },
+                  {
+                      "path":  "locales/hu_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hu_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/hu_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hu_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/hu_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/hu_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/id.pak",
+                      "sha256":  "AD799B511AEA311AC1D0CEE82DE2E903500B97BBCDBF470CA700EA439AC781C2",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/id.pak"
+                  },
+                  {
+                      "path":  "locales/id_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/id_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/id_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/id_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/id_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/id_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/it.pak",
+                      "sha256":  "4E74C90FB1F82BF4BB392BF3AA19124A7D94DB29885E3A2F8C1DCA7D4D997D82",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/it.pak"
+                  },
+                  {
+                      "path":  "locales/it_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/it_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/it_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/it_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/it_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/it_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ja.pak",
+                      "sha256":  "54B11607D56675B1ABD6A207E32E9C26F8B5CE2020C6477CB7E776E8CB31B6EA",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ja.pak"
+                  },
+                  {
+                      "path":  "locales/ja_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ja_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ja_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ja_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ja_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ja_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/kn.pak",
+                      "sha256":  "3D53CEE7B089A89343DB64FD42B5CF75CDDDFD1FF0F07E9429BDF61787F56DDB",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/kn.pak"
+                  },
+                  {
+                      "path":  "locales/kn_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/kn_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/kn_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/kn_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/kn_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/kn_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ko.pak",
+                      "sha256":  "F320A302948B6670EE2FD34A018125268DF87DD758D508A28BCD03D38A0FD18F",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ko.pak"
+                  },
+                  {
+                      "path":  "locales/ko_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ko_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ko_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ko_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ko_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ko_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/lt.pak",
+                      "sha256":  "D616A6C889F132185901B74C1F90250D78ABF81B2310AAAEFA851CA93DDE822A",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/lt.pak"
+                  },
+                  {
+                      "path":  "locales/lt_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/lt_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/lt_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/lt_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/lt_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/lt_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/lv.pak",
+                      "sha256":  "CB24EC4C776008C071EE37A9499F90246BCB0D89A7C3157DFB6D1BCA77B54531",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/lv.pak"
+                  },
+                  {
+                      "path":  "locales/lv_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/lv_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/lv_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/lv_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/lv_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/lv_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ml.pak",
+                      "sha256":  "34F898DA37273423B8AE777A62A68351A3F05C8F2A1D126939EA2821BA78B9F1",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ml.pak"
+                  },
+                  {
+                      "path":  "locales/ml_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ml_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ml_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ml_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ml_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ml_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/mr.pak",
+                      "sha256":  "2A3A8A3DAEDC17F1DB64896C5CDAB6858937AC34D0EFCC6B7300F438D829BFEA",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/mr.pak"
+                  },
+                  {
+                      "path":  "locales/mr_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/mr_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/mr_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/mr_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/mr_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/mr_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ms.pak",
+                      "sha256":  "66A90730B8149160BF39887148EC4792B85E080B0D0412DF5BC72C6F01C78C60",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ms.pak"
+                  },
+                  {
+                      "path":  "locales/ms_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ms_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ms_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ms_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ms_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ms_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/nb.pak",
+                      "sha256":  "6498FE21ABF897FF07628028519BA6DA9426FB04DA3C9AF5FBE8E8B4FADBFCB2",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/nb.pak"
+                  },
+                  {
+                      "path":  "locales/nb_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/nb_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/nb_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/nb_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/nb_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/nb_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/nl.pak",
+                      "sha256":  "E340514620DD56FB7A5EB3DDD5037E7A0AEE9C3B2B98B696A5BB444FD8778C05",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/nl.pak"
+                  },
+                  {
+                      "path":  "locales/nl_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/nl_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/nl_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/nl_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/nl_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/nl_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/pl.pak",
+                      "sha256":  "48E158FBA280B9CCA9CE0311F82BDF11FB0572B0494077EC2B07E5F2C3BEFBCF",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pl.pak"
+                  },
+                  {
+                      "path":  "locales/pl_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pl_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/pl_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pl_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/pl_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pl_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/pt-BR.pak",
+                      "sha256":  "C4D93FA6A10FF1D603DFA4D4DE60A6402699F2E457FFD5354CDF91E0C7239E26",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pt-BR.pak"
+                  },
+                  {
+                      "path":  "locales/pt-BR_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pt-BR_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/pt-BR_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pt-BR_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/pt-BR_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pt-BR_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/pt-PT.pak",
+                      "sha256":  "680A8D9D7E7D72CD4196E1692CAA6A149E55EB21E2C7B889FF7994B691E88DEE",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pt-PT.pak"
+                  },
+                  {
+                      "path":  "locales/pt-PT_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pt-PT_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/pt-PT_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pt-PT_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/pt-PT_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/pt-PT_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ro.pak",
+                      "sha256":  "47001AC1F4CAF671CAB8209A3289EC7B6DF8F4B4CF779E6392D178EB8423BD4F",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ro.pak"
+                  },
+                  {
+                      "path":  "locales/ro_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ro_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ro_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ro_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ro_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ro_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ru.pak",
+                      "sha256":  "E98D9F281DAA2ECF33EF22F935BA47C809FF01D3830B09FC91458708A4655F3C",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ru.pak"
+                  },
+                  {
+                      "path":  "locales/ru_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ru_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ru_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ru_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ru_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ru_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/sk.pak",
+                      "sha256":  "09D0FCFDF8E3674DBD9EB46D2B68B20B01880801226A479E80F79EE28E61EB9B",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sk.pak"
+                  },
+                  {
+                      "path":  "locales/sk_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sk_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/sk_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sk_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/sk_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sk_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/sl.pak",
+                      "sha256":  "49625C279A1B82E734A3EEE3DFF9A47B772408195F90858934A7CE664C3BEB23",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sl.pak"
+                  },
+                  {
+                      "path":  "locales/sl_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sl_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/sl_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sl_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/sl_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sl_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/sr.pak",
+                      "sha256":  "6E283F23CCCD7B3E153C05B4A65871951D05A276615FF7075F8750A54470E826",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sr.pak"
+                  },
+                  {
+                      "path":  "locales/sr_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sr_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/sr_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sr_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/sr_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sr_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/sv.pak",
+                      "sha256":  "13FF30E62BFF90492425336F2470FA145A7A47B8B792FB14EB67DBDC43678AD5",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sv.pak"
+                  },
+                  {
+                      "path":  "locales/sv_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sv_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/sv_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sv_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/sv_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sv_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/sw.pak",
+                      "sha256":  "F6430E9F290291807E02DF17661F541668A99F3B4AE81BD0AA07E56471177379",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sw.pak"
+                  },
+                  {
+                      "path":  "locales/sw_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sw_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/sw_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sw_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/sw_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/sw_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ta.pak",
+                      "sha256":  "82A29C969122898F8111526C47C6E62A9EAA1812DB23FC893256CBDF8C54ED31",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ta.pak"
+                  },
+                  {
+                      "path":  "locales/ta_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ta_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ta_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ta_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ta_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ta_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/te.pak",
+                      "sha256":  "06F176C76136769AA35543E068088D3AAAEF75F9FB9D564A1C0E2552CC445194",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/te.pak"
+                  },
+                  {
+                      "path":  "locales/te_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/te_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/te_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/te_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/te_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/te_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/th.pak",
+                      "sha256":  "9897FBCA11C27DAD12CA185C86DECACBC197D1565921EB0B786D16C6E1B534BC",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/th.pak"
+                  },
+                  {
+                      "path":  "locales/th_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/th_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/th_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/th_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/th_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/th_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/tr.pak",
+                      "sha256":  "AA18D9415D8E70D3B5F0A1DBC6F0405EDDEDD63EAE6A3D3FCF6B1E7743283E9B",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/tr.pak"
+                  },
+                  {
+                      "path":  "locales/tr_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/tr_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/tr_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/tr_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/tr_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/tr_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/uk.pak",
+                      "sha256":  "FEB1428E8CB00E03D347613378F2519C11C5399A55417B36DF49ECDF1BF91D07",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/uk.pak"
+                  },
+                  {
+                      "path":  "locales/uk_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/uk_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/uk_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/uk_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/uk_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/uk_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/ur.pak",
+                      "sha256":  "D9CAD3D101925D4DB21E41A4071979C4DEF869F26D56544A40E14068924D85EA",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ur.pak"
+                  },
+                  {
+                      "path":  "locales/ur_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ur_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/ur_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ur_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/ur_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/ur_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/vi.pak",
+                      "sha256":  "2B055B7996A6136872580634E5296F75F7E9C9F6BC799B1C1DBA061C9CA5449D",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/vi.pak"
+                  },
+                  {
+                      "path":  "locales/vi_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/vi_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/vi_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/vi_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/vi_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/vi_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/zh-CN.pak",
+                      "sha256":  "B902E7FBEB810D88926996CAF7AF203D9A8ACFBDC48F471886CFCB850BC5C4F7",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/zh-CN.pak"
+                  },
+                  {
+                      "path":  "locales/zh-CN_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/zh-CN_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/zh-CN_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/zh-CN_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/zh-CN_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/zh-CN_NEUTER.pak"
+                  },
+                  {
+                      "path":  "locales/zh-TW.pak",
+                      "sha256":  "DEDDC62D0990410E24F97405F19E8F8F93588F1F141967CD249880FE6D8791F3",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/zh-TW.pak"
+                  },
+                  {
+                      "path":  "locales/zh-TW_FEMININE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/zh-TW_FEMININE.pak"
+                  },
+                  {
+                      "path":  "locales/zh-TW_MASCULINE.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/zh-TW_MASCULINE.pak"
+                  },
+                  {
+                      "path":  "locales/zh-TW_NEUTER.pak",
+                      "sha256":  "CA73097BD968B363B7145E86B64F3C595E533808B0763DC8863A27FC363CFA51",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "CEF/win-x64/locales/zh-TW_NEUTER.pak"
+                  },
+                  {
+                      "path":  "resources.pak",
+                      "sha256":  "8EE8B095AC381EBEE66EE2A24EC6CD72ADCE90C101B82C132B753A2ABAF4B246",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/resources.pak"
+                  },
+                  {
+                      "path":  "v8_context_snapshot.bin",
+                      "sha256":  "4CFA19D8BED5D24F0567F165F3396F5E06C4676EBB913249D317E93E539EA384",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/v8_context_snapshot.bin"
+                  },
+                  {
+                      "path":  "vk_swiftshader.dll",
+                      "sha256":  "8DE8BA210A07034ADCBDC63055314C1EBEA8634A4E9FBACC6B64CAFCE67E4FEF",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/vk_swiftshader.dll"
+                  },
+                  {
+                      "path":  "vk_swiftshader_icd.json",
+                      "sha256":  "32D83FF113FEF532A9F97E0D2831F8656628AB1C99E9060F0332B1532839AFD9",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/vk_swiftshader_icd.json"
+                  },
+                  {
+                      "path":  "vulkan-1.dll",
+                      "sha256":  "11329B3CC832EAA2569E6F5A25AAFFA4D065651386251E4857FFBE572D8D3382",
+                      "package":  "chromiumembeddedframework.runtime.win-x64",
+                      "entry":  "runtimes/win-x64/native/vulkan-1.dll"
+                  }
+              ]
+}
