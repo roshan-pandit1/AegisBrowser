@@ -36,6 +36,7 @@ internal static partial class Program
         if (args.Length == 2 && args[0] is "webrtc-baseline" or "webrtc-restrict") return WebRtcStartupProbe(args[1], args[0] == "webrtc-restrict");
         if (args.Length == 2 && args[0] == "external-egress-probe") return ExternalEgressProbe(args[1]);
         if (args.Length == 2 && args[0] == "hwnd-repro") return NativeWindowRepro(args[1]);
+        if (args.Length == 3 && args[0] == "download-callback-probe") return DownloadCallbackProbe(args[1], args[2]);
         if (args.Length == 2 && args[0] == "proxy-auth-probe") return ProxyAuthProbe(args[1]);
         if (args.Length == 2 && args[0] is "viewport-write" or "viewport-read") return ViewportCssProbe(args[1], args[0]);
         if (args.Length == 2 && args[0] is "fingerprint-write" or "fingerprint-read") return FingerprintSurfaceProbe(args[1], args[0]);

@@ -1,0 +1,88 @@
+name: Native download callback fixture
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  callback-fixture:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.404'
+      - name: Record tested source
+        run: git rev-parse HEAD
+      - name: Build native fixture
+        run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+      - name: Build directory observation fixture
+        run: dotnet build AegisBrowser.Tests -c Release -r win-x64
+      - name: Observe owned directory sharing on this disposable runner
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-directory-sharing-observation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Diagnose delete-pending state independently
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-directory-delete-diagnostic
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compare directory-list-access sharing behavior
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-directory-list-access-diagnostic
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Observe same-user ACL mutation while a staging handle is held
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-acl-race-observation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Observe junction substitution with held staging handles
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-junction-observation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Observe handle-relative no-replace publication
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-publication-observation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Observe native handle-relative no-replace publication
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-publication-native-observation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test native CEF download callbacks on loopback
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          $exe = './AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe'
+          foreach ($mode in @('decline', 'accept', 'cancel', 'interrupt', 'held-staging', 'held-ancestor-staging', 'barrier-close')) {
+            $root = Join-Path $env:RUNNER_TEMP ("download-$mode-" + [guid]::NewGuid().ToString('N'))
+            $output = & $exe download-callback-probe $root $mode 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if ($code -ne 0 -or ($output -join "`n") -match 'Check failed:' -or
+                ($output -join "`n") -notmatch "PASS: native download callback probe \($mode\), CEF shutdown and output listing") {
+              throw "CEF download callback fixture failed: $mode"
+            }
+          }

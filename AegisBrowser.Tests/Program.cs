@@ -3,6 +3,58 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
 
+if (args.Length == 1 && args[0] == "--download-junction-observation")
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows is required.");
+    await DownloadJunctionObservationTests.RunDisposable();
+    return;
+}
+if (args.Length == 6 && args[0] == "--download-junction-worker")
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows is required.");
+    await DownloadJunctionObservationTests.RunWorker(args);
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--download-acl-race-observation")
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows is required.");
+    await DownloadAclRaceObservationTests.RunDisposable();
+    return;
+}
+if (args.Length == 6 && args[0] == "--download-acl-race-worker")
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows is required.");
+    await DownloadAclRaceObservationTests.RunWorker(args);
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--download-directory-sharing-observation")
+{
+    DownloadDirectoryObservationTests.RunDisposableSharingObservation();
+    return;
+}
+if (args.Length == 1 && args[0] == "--download-directory-delete-diagnostic")
+{
+    DownloadDirectoryObservationTests.RunDisposableDeleteDiagnostic();
+    return;
+}
+if (args.Length == 1 && args[0] == "--download-directory-list-access-diagnostic")
+{
+    DownloadDirectoryObservationTests.RunDisposableListAccessDiagnostic();
+    return;
+}
+if (args.Length == 1 && args[0] == "--download-publication-observation")
+{
+    DownloadPublicationObservationTests.RunDisposable();
+    return;
+}
+if (args.Length == 1 && args[0] == "--download-publication-native-observation")
+{
+    DownloadPublicationObservationTests.RunDisposable(native: true);
+    return;
+}
+
 // A child process proves that the OS lease is exclusive beyond this process.
 if (args.Length == 2 && args[0] == "--probe-lock")
 {
@@ -67,6 +119,10 @@ PrivacyTests.Run();
 ViewportLetterboxingTests.Run();
 ViewportZoomQueryTests.Run();
 AddressTests.Run();
+DownloadFileNameTests.Run();
+DownloadHistoryTests.Run();
+DownloadCloseBarrierTests.Run();
+DownloadDirectoryObservationTests.Run();
 ProfileCatalogTests.Run();
 ProfileRepositoryTests.Run();
 ProfileDashboardTests.Run();

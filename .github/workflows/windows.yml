@@ -11,6 +11,8 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
