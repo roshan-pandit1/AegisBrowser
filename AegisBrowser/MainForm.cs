@@ -15,6 +15,7 @@ public sealed class MainForm : Form
     private readonly PackageSmokeTrace? packageSmoke;
     private readonly SessionHistoryService sessionHistory = new();
     internal SessionHistoryService HistoryForTests => sessionHistory;
+    internal Action<bool>? ControlLHandledForTests;
     private readonly HistoryNavigationTracker historyTracker;
     private HistoryForm? historyWindow;
     private bool closing;
@@ -535,7 +536,10 @@ public sealed class MainForm : Form
         switch (keys)
         {
             case Keys.Control | Keys.H: OpenHistory(); break;
-            case Keys.Control | Keys.L: address.Focus(); address.SelectAll(); break;
+            case Keys.Control | Keys.L:
+                address.Focus(); address.SelectAll();
+                ControlLHandledForTests?.Invoke(address.Focused);
+                break;
             case Keys.Control | Keys.T: NewTab(BrowserPolicy.DiagnosticsUrl); break;
             case Keys.Control | Keys.W: CloseTab(); break;
             case Keys.F12: Current?.ShowDevTools(); break;

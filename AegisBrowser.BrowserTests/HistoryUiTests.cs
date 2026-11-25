@@ -160,11 +160,13 @@ internal static partial class Program
             var requestsBeforeOpening = Volatile.Read(ref requests);
             form.Activate();
             var address = (TextBox)form.Controls.Find("BrowserAddress", true).Single();
-            var cefControlL = 0; var addressEntered = 0; var addressLeft = 0;
+            var cefControlL = 0; var handledControlL = 0; var focusedWhenHandled = false;
+            var addressEntered = 0; var addressLeft = 0;
             ((BrowserKeys)web.KeyboardHandler).ShortcutObservedForTests = keys =>
             {
                 if (keys == (Keys.Control | Keys.L)) Interlocked.Increment(ref cefControlL);
             };
+            form.ControlLHandledForTests = focused => { handledControlL++; focusedWhenHandled = focused; };
             address.Enter += (_, _) => addressEntered++;
             address.Leave += (_, _) => addressLeft++;
             address.Focus();
@@ -179,11 +181,12 @@ internal static partial class Program
                 if (HistoryForegroundWindow() == form.Handle && web.ContainsFocus)
                 {
                     await FocusHistoryContent(form, web);
+                    var enteredBeforeShortcut = addressEntered; var leftBeforeShortcut = addressLeft;
                     SendKeys.SendWait("^l");
                     try { await Wait(() => address.Focused, "existing Ctrl+L shortcut"); }
                     catch (TimeoutException)
                     {
-                        Console.Error.WriteLine($"HISTORY_SHORTCUT_DIAGNOSTIC: cef_control_l={Volatile.Read(ref cefControlL)} address_entered={addressEntered} address_left={addressLeft} foreground={(HistoryForegroundWindow() == form.Handle ? 1 : 0)} browser_focused={(web.ContainsFocus ? 1 : 0)}");
+                        Console.Error.WriteLine($"HISTORY_SHORTCUT_DIAGNOSTIC: cef_control_l={Volatile.Read(ref cefControlL)} handled_control_l={handledControlL} focused_when_handled={(focusedWhenHandled ? 1 : 0)} address_entered_after={addressEntered - enteredBeforeShortcut} address_left_after={addressLeft - leftBeforeShortcut} address_can_focus={(address.CanFocus ? 1 : 0)} foreground={(HistoryForegroundWindow() == form.Handle ? 1 : 0)} browser_focused={(web.ContainsFocus ? 1 : 0)}");
                         throw;
                     }
                     Check(true, "Ctrl+L still focuses the address field");
