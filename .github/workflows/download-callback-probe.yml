@@ -65,9 +65,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test native CEF download callbacks on loopback
         if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
         run: |
           $exe = './AegisBrowser.BrowserTests/bin/Release/net10.0-windows/win-x64/AegisBrowser.BrowserTests.exe'
-          foreach ($mode in @('decline', 'accept', 'cancel', 'interrupt', 'held-staging', 'barrier-close')) {
+          foreach ($mode in @('decline', 'accept', 'cancel', 'interrupt', 'held-staging', 'held-ancestor-staging', 'barrier-close')) {
             $root = Join-Path $env:RUNNER_TEMP ("download-$mode-" + [guid]::NewGuid().ToString('N'))
             $output = & $exe download-callback-probe $root $mode 2>&1
             $code = $LASTEXITCODE

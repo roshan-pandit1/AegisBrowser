@@ -14,10 +14,21 @@ internal static partial class Program
     // Test-only probe. Production continues to use DenyDownloads.
     private static int DownloadCallbackProbe(string profileRoot, string mode)
     {
-        if (mode is not ("decline" or "accept" or "cancel" or "interrupt" or "close-tab" or "held-staging" or "barrier-close")) return 2;
+        if (mode is not ("decline" or "accept" or "cancel" or "interrupt" or "close-tab" or "held-staging" or "held-ancestor-staging" or "barrier-close")) return 2;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var root = Path.GetFullPath(profileRoot);
+        if (mode == "held-ancestor-staging")
+        {
+            if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
+                Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted" ||
+                Environment.GetEnvironmentVariable("AEGIS_DISPOSABLE_DOWNLOAD_TEST") != "1")
+                throw new InvalidOperationException("Holding the full ancestor chain requires an acknowledged disposable GitHub-hosted Windows runner.");
+            var runnerTemp = Path.GetFullPath(Environment.GetEnvironmentVariable("RUNNER_TEMP") ?? throw new IOException("Runner temporary directory is unavailable."));
+            var relativeRoot = Path.GetRelativePath(runnerTemp, root);
+            if (Path.IsPathRooted(relativeRoot) || relativeRoot == ".." || relativeRoot.StartsWith("..\\", StringComparison.Ordinal))
+                throw new IOException("The fixture must be created below runner temp.");
+        }
         // This is an owned test staging location, never a user-selected path.
         // It is not the qualified production staging implementation.
         var downloads = Path.Combine(root, "test-owned-staging");
@@ -27,6 +38,7 @@ internal static partial class Program
         var marker = Path.Combine(downloads, ".aegis-fixture-owner");
         using (new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) { }
         using var stagingHandle = mode == "held-staging" ? DownloadDirectoryObservation.OpenWithListAccessForTest(downloads) : null;
+        using var ancestorHandles = mode == "held-ancestor-staging" ? HeldDirectoryChain.Open(downloads) : null;
         var stagingIdentity = stagingHandle?.Identity;
         var payload = Encoding.UTF8.GetBytes("Aegis owned download callback fixture\n");
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -75,7 +87,7 @@ internal static partial class Program
                     await responseServed.Task.WaitAsync(TimeSpan.FromSeconds(25));
                     await handler.Before.Task.WaitAsync(TimeSpan.FromSeconds(25));
                     Check(handler.Suggested == "fixture.txt", "Content-Disposition suggested filename reaches native callback");
-                    if (mode is "accept" or "held-staging")
+                    if (mode is "accept" or "held-staging" or "held-ancestor-staging")
                     {
                         await handler.Complete.Task.WaitAsync(TimeSpan.FromSeconds(25));
                         Check(File.Exists(target) && File.ReadAllBytes(target).SequenceEqual(payload), "native download wrote exact fixture bytes");
@@ -84,6 +96,11 @@ internal static partial class Program
                         Console.WriteLine("DOWNLOAD_FIXTURE_SHA256: " + hash);
                         if (stagingHandle is not null)
                             Check(stagingHandle.ReadHeldIdentity() == stagingIdentity, "held staging directory identity remains stable while CEF writes");
+                        if (ancestorHandles is not null)
+                        {
+                            ancestorHandles.Verify();
+                            Console.WriteLine("ANCESTOR_CHAIN_OBSERVATION: held_count=" + ancestorHandles.Count + " retained_and_reopened_identities_match=true");
+                        }
                     }
                     else if (mode == "cancel")
                     {
@@ -160,7 +177,7 @@ internal static partial class Program
                 foreach (var file in files) Console.Error.WriteLine("DOWNLOAD_REMAINING_FILE: " + Path.GetFileName(file));
                 Console.Error.WriteLine("FAIL: unsuccessful download left output files"); return 1;
             }
-            if (mode is "accept" or "held-staging" && (files.Length != 1 || files[0] != target)) { Console.Error.WriteLine("FAIL: unexpected output files"); return 1; }
+            if (mode is "accept" or "held-staging" or "held-ancestor-staging" && (files.Length != 1 || files[0] != target)) { Console.Error.WriteLine("FAIL: unexpected output files"); return 1; }
             Console.WriteLine($"PASS: native download callback probe ({mode}), CEF shutdown and output listing");
         }
         return result;
@@ -195,7 +212,7 @@ internal static partial class Program
                     if (!closeBarrier.TryRegister(browserId, downloadId, CancelRetained)) throw new InvalidOperationException("Could not register fixture download.");
                     PendingNative = true;
                 }
-                if (mode is "accept" or "cancel" or "interrupt" or "close-tab" or "held-staging" or "barrier-close") callback.Continue(target, false);
+                if (mode is "accept" or "cancel" or "interrupt" or "close-tab" or "held-staging" or "held-ancestor-staging" or "barrier-close") callback.Continue(target, false);
             }
             Before.TrySetResult(true);
             return true;
@@ -233,6 +250,45 @@ internal static partial class Program
             var task = barrier.BeginClose();
             if (barrier.TryRegister(browserId, downloadId + 1, () => { })) throw new InvalidOperationException("Close accepted a new download.");
             return task;
+        }
+    }
+
+    // Research fixture: retain every ancestor from the volume root to the test
+    // stage, and compare path-reopened identities after a native transfer. It
+    // does not validate owners, DACLs, existing handles or authorize a download.
+    private sealed class HeldDirectoryChain : IDisposable
+    {
+        private readonly List<(string Path, DownloadDirectoryObservation Handle)> entries = [];
+        internal int Count => entries.Count;
+
+        internal static HeldDirectoryChain Open(string leaf)
+        {
+            var chain = new Stack<string>();
+            for (var path = Path.GetFullPath(leaf); path is not null; path = Path.GetDirectoryName(path)) chain.Push(path);
+            var result = new HeldDirectoryChain();
+            try
+            {
+                while (chain.TryPop(out var path)) result.entries.Add((path, DownloadDirectoryObservation.OpenWithListAccessForTest(path)));
+                result.Verify();
+                return result;
+            }
+            catch { result.Dispose(); throw; }
+        }
+
+        internal void Verify()
+        {
+            foreach (var (path, held) in entries)
+            {
+                using var reopened = DownloadDirectoryObservation.OpenWithListAccessForTest(path);
+                if (held.ReadHeldIdentity() != held.Identity || reopened.Identity != held.Identity)
+                    throw new IOException("A held fixture ancestor changed identity.");
+            }
+        }
+
+        public void Dispose()
+        {
+            for (var i = entries.Count - 1; i >= 0; i--) entries[i].Handle.Dispose();
+            entries.Clear();
         }
     }
 }
