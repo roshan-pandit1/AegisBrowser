@@ -49,6 +49,13 @@ jobs:
         run: |
           & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-acl-race-observation
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Observe junction substitution with held staging handles
+        if: always()
+        env:
+          AEGIS_DISPOSABLE_DOWNLOAD_TEST: '1'
+        run: |
+          & ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.exe --download-junction-observation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Observe handle-relative no-replace publication
         if: always()
         env:
