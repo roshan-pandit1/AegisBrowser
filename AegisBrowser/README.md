@@ -1,12 +1,15 @@
 # Aegis Browser
 
-A Windows x64 browser for ordinary browsing and local privacy diagnostics. Includes tabs, back/forward, reload/stop, an address bar, persistent profiles and Chromium DevTools. No identity spoofing, fingerprint modifications or fraud-detection bypasses.
+A Windows x64 **DEVELOPMENT PREVIEW** for browsing and local privacy diagnostics. It includes tabs, navigation, persistent profiles and Chromium DevTools. Optional viewport, WebGL and remote-font controls reduce particular exposed surfaces; they do not establish anonymity or comprehensive fingerprint resistance. The engine's current security-fix coverage is unqualified, the stock CefSharp binding does not provide the CEF renderer sandbox, and required-proxy profiles remain blocked.
 
 ## Build on Windows
 
 Install Windows 10/11 x64, the .NET 10 SDK pinned in `global.json`, and the Microsoft Visual C++ 2015–2022 x64 Redistributable. Internet access is required for NuGet restore. Use an IDE that supports the pinned SDK, or build with the command-line SDK.
 
-Run from the repository root:
+Run from the repository root. The core test command below deliberately
+terminates test-owned processes and creates junction fixtures; run that command
+only in an existing authorized disposable isolated Windows VM. It is blocked
+when that environment is unavailable. Use disposable profiles for tests.
 
 ```powershell
 dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
@@ -26,7 +29,7 @@ Distribute the entire publish directory, including the subprocess, native DLLs, 
 
 Data lives at `%LOCALAPPDATA%\AegisBrowser\Profiles\profile-<name>`, with a separate CEF root and cache directory for each profile. Tabs share the process profile. An exclusive OS file handle prevents two processes opening the same profile; a stale lock filename after a crash is harmless. Cookies with persistent expiry and origin storage survive restarts; session cookies retain Chromium's normal session lifetime. Close the profile before removing its directory to erase local data. Existing starter directories are not migrated automatically.
 
-Profiles isolate stored browsing state, not OS users, IP addresses or hardware characteristics. Local files and Chromium logs are not an encrypted vault.
+Profiles use separate storage directories and a per-profile lease. Controlled cookie and local-storage fixtures cover part of that separation; they do not establish complete storage isolation or an OS security boundary against another process running as the user. Profiles do not isolate OS users, IP addresses or hardware characteristics. Local files and Chromium logs are not an encrypted vault.
 
 ## Controls and policy
 
@@ -37,7 +40,7 @@ Profiles isolate stored browsing state, not OS users, IP addresses or hardware c
 - Location, notifications, camera and microphone may use Chromium's native origin-labelled consent UI when the requesting origin matches the top-level origin and is HTTPS or loopback. The app never grants a request automatically. Chromium owns consent, dismissal/navigation cancellation and any profile-scoped permission persistence. Cross-origin frames, insecure non-loopback origins, diagnostics, unknown permission types, screen capture and device pan/tilt/zoom are denied. To fully reset a disposable profile's grants and stored data, close it and remove its profile directory; no custom permission database is maintained.
 - Downloads are disabled. Invalid certificates are rejected without an override. No remote debugging port, privileged JavaScript binding, user-agent override, certificate bypass or web-security disabling switch is configured.
 
-The application preserves CefSharp/CEF defaults for Chromium security mechanisms. CefSharp is an embedded engine and does not provide all security services or sandbox guarantees of Google Chrome; this app does not claim Chrome-equivalent hardening or Safe Browsing. No additional sandbox-disabling flags are added. It has no automatic engine updater.
+The application uses stock CefSharp/CEF settings. This binding initializes CEF without renderer sandbox support; do not rely on renderer sandbox isolation in this preview. It does not claim Chrome-equivalent hardening or Safe Browsing, and it has no automatic engine updater.
 
 ## Local diagnostics
 
@@ -45,7 +48,7 @@ The startup page, Diagnostics button and `aegis:diagnostics` address show an emb
 
 ## Verification
 
-The dependency-free .NET console test runner throws on failure and exits nonzero. It checks address validation, profile argument rejection, case normalization, Windows reserved-name handling, separate storage, exclusive leases and persistence/reopening. Run it with `dotnet run --project AegisBrowser.Tests -c Release`; it is not a `dotnet test` project.
+The .NET console test runner uses the project's restored dependencies, throws on failure and exits nonzero. It checks address validation, profile argument rejection, case normalization, Windows reserved-name handling, separate storage, exclusive leases and persistence/reopening. Run it only in the authorized disposable environment described above; it is not a `dotnet test` project.
 
 On a Windows machine, also verify:
 
@@ -56,13 +59,15 @@ On a Windows machine, also verify:
 5. Disconnect networking and reload diagnostics; check the DevTools network panel for no outbound diagnostics requests.
 6. Run the published executable on a clean Windows x64 machine with the VC++ runtime, and verify subprocess startup and DevTools.
 
-Implementation environment: macOS ARM64. `dotnet` is absent, including common installation paths. Restore, build and tests cannot run here. Shell HTTPS fetching also failed DNS resolution. Windows CI is the source of executable verification. See BUILD-STATUS.md for exact tested revisions and results; local compilation is unavailable.
+The original implementation report in `BUILD-STATUS.md` describes an earlier macOS ARM64 environment and historical revisions. See the current build's CI run and [core baseline](../docs/core-mvp-baseline.md) for their actual source SHA, Windows environment and verification scope.
 
 Upstream references: [CefSharp .NET example](https://github.com/cefsharp/CefSharp.MinimalExample), [pinned NuGet package](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/154.0.340), [CefSharp project](https://github.com/cefsharp/CefSharp).
 
 ## Browser integration suite
 
-On Windows, use a fresh root for each complete write/read pair:
+Only in an existing authorized disposable isolated Windows VM, use a fresh
+root for each complete write/read pair. The write phase deliberately crashes
+a test renderer.
 
 ```powershell
 dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
@@ -82,6 +87,6 @@ The bundled tracking list is intentionally small. Import standard UTF-8 privacy 
 
 See [privacy filtering documentation](../docs/privacy.md) for syntax, precedence, persistence, limitations and Windows acceptance cases. Real Chromium filtering tests are built and run by the Windows workflow before publishing. Consult [BUILD-STATUS.md](../BUILD-STATUS.md) for verified results; a compiled binary alone does not establish GUI acceptance.
 
-## Portable release candidate
+## Portable development preview
 
-See [Windows installation instructions](../docs/INSTALL-WINDOWS.md) and [release review gates](../docs/release-review.md). Windows CI packages `AegisBrowser-RC1-win-x64.zip` with a SHA-256 checksum, verifies every extracted file and smoke-tests the extracted executable. The app folder is portable; profile data remains in LocalAppData. A successful candidate build does not replace manual stable-release acceptance.
+See [Windows installation instructions](../docs/INSTALL-WINDOWS.md) and the historical [release review](../docs/release-review.md). Windows CI packages `AegisBrowser-DEVELOPMENT-PREVIEW-win-x64.zip` with a SHA-256 checksum, checks archive round-trip content and smoke-tests the extracted executable. The app folder is portable; profile data remains in LocalAppData. A successful smoke test does not establish the missing engine, sandbox, containment or manual acceptance gates.

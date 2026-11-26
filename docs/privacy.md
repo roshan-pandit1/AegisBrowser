@@ -1,6 +1,6 @@
 # Privacy filtering
 
-The filtering engine uses the existing .NET 8 core library and CefSharp resource interception. It does not change Chromium certificate validation, sandboxing, web security, permissions, identity, or authentication headers.
+The filtering engine uses the .NET 10 core library and CefSharp resource interception. It does not change certificate validation, the existing sandbox configuration, web security, permissions, identity, or authentication headers. This development preview's stock CefSharp binding does not provide the CEF renderer sandbox; filtering does not remedy that limitation.
 
 ## Network rule format
 
@@ -61,6 +61,15 @@ Strict mode can break embedded sign-in, payment widgets, video, fonts and CDN de
 
 ## Automated verification
 
-Run the existing console tests with `dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64`. On Windows, build and run `AegisBrowser.FilteringTests` with `dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true`, then run its generated executable. This harness uses the production request handler with a loopback HTTP fixture; it tests server-side arrival of allowed requests and absence of blocked direct/redirect/iframe requests, Strict mode, exceptions, pause/resume and top-level navigation. It also opens the native Privacy form, but does not automate editing every control.
+The full `AegisBrowser.Tests` console suite deliberately terminates test-owned
+processes and creates junction fixtures. Run it only in an existing authorized
+disposable isolated Windows VM, using disposable profiles. On an authorized
+Windows test environment, build and run `AegisBrowser.FilteringTests` with
+`dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true`,
+then run its generated executable. This harness uses the production request
+handler with a loopback HTTP fixture; it tests server-side arrival of allowed
+requests and absence of blocked direct/redirect/iframe requests, Strict mode,
+exceptions, pause/resume and top-level navigation. It also opens the native
+Privacy form, but does not automate editing every control.
 
-The workflow runs on `windows-latest`, installs .NET 8, requires the harness's completion marker and exit code, and only then publishes and uploads the complete self-contained win-x64 directory. See BUILD-STATUS.md for actual results and remaining manual tests.
+The workflow runs on `windows-latest`, installs the pinned .NET 10 SDK, requires the harness's completion marker and exit code, and only then publishes and uploads the complete self-contained win-x64 directory. Check the matching CI run and source SHA for actual results; hosted CI does not establish manual Windows 11 desktop acceptance.
