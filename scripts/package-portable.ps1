@@ -51,7 +51,7 @@ Copy-Item -LiteralPath 'third-party-licenses' -Destination (Join-Path $bundle 't
 $revision = git rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not record source revision' }
 @("Aegis Browser DEVELOPMENT PREVIEW - production NO_GO", "Source checkout commit: $revision", "Target: win-x64, self-contained .NET 10.0.15", "Chromium security-fix coverage is unqualified; stock CefSharp does not support the CEF renderer sandbox.", "Required-proxy profiles remain blocked; network containment is not established.", "Read PORTABLE-CANDIDATE.md and ENGINE-SELECTION.md. Manual release acceptance remains required.") | Set-Content (Join-Path $bundle 'VERSION.txt')
-Compress-Archive -Path $bundle -DestinationPath $zip -CompressionLevel Optimal
+./scripts/write-deterministic-zip.ps1 -SourceDirectory $bundle -ArchivePath $zip
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 $extract = Join-Path $stage 'extracted'
 Expand-Archive $zip -DestinationPath $extract
