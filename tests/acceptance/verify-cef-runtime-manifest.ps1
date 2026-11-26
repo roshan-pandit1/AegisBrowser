@@ -45,4 +45,5 @@ foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File) {
 
 $cefVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $root 'libcef.dll')).FileVersion
 if ($cefVersion -cne $manifest.cef) { throw 'CEF_COMPONENT_VERSION_MISMATCH: libcef.dll' }
+& (Join-Path $PSScriptRoot 'verify-published-executables.ps1') -PublishDirectory $root
 Write-Output "PASS: 240 CEF/CefSharp x64 binaries, resources and locales match the recorded signed-package hashes; libcef=$cefVersion"

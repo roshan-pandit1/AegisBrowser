@@ -1,5 +1,11 @@
 # Engine decision for the core preview
 
+> **2026-11-26 evidence update:** The later
+> [supply-chain review](supply-chain-2026-11-26.md) retained signature details
+> for the pinned packages but not complete command exit codes or trust-chain
+> decisions. Treat earlier package-signature pass claims below as unverified
+> pending the recorded rerun; this does not change the preview-only decision.
+
 Decision date: 2026-11-25 UTC. Source baseline:
 `36748360cb4c38a56fa300755b3295ec03ae1b46`.
 

@@ -27,3 +27,4 @@ finally {
     if ([IO.File]::Exists($wrong)) { [IO.File]::Delete($wrong) }
     if ([IO.Directory]::Exists($root)) { [IO.Directory]::Delete($root, $false) }
 }
+& (Join-Path $PSScriptRoot 'test-published-executables.ps1') -PublishDirectory $PublishDirectory

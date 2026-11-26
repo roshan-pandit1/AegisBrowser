@@ -1,0 +1,246 @@
+[
+    {
+        "id":  "CefSharp.Common.NETCore",
+        "version":  "154.0.340",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/cefsharp.common.netcore/154.0.340.json",
+        "packageSha256":  "05D534D8BFBF71B0B038792B6FF93CA3116A12C0B763082A900029ACFB1C6142",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared license file: LICENSE; classification and redistribution obligations UNVERIFIED",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.10.12.21.15.04/cefsharp.common.netcore.154.0.340.json",
+        "published":  "2026-10-12T21:06:44.45Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/cefsharp.common.netcore/154.0.340/cefsharp.common.netcore.154.0.340.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "XDSlFxGwmVgSz9fezVv3jfQE4vnLeLv9gSiIhKLHGwlUs9uFKpDZIgiH3DziKcl2+02+G9MIef56XqYEh6rTxQ==",
+        "signatureTypes":  [
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "CefSharp.WinForms.NETCore",
+        "version":  "154.0.340",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/cefsharp.winforms.netcore/154.0.340.json",
+        "packageSha256":  "D6E220A21CFDD8014A3664E40475886DE7027A46EBBB7DE0F95B20FA1F063637",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared license file: LICENSE; classification and redistribution obligations UNVERIFIED",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.10.12.21.16.15/cefsharp.winforms.netcore.154.0.340.json",
+        "published":  "2026-10-12T21:06:49.823Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/cefsharp.winforms.netcore/154.0.340/cefsharp.winforms.netcore.154.0.340.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "H6tpv0htVSaEPlX85FTmHieTBUQZq1IJDBE/KUBBIl31JHToJzB55pYxnp+uRDqF9Y8G4wo1AqI1scYhCvCWHg==",
+        "signatureTypes":  [
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "chromiumembeddedframework.runtime",
+        "version":  "154.0.34",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/chromiumembeddedframework.runtime/154.0.34.json",
+        "packageSha256":  "A39651745FB911B70A5DE46DBC858E6D3EE593D3A3AA7122C292ADF082925AA6",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared license file: LICENSE.txt; classification and redistribution obligations UNVERIFIED",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.10.12.11.08.48/chromiumembeddedframework.runtime.154.0.34.json",
+        "published":  "2026-10-12T11:02:02.953Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/chromiumembeddedframework.runtime/154.0.34/chromiumembeddedframework.runtime.154.0.34.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "q+JN2HRYhZhHiIYb554G1+RTFfMTyv/4ljbfV50/Ju8V+M+SFfizR482FO9+a7N60LRq0Ulxy+vylVySGkbvAA==",
+        "signatureTypes":  [
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "chromiumembeddedframework.runtime.win-x64",
+        "version":  "154.0.34",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/chromiumembeddedframework.runtime.win-x64/154.0.34.json",
+        "packageSha256":  "84A649927A79B94472ECA01C41A601B6A72E118DF623F6ACC95065F7544F1AF7",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared license file: LICENSE.txt; classification and redistribution obligations UNVERIFIED",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.10.12.11.14.57/chromiumembeddedframework.runtime.win-x64.154.0.34.json",
+        "published":  "2026-10-12T11:02:34.993Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/chromiumembeddedframework.runtime.win-x64/154.0.34/chromiumembeddedframework.runtime.win-x64.154.0.34.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "MnHgTXjzGD4nuaNByVcPCcOnVVDBJ5c/cA4BDVwdm5eBnChDTpaUp/uYpozffVOkvRBjXwCpfmsI8OSdfLH3ig==",
+        "signatureTypes":  [
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "Microsoft.Data.Sqlite",
+        "version":  "10.0.15",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/microsoft.data.sqlite/10.0.15.json",
+        "packageSha256":  "10DDEAFEDFDFFA276F26867A400BDD9290A12A667551431DDB1AA9CC9669A79B",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared SPDX expression: MIT",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.11.10.14.02.38/microsoft.data.sqlite.10.0.15.json",
+        "published":  "2026-11-10T13:08:32.987Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite/10.0.15/microsoft.data.sqlite.10.0.15.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "Tj+zwGHKyBat4qQktUjL/sNgFbNjNad3aAr9BOMSUUxbVfx/Dh7HpzjcoCc0PxoLfXn8l6vxFa5TJrKnD7hB4A==",
+        "signatureTypes":  [
+                               "Author",
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "Microsoft.Data.Sqlite.Core",
+        "version":  "10.0.15",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/microsoft.data.sqlite.core/10.0.15.json",
+        "packageSha256":  "56479098121B7D0FEB2FED11BEC4746B9AE4AE1410601ECB4A954C0B89F937C3",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared SPDX expression: MIT",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.11.10.13.58.33/microsoft.data.sqlite.core.10.0.15.json",
+        "published":  "2026-11-10T13:08:33.103Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite.core/10.0.15/microsoft.data.sqlite.core.10.0.15.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "eGkeotCCTox6XLG5s42KtschJlxmTJnPPzlmdvI8oc8Q4b4eL4Yku8Q39BtzQ04+etzaW34YbdqVsTL5y5zbGA==",
+        "signatureTypes":  [
+                               "Author",
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "SQLitePCLRaw.bundle_e_sqlite3",
+        "version":  "2.1.13",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/sqlitepclraw.bundle_e_sqlite3/2.1.13.json",
+        "packageSha256":  "89A216F8059D09CABCB45AB75AC2F180B733323C27D41CF9A981DC5F5B5C6C0F",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared SPDX expression: Apache-2.0",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.08.13.17.41.56/sqlitepclraw.bundle_e_sqlite3.2.1.13.json",
+        "published":  "2026-08-13T17:39:34.86Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.13/sqlitepclraw.bundle_e_sqlite3.2.1.13.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "sef6qu3HuKduXOg73LOvqqaM18WJ94HVwChWGMlsgFW/4W72tqpMhsPPdVkQCl1YHDrxfuYjfyZpFMZFChBdig==",
+        "signatureTypes":  [
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "SQLitePCLRaw.core",
+        "version":  "2.1.13",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/sqlitepclraw.core/2.1.13.json",
+        "packageSha256":  "D93D5F7AB3F864C47722A2D90048C31A1AAC743E153D87B9F4A07589EE2F9DAF",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared SPDX expression: Apache-2.0",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.08.13.17.40.37/sqlitepclraw.core.2.1.13.json",
+        "published":  "2026-08-13T17:37:44.193Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.core/2.1.13/sqlitepclraw.core.2.1.13.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "DNjhn7CS7WDnBnrcIR+6iKLWZgIjMxj/1XnPM13IudFGk1Ijq41Am9fBTiayKu/zfIBSStbuuvyAerZ8jUPxdQ==",
+        "signatureTypes":  [
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "SQLitePCLRaw.lib.e_sqlite3",
+        "version":  "2.1.13",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/sqlitepclraw.lib.e_sqlite3/2.1.13.json",
+        "packageSha256":  "D07D13B4779123CFA56B3348B504D57A2AB6FC10C764FB6E2C9D787987E39201",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared SPDX expression: Apache-2.0",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.08.13.16.13.30/sqlitepclraw.lib.e_sqlite3.2.1.13.json",
+        "published":  "2026-08-13T16:07:59.557Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.lib.e_sqlite3/2.1.13/sqlitepclraw.lib.e_sqlite3.2.1.13.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "2vbPcrL00z1BxAKYl9uGAPhDXdBPA+f8dNNFaRWbjljbmX7+V+pmNLMtPe8lTiRdIzk66CuEm+ob06jollESPQ==",
+        "signatureTypes":  [
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "SQLitePCLRaw.provider.e_sqlite3",
+        "version":  "2.1.13",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/sqlitepclraw.provider.e_sqlite3/2.1.13.json",
+        "packageSha256":  "513EF2BA5D01C14D1E8032D9D2CA2C8985DF7EC7D351F0E40917476114AC1F9C",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared SPDX expression: Apache-2.0",
+        "advisory":  "No package advisory returned by NuGet query; embedded/native dependencies and completeness UNVERIFIED",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.08.13.17.41.56/sqlitepclraw.provider.e_sqlite3.2.1.13.json",
+        "published":  "2026-08-13T17:39:04.313Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/2.1.13/sqlitepclraw.provider.e_sqlite3.2.1.13.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "w9dMB40gReMLzOxfCDuvjUhUTuSI9443Q2Hxrp8SW/vIGh6qP8TjkOTZ9p59mH50NpzQM7F3hhp8MAB2py9Now==",
+        "signatureTypes":  [
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "Microsoft.NETCore.App.Runtime.win-x64",
+        "version":  "10.0.15",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/microsoft.netcore.app.runtime.win-x64/10.0.15.json",
+        "packageSha256":  "7423F58917342B9E4BF276FB164D5726D2C90FE2FE989C552B9E39056256A035",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared SPDX expression: MIT",
+        "advisory":  "UNVERIFIED: runtime pack was not included in project NuGet advisory query",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.11.10.13.52.53/microsoft.netcore.app.runtime.win-x64.10.0.15.json",
+        "published":  "2026-11-10T13:08:04.62Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/microsoft.netcore.app.runtime.win-x64/10.0.15/microsoft.netcore.app.runtime.win-x64.10.0.15.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "MEGAkRGHrAXYA2t/Lo0mDxH+/O5NLqgWTcVh70iOZJTpoOCL/jKfOgDqYoDi3W9WcnviL4DhMl+5lWC8cxttSw==",
+        "signatureTypes":  [
+                               "Author",
+                               "Repository"
+                           ]
+    },
+    {
+        "id":  "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+        "version":  "10.0.15",
+        "queryUtc":  "2026-11-26T08:37:46.4218986Z",
+        "source":  "https://api.nuget.org/v3/registration5-gz-semver2/microsoft.windowsdesktop.app.runtime.win-x64/10.0.15.json",
+        "packageSha256":  "A036C174BAC57A716E21DEDCCF96459804E4D8D8C31A08E3A8DE649BF7684497",
+        "catalogHash":  "MATCH SHA512",
+        "signature":  "UNVERIFIED: signature details observed; exit codes and full trust decisions not retained",
+        "license":  "Package-declared SPDX expression: MIT",
+        "advisory":  "UNVERIFIED: runtime pack was not included in project NuGet advisory query",
+        "catalogUrl":  "https://api.nuget.org/v3/catalog0/data/2026.11.10.13.52.53/microsoft.windowsdesktop.app.runtime.win-x64.10.0.15.json",
+        "published":  "2026-11-10T13:07:59.39Z",
+        "contentUrl":  "https://api.nuget.org/v3-flatcontainer/microsoft.windowsdesktop.app.runtime.win-x64/10.0.15/microsoft.windowsdesktop.app.runtime.win-x64.10.0.15.nupkg",
+        "advisorySource":  "https://api.nuget.org/v3/index.json",
+        "advisoryQueryUtc":  "2026-11-26T08:40:13Z",
+        "packageSha512":  "vUp++3z72ONuBlzCplThiiZHdunYILGH37bfKjzzWG75nsllieq9m63DSGkf6budzAgOXQ9/+jWBeaS4qlUUEw==",
+        "signatureTypes":  [
+                               "Author",
+                               "Repository"
+                           ]
+    }
+]
