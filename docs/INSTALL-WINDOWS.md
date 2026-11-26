@@ -1,12 +1,12 @@
-# Aegis Browser v0.1.0 — Windows portable release candidate
+# Aegis Browser — Windows DEVELOPMENT PREVIEW
 
-This is a release candidate, not a stable-release certification. Check BUILD-STATUS.md and the linked CI run before distribution. Full manual GUI and real-site authentication acceptance remains required.
+This is a development preview, not an approved production release. Its Chromium security-fix coverage is unqualified, its stock CefSharp binding does not support the CEF renderer sandbox, and required-proxy profiles remain blocked. Read PORTABLE-CANDIDATE.md and ENGINE-SELECTION.md and check the linked CI run before distribution. Full manual GUI and real-site authentication acceptance remains required.
 
 ## Install and start
 
 1. Use Windows 10/11 x64. The archive includes the .NET runtime; the .NET SDK is not needed to run it. CefSharp may require the Microsoft Visual C++ x64 Redistributable: https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist . Install that prerequisite using Microsoft's installer if native runtime DLLs are missing.
-2. Download the portable artifact from the PR's successful Windows Actions run. The Actions artifact wrapper contains `AegisBrowser-RC1-win-x64.zip` and its `.sha256` file.
-3. Verify the inner ZIP using PowerShell `Get-FileHash .\AegisBrowser-RC1-win-x64.zip -Algorithm SHA256` and compare it with the accompanying checksum and CI log.
+2. Download the portable artifact from the PR's successful Windows Actions run. The Actions artifact wrapper contains `AegisBrowser-DEVELOPMENT-PREVIEW-win-x64.zip` and its `.sha256` file.
+3. Verify the inner ZIP using PowerShell `Get-FileHash .\AegisBrowser-DEVELOPMENT-PREVIEW-win-x64.zip -Algorithm SHA256` and compare it with the accompanying checksum and CI log.
 4. Extract the ZIP completely to a writable folder. Keep every file and subfolder together. Do not run the executable inside the ZIP or copy only the EXE.
 5. Open `AegisBrowser\AegisBrowser.exe`. No administrator privileges are required for the browser. This build is not code-signed; follow your organization's application trust policy.
 

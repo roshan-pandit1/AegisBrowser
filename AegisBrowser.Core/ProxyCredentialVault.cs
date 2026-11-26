@@ -42,9 +42,7 @@ public sealed class ProxyCredentialVault : IProxyCredentialVault
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows user-scoped data protection is required.");
         ValidateId(profileId);
         var id = Guid.NewGuid();
-        var directory = CredentialDirectory(profileId, create: true);
-        var destination = Path.Combine(directory, id.ToString("N") + ".bin");
-        var temporary = Path.Combine(directory, ".credential-" + Guid.NewGuid().ToString("N") + ".tmp");
+        string? temporary = null;
         var owned = false;
         byte[]? plain = null;
         try
@@ -55,19 +53,37 @@ public sealed class ProxyCredentialVault : IProxyCredentialVault
             BinaryPrimitives.WriteInt32LittleEndian(plain.AsSpan(4, 4), passLength);
             Utf8.GetBytes(credentials.Username, plain.AsSpan(8, userLength));
             Utf8.GetBytes(credentials.Password, plain.AsSpan(8 + userLength, passLength));
-            var protectedBytes = ProtectedData.Protect(plain, Entropy(profileId, id), DataProtectionScope.CurrentUser);
+            byte[] entropy;
+            try { entropy = Entropy(profileId, id); }
+            catch (CryptographicException) { throw new IOException("Windows could not prepare proxy credential protection; no credential was saved."); }
+            byte[] protectedBytes;
+            try { protectedBytes = ProtectedData.Protect(plain, entropy, DataProtectionScope.CurrentUser); }
+            catch (CryptographicException ex) { throw ProtectionFailure(ex); }
+            // Do not create even credential-store directories if protection fails.
+            var directory = CredentialDirectory(profileId, create: true);
+            var destination = Path.Combine(directory, id.ToString("N") + ".bin");
+            temporary = Path.Combine(directory, ".credential-" + Guid.NewGuid().ToString("N") + ".tmp");
             using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             { owned = true; file.Write(protectedBytes); file.Flush(true); }
             File.Move(temporary, destination); // Never replace another credential.
             return id;
         }
         catch (EncoderFallbackException) { throw new ArgumentException("Invalid proxy credentials."); }
-        catch (CryptographicException) { throw new IOException("Windows could not protect proxy credentials for this user."); }
         finally
         {
             if (plain is not null) CryptographicOperations.ZeroMemory(plain);
-            if (owned && File.Exists(temporary)) File.Delete(temporary);
+            if (owned && temporary is not null && File.Exists(temporary)) File.Delete(temporary);
         }
+    }
+
+    // Expose only numeric HRESULTs; these may be generic managed errors.
+    // Never carry exception messages or inner exceptions into UI feedback.
+    internal static IOException ProtectionFailure(CryptographicException error)
+    {
+        var codes = new List<string>();
+        for (Exception? current = error; current is not null && codes.Count < 4; current = current.InnerException)
+            codes.Add($"0x{unchecked((uint)current.HResult):X8}");
+        return new IOException($"Windows could not protect proxy credentials for this user (DPAPI HRESULTs {string.Join(",", codes)}); no credential was saved. Check that the Windows user profile is loaded and accessible.");
     }
 
     public ProxyCredentials Read(Guid profileId, Guid credentialId)

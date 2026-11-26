@@ -4,3 +4,6 @@ third-party-licenses/DOTNET-RUNTIME-LICENSE.TXT binary
 third-party-licenses/DOTNET-RUNTIME-THIRD-PARTY-NOTICES.TXT binary
 third-party-licenses/DOTNET-DESKTOP-LICENSE.TXT binary
 third-party-licenses/SQLITEPCLRAW-APACHE-2.0.txt binary
+# Keep evidence with published SHA-256 values byte-identical across checkouts.
+docs/security/pr90-preview.sbom.cdx.json text eol=lf
+docs/security/evidence/ci-zip-comparison-1ee1dd2.json text eol=lf

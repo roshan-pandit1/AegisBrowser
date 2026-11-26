@@ -1,5 +1,7 @@
 # PR #5 review and user-reported acceptance — 2026-10-23
 
+> **Historical evidence:** This file records earlier named PRs and revisions, not the current preview's acceptance or production status. See `docs/core-mvp-baseline.md`, `docs/portable-candidate.md`, and the current engine decision for the later build's scope.
+
 PR #5 is prepared for human review against `main`. Main at `023a5709ff3af0dbc3edf319e4ebe8b827d79cf0` contains PR #4's merge and the original privacy base `8a78d77`; retargeting does not require reintroducing those changes. No automatic merge is authorized or performed.
 
 ## User-reported manual results

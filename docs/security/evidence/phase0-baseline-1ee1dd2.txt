@@ -1,0 +1,19 @@
+Source: 1ee1dd284d2f6ad3ccb66593ce2984d56843063a
+Environment: development host, Windows NT 10.0.26300 x64, .NET SDK 10.0.404. Edition and VM status not independently established by this observer.
+Commands:
+dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
+dotnet build AegisBrowser.Tests -c Release -r win-x64 -p:PlatformTarget=x64
+dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore --no-build
+AegisBrowser.BrowserTests.exe write/read UNIQUE_TEMP_ROOT
+dotnet build AegisBrowser.FilteringTests -c Release -r win-x64 -p:SelfContained=true
+AegisBrowser.FilteringTests.exe (default), write/read UNIQUE_TEMP_ROOT
+
+Builds: PASS; BrowserTests 5 SYSLIB0057 warnings, core 2 SYSLIB0057 warnings, FilteringTests 2 CS8600/CS8602 warnings.
+Core suite restricted filesystem sandbox: FAIL, exit 1, generic Windows proxy-credential protection IOException. All preceding suite summaries including metadata 46 and settings 13 completed.
+Core suite normal current-user DPAPI: PASS, exit 0; 2 local symlink fixtures skipped.
+Core suite normal counts: privacy 88; letterboxing 24051; zoom 48; address 49; catalog 14; metadata 46; dashboard 38; profile operations 21; bulk 12; profile transfer 20; backup 21; settings 13; proxy config and credential 90; startup safety 16; protected preparation 14; authentication scope 10; bulk proxy drafts 15; proxy presets 23; preset transfer 28; proxy config transfer 29; proxy transport 32; policy/profile 50. Standalone lease test also passed. No aggregate total claimed.
+Browser write/read: PASS, 104 and 10 checks; each exit 0 and CEF shutdown completion marker.
+Filtering single/write/read: PASS, 29, 3 and 6 checks; each exit 0.
+
+IMPORTANT: On the everyday workstation, before source inspection, each of the two core invocations reached two unconditional test-owned child-process termination probes (metadata transaction and interrupted settings): four test-owned child kills total. The native browser write phase also invoked Page.crash once against its test renderer. These operations violated the user restriction requiring disposable authorized VMs for destructive tests. No more were run. Each core invocation also created and removed three test-owned temp junctions. No system trust, firewall or WFP change was made. Browser search-engine navigations used registered local CEF scheme factories, not public search-provider endpoints.
+Full per-assertion logs were not retained; native command output was filtered to summary markers, and unit summaries were emitted to the tool transcript. These are developer-authored observations, not independent security validation.

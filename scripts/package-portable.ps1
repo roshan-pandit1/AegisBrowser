@@ -26,7 +26,7 @@ if ($output.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase) -or
 $pendingName = '.aegis-package-' + [guid]::NewGuid().ToString('N')
 $pending = Join-Path $outputParent $pendingName
 New-Item -ItemType Directory -Path $pending -ErrorAction Stop | Out-Null
-$zip = Join-Path $pending 'AegisBrowser-RC1-win-x64.zip'
+$zip = Join-Path $pending 'AegisBrowser-DEVELOPMENT-PREVIEW-win-x64.zip'
 $sidecar = "$zip.sha256"
 $published = $false
 try {
@@ -37,6 +37,8 @@ New-Item -ItemType Directory -Force $bundle | Out-Null
 Copy-Item "$source/*" $bundle -Recurse
 Copy-Item docs/INSTALL-WINDOWS.md (Join-Path $bundle 'INSTALL-WINDOWS.md')
 Copy-Item docs/portable-candidate.md (Join-Path $bundle 'PORTABLE-CANDIDATE.md')
+Copy-Item docs/decisions/engine-selection.md (Join-Path $bundle 'ENGINE-SELECTION.md')
+Copy-Item docs/core-mvp-baseline.md (Join-Path $bundle 'CORE-MVP-BASELINE.md')
 Copy-Item docs/privacy.md (Join-Path $bundle 'PRIVACY.md')
 Copy-Item docs/release-rc1.md (Join-Path $bundle 'release-rc1.md')
 Copy-Item docs/production-release.md (Join-Path $bundle 'production-release.md')
@@ -48,8 +50,8 @@ Copy-Item BUILD-STATUS.md (Join-Path $bundle 'BUILD-STATUS.md')
 Copy-Item -LiteralPath 'third-party-licenses' -Destination (Join-Path $bundle 'third-party-licenses') -Recurse
 $revision = git rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not record source revision' }
-@("Aegis Browser v0.1.0 experimental candidate - production NO_GO", "Source checkout commit: $revision", "Target: win-x64, self-contained .NET 10.0.15", "Read PORTABLE-CANDIDATE.md and the matching build's evidence. Manual release acceptance remains required.") | Set-Content (Join-Path $bundle 'VERSION.txt')
-Compress-Archive -Path $bundle -DestinationPath $zip -CompressionLevel Optimal
+@("Aegis Browser DEVELOPMENT PREVIEW - production NO_GO", "Source checkout commit: $revision", "Target: win-x64, self-contained .NET 10.0.15", "Chromium security-fix coverage is unqualified; stock CefSharp does not support the CEF renderer sandbox.", "Required-proxy profiles remain blocked; network containment is not established.", "Read PORTABLE-CANDIDATE.md and ENGINE-SELECTION.md. Manual release acceptance remains required.") | Set-Content (Join-Path $bundle 'VERSION.txt')
+./scripts/write-deterministic-zip.ps1 -SourceDirectory $bundle -ArchivePath $zip
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 $extract = Join-Path $stage 'extracted'
 Expand-Archive $zip -DestinationPath $extract
@@ -63,6 +65,11 @@ foreach ($file in $expected) {
     if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $restored).Hash) { throw "ZIP content mismatch: $relative" }
 }
 ./tests/acceptance/verify-published-runtime.ps1 -PublishDirectory $unpacked -ExpectedRuntimeVersion '10.0.15'
+./tests/acceptance/verify-cef-runtime-manifest.ps1 -PublishDirectory $unpacked
+if ((Get-FileHash -LiteralPath (Join-Path $unpacked 'third-party-licenses/CEF-RUNTIME-HASHES.json') -Algorithm SHA256).Hash -cne
+    (Get-FileHash -LiteralPath 'third-party-licenses/CEF-RUNTIME-HASHES.json' -Algorithm SHA256).Hash) {
+    throw 'CEF_COMPONENT_MANIFEST_MISMATCH: packaged manifest differs from the source manifest.'
+}
 ./tests/acceptance/verify-cef-notices.ps1 -PublishDirectory $unpacked -CreditsFile (Join-Path $unpacked 'third-party-licenses/CEF-CREDITS.html')
 ./tests/acceptance/verify-dotnet-notices.ps1 -PublishDirectory $unpacked -NoticeDirectory (Join-Path $unpacked 'third-party-licenses')
 $smokeFailures = 0

@@ -11,6 +11,8 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -19,7 +21,10 @@ jobs:
         run: |
           dotnet --info
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git rev-parse HEAD
+          $source = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output "Source SHA: $source"
+          if ($source -cne '${{ github.event.pull_request.head.sha || github.sha }}') { throw 'Checkout does not match the event source SHA.' }
       - name: Restore Windows x64 application
         run: dotnet restore AegisBrowser/AegisBrowser.csproj -r win-x64 -p:SelfContained=true
       - name: Build Windows x64 Release
@@ -28,6 +33,11 @@ jobs:
         run: dotnet restore AegisBrowser.Tests/AegisBrowser.Tests.csproj -r win-x64
       - name: Run Windows x64 automated tests
         run: dotnet run --project AegisBrowser.Tests -c Release --runtime win-x64 -p:PlatformTarget=x64 --no-restore
+      - name: Verify credential protection and diagnostic redaction
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP ('aegis-dpapi-probe-' + [guid]::NewGuid().ToString('N'))
+          dotnet ./AegisBrowser.Tests/bin/Release/net10.0/win-x64/AegisBrowser.Tests.dll --probe-dpapi $fixture
+          if ($LASTEXITCODE -ne 0) { throw 'The current-user DPAPI probe failed.' }
       - name: Build browser integration tests
         run: dotnet build AegisBrowser.BrowserTests -c Release -r win-x64 -p:SelfContained=true
       - name: Compile and test synthetic WFP scope checks without policy operations
@@ -433,6 +443,8 @@ jobs:
             if (!(Get-ChildItem artifacts/win-x64 -Recurse -Filter $file)) { throw "Missing $file" }
           }
           ./tests/acceptance/verify-published-runtime.ps1 -PublishDirectory artifacts/win-x64 -ExpectedRuntimeVersion '10.0.15'
+          ./tests/acceptance/test-cef-runtime-manifest.ps1 -PublishDirectory artifacts/win-x64
+          ./tests/acceptance/test-deterministic-zip.ps1
           ./tests/acceptance/test-cef-notices.ps1 -PublishDirectory artifacts/win-x64
           ./tests/acceptance/test-dotnet-notices.ps1 -PublishDirectory artifacts/win-x64
       - name: Reject unverified and pre-existing portable outputs

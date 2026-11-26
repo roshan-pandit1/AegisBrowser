@@ -155,6 +155,7 @@ internal static partial class Program
         var original = repository.Create(new ProfileDraft("ui-test", "Dashboard sample", "old note", ["blue"], ["Work"]));
         using var manager = new ProfileManagerForm(profilesRoot);
         manager.Show();
+        Check(manager.Text.StartsWith("DEVELOPMENT PREVIEW", StringComparison.Ordinal), "profile manager identifies the development preview");
         T Control<T>(Control parent, string name) where T : Control =>
             parent.Controls.Find(name, true).OfType<T>().Single();
         var grid = Control<DataGridView>(manager, "ProfileGrid");
@@ -295,7 +296,7 @@ internal static partial class Program
         var root = ProfileCatalog.DefaultRoot;
         var slug = "dash-" + Guid.NewGuid().ToString("N");
         var path = BrowserPolicy.ProfilePath(root, slug);
-        var targetTitle = "Aegis Browser — " + slug;
+        var targetTitle = "DEVELOPMENT PREVIEW — Aegis Browser — " + slug;
         var repository = new ProfileRepository(root);
         using var supervisor = new ProfileProcessSupervisor(new ProfileLeaseProbe(root),
             new ProfileChildStarter(Path.GetFullPath(executable), "", Path.GetDirectoryName(Path.GetFullPath(executable))!));
@@ -541,6 +542,12 @@ internal static partial class Program
     {
         using var form = new MainForm("integration");
         form.Show();
+        Check(form.Text.StartsWith("DEVELOPMENT PREVIEW", StringComparison.Ordinal) &&
+            form.Controls.OfType<StatusStrip>().Single().Items.OfType<ToolStripStatusLabel>()
+                .Any(item => item.Name == "DevelopmentPreviewStatus" && item.Text == "DEVELOPMENT PREVIEW"),
+            "browser visibly identifies the development preview");
+        Check(BrowserMenuItem(form, "PreviewSecurityStatus").Text == "Preview security status",
+            "browser exposes the preview security status action");
         var tabs = form.Controls.OfType<TabControl>().Single();
 
         var status = form.Controls.OfType<StatusStrip>().Single().Items.OfType<ToolStripStatusLabel>().Last();

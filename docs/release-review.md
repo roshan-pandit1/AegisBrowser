@@ -1,5 +1,7 @@
 # Windows release review
 
+> **Historical review:** This document records the earlier PR #4 and .NET 8 candidate. Its statements and test results do not establish the current preview's security or release status. See `portable-candidate.md`, `core-mvp-baseline.md`, and the current engine decision.
+
 PR #4 is the review branch. Current main's browser compatibility changes are included for verification; PR #4 must not be merged or advertised as a stable release until release acceptance is complete.
 
 ## Inspection scope

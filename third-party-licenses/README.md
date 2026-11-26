@@ -26,6 +26,18 @@ and additional third-party licensing information:
 The archive SHA-256 is `c81c34d048d87276f4a18f0b000206710a1709bb67dd658948b87100e1a538da`;
 the credits SHA-256 is `eb5a0b6300c58bb8316a66b3e935d55b1456f8f1cf225c979b03d42afa878c4b`.
 Packaging checks the credits and `libcef.dll` against their expected hashes.
+`CEF-RUNTIME-HASHES.json` also records the official NuGet package identities,
+SHA-256 values and exact package-member hashes for the 240 CEF/CefSharp x64
+runtime files, resources and locales. On 2026-11-25 UTC, the packages were
+checked against the official NuGet catalog SHA-512 values and their NuGet
+repository signatures before these hashes were recorded. The package checks
+compare both the published and extracted files with this manifest and reject
+an altered component. This is file provenance and integrity evidence for
+the listed components, not an engine security qualification or license review.
+The sources are the official NuGet pages for
+[CefSharp.WinForms.NETCore 154.0.340](https://www.nuget.org/packages/CefSharp.WinForms.NETCore/154.0.340),
+[CefSharp.Common.NETCore 154.0.340](https://www.nuget.org/packages/CefSharp.Common.NETCore/154.0.340),
+and [chromiumembeddedframework.runtime.win-x64 154.0.34](https://www.nuget.org/packages/chromiumembeddedframework.runtime.win-x64/154.0.34).
 The upstream HTML links stylesheets at `chrome://` addresses; standalone display
 may omit styling. Its inclusion does not establish that notices for every other
 shipped dependency are complete or that redistribution has been approved.

@@ -35,7 +35,7 @@ try {
 
     $existing = Join-Path $root 'existing-output'
     New-Item -ItemType Directory -Path $existing -ErrorAction Stop | Out-Null
-    $oldZip = Join-Path $existing 'AegisBrowser-RC1-win-x64.zip'
+    $oldZip = Join-Path $existing 'AegisBrowser-DEVELOPMENT-PREVIEW-win-x64.zip'
     $oldChecksum = "$oldZip.sha256"
     [IO.File]::WriteAllText($oldZip, 'existing ZIP sentinel')
     [IO.File]::WriteAllText($oldChecksum, 'existing checksum sentinel')

@@ -69,7 +69,7 @@ public sealed class ProfileManagerForm : Form
         transfer = new ProfileTransfer(root, repository, templateRepository);
         backups = new ProfileBackupService(root, repository);
         settingsTransactions = new ProfileSettingsTransactions(root, repository, templateRepository);
-        Text = "Aegis Browser — Profiles";
+        Text = $"{PreviewStatus.Label} — Aegis Browser — Profiles";
         DesktopStyle.Apply(this);
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(1060, 640); MinimumSize = new Size(650, 460);
