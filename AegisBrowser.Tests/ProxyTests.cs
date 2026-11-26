@@ -1,4 +1,5 @@
 using System.Text;
+using System.Security.Cryptography;
 using AegisBrowser.Core;
 using Microsoft.Data.Sqlite;
 
@@ -13,6 +14,12 @@ internal static class ProxyTests
             try { action(); } catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException) { count++; return; }
             throw new Exception("FAIL proxy (accepted): " + name);
         }
+        var privateDiagnosticText = Guid.NewGuid().ToString("N");
+        var failure = ProxyCredentialVault.ProtectionFailure(
+            new CryptographicException(privateDiagnosticText, new InvalidOperationException(privateDiagnosticText)));
+        Check(failure.Message.Contains("DPAPI HRESULTs 0x", StringComparison.Ordinal) &&
+            !failure.Message.Contains(privateDiagnosticText, StringComparison.Ordinal) && failure.InnerException is null,
+            "DPAPI failure reports only a numeric error and excludes the original exception");
         var direct = new ProxyDraft(ProxyProtocol.Direct, "", 0, false, null, "", false);
         var http = new ProxyDraft(ProxyProtocol.Http, "proxy.example", 8080, false, null, "Test", true);
         foreach (var draft in new[] { direct, http, http with { Protocol = ProxyProtocol.Https, Host = "127.0.0.1", Port = 443 },

@@ -3,6 +3,12 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
 
+if (args.Length == 2 && args[0] == "--probe-dpapi")
+{
+    Environment.ExitCode = DpapiDiagnostic.Run(args[1]);
+    return;
+}
+
 // A child process proves that the OS lease is exclusive beyond this process.
 if (args.Length == 2 && args[0] == "--probe-lock")
 {
