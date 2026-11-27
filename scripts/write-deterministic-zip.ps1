@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression
+. (Join-Path $PSScriptRoot 'archive-entry-policy.ps1')
 
 $resolvedRoot = (Resolve-Path -LiteralPath $SourceDirectory).Path
 $root = $resolvedRoot.TrimEnd(
@@ -58,6 +59,7 @@ foreach ($item in Get-ChildItem -LiteralPath $root -Recurse -Force) {
     $relative = $item.FullName.Substring($rootPrefix.Length).Replace('\', '/')
     $entryName = $rootName + '/' + $relative
     if ($item.PSIsContainer) { $entryName += '/' }
+    Assert-AegisArchiveEntry -EntryName $entryName -IsDirectory ([bool]$item.PSIsContainer)
     # Compare without the directory suffix so a case-sensitive source cannot
     # introduce a file/directory collision when extracted on Windows.
     $collisionKey = if ($item.PSIsContainer) { $entryName.Substring(0, $entryName.Length - 1) } else { $entryName }
