@@ -38,6 +38,31 @@ or execute the archive. The first archive-read attempt used an unavailable .NET
 conversion method and failed; the successful comparison used
 `BitConverter.ToString`. Both attempts disposed the archive and streams.
 
+## Further read-only matches
+
+Six further archive members match both their SBOM digest and the source files
+listed below. Four were missed by the earlier case-sensitive filename search;
+the other two match files in the preserved PR #90 worktree, not this checkout.
+These are byte matches, not authenticated build origins. **PARTIAL
+[SOURCE-VERIFIED] [DEVELOPMENT-SAFE].** Of the original 27, 18 now have
+repository-byte matches and nine do not; no additional publisher or build-host
+provenance was authenticated.
+
+| Archive member | Matching repository file | SHA-256 |
+| --- | --- | --- |
+| `PORTABLE-CANDIDATE.md` | `docs/portable-candidate.md` | `36BD2ED054F405F137623DE6723C1FA5396513C94EEAB39985E00331DA08042D` |
+| `CORE-MVP-BASELINE.md` | `docs/core-mvp-baseline.md` | `1DA52ABEE57DC24F6117BADACA6600D787CFE5D9C7004C6256FA73BB045AC193` |
+| `PROFILE-MANAGER.md` | `docs/profile-manager.md` | `733A9A5AC14CF85D2B5FD98166913F18FA4332EA09961B2A40F1E6563C73458A` |
+| `SEARCH.md` | `docs/search.md` | `0D65BBDDDF19D505A969C54AD1DB7B082A921A47705976B62C3D2AFF127A8AF6` |
+| `BUILD-STATUS.md` | Historical PR #90 worktree `BUILD-STATUS.md` | `2CCB6DD053376CA22ED3742E1FEDB9F6211562A51811D31E1D546E77A43D8E77` |
+| `PRIVACY.md` | Historical PR #90 worktree `docs/privacy.md` | `126CBEBAEF4ACDC142431A53328A82AC52F7C04564908F94721DB845EBCD2437` |
+
+The remaining nine comprise seven application or generated build files,
+`ENGINE-SELECTION.md` and `VERSION.txt`. Some build scripts describe how these
+files are generated, but the retained archive's embedded claims are not a build
+attestation. Next: compare them with authenticated outputs and build-service
+attestation for the exact source commit.
+
 **NOT_RUN [NOT_RUN]:** CycloneDX schema validation and new authenticated package
 verification. The validator and transitive execution paths were not qualified in
 this environment. Next: independently authenticate exact artifacts, validate their

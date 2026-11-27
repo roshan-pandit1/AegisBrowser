@@ -62,6 +62,64 @@ the smaller maintainable secure design; the decisive facts are their independent
 verified renderer restrictions, per-profile proxy/containment scope, profile
 lifecycle and current security-fix provenance.
 
+## Focused next-candidate decision
+
+**PARTIAL [OFFICIAL-UPSTREAM] [UNVERIFIED]:** qualify WebView2 first, with
+native CEF retained as the fallback candidate. This is a prototype priority,
+not an engine selection or a security acceptance. Microsoft documents separate
+process groups for distinct user-data folders, while a folder can also be shared
+by applications; it documents an app-distributed Fixed Version runtime alongside
+the independently serviced Evergreen option. These characteristics make an
+initial profile/process and maintenance assessment practical, but do not prove
+OS-enforced separation, renderer restrictions, per-profile proxy support, or
+safe WFP scoping. Sources: [process model](https://learn.microsoft.com/microsoft-edge/webview2/concepts/process-model)
+and [runtime distribution](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/evergreen-vs-fixed-version).
+
+Migration complexity is estimated **high and unmeasured** because existing
+browser lifecycle, interception, profile and policy responsibilities are coupled
+to CefSharp. No duration estimate or feature parity is established. Test an
+isolated prototype for two concurrent user-data folders, persistent storage,
+permissions and denied downloads, proxy and authentication combinations, HTTPS,
+interception, controlled shutdown, external process identity, and the independent
+renderer file-denial protocol. On a separately authorized network topology, prove
+that every network-capable process can be scoped per profile without affecting
+unrelated WebView2 applications. Confirm supported redistribution and fixed-version
+servicing using authenticated inputs.
+
+Reject this priority in favor of native CEF if an essential proxy/interception
+capability is unsupported, if renderer enforcement fails independent testing, or
+if external containment cannot be scoped safely. Native CEF then still needs an
+authenticated matching sandbox library, host and subprocess and the same tests.
+Prototype source and runtime experiments are **NOT_RUN**; next: obtain an
+authorized isolated environment and authenticated SDK/runtime artifacts before
+building or executing an experiment.
+
+### Migration boundaries for the first qualification prototype
+
+This table is a source/API mapping, not evidence of behavioral equivalence.
+The [CoreWebView2 API reference](https://learn.microsoft.com/en-us/dotnet/api/microsoft.web.webview2.core.corewebview2)
+documents navigation, resource, permission, download and process-related APIs;
+the [process model](https://learn.microsoft.com/microsoft-edge/webview2/concepts/process-model)
+describes user-data-folder process groups. [OFFICIAL-UPSTREAM]
+
+| Existing boundary | Candidate equivalent and qualification needed |
+| --- | --- |
+| WinForms browser initialization, tabs and navigation | **PARTIAL:** WebView2 controls and navigation APIs exist; test multiple tabs, popup ownership, failure pages and close ordering in the application. |
+| Per-profile directories and lifecycle | **PARTIAL:** environments support distinct user-data folders. Test leases, concurrent profiles, restart and all storage types; folders alone do not enforce OS isolation. |
+| Cookies and other storage | **UNKNOWN:** test cookies, local/session storage, IndexedDB, service workers and cache across independent disposable profiles and restarts. |
+| Request interception and privacy filtering | **PARTIAL:** resource events exist. Test matching, response behavior, frames and workers against the current filtering semantics. |
+| Proxy configuration and authentication | **UNKNOWN:** determine documented per-environment protocol and authentication support, failure semantics and scope before use. No direct fallback is authorized. |
+| Permissions | **PARTIAL:** permission-request events exist. Test default denial, persistence and profile isolation for every supported permission. |
+| Download denial | **PARTIAL:** a download-start event exists; test whether cancellation prevents any file output, including lifecycle races, before using it as a deny policy. |
+| Process identification and shutdown | **PARTIAL:** documented process groups and failure events aid inspection. Independently correlate renderer identity and creation time, then test shutdown and lease release. |
+| Renderer sandbox and containment | **UNKNOWN:** API availability and process separation are not evidence. Run independent denial/control and per-traffic-class WFP protocols in authorized environments. |
+| Runtime servicing and redistribution | **PARTIAL:** Evergreen and Fixed Version have different servicing responsibilities. Authenticate exact runtime artifacts, notices, fixes and update behavior. |
+
+Prototype code is not yet prepared: no authenticated SDK/runtime inputs or
+authorized runtime environment have been established. The next discriminating
+test is an isolated, disposable-profile prototype exercising this table without
+external browsing or credentials. [NOT_RUN]
+
 ## Migration scope
 
 An exact text search for `CefSharp` in production C# source finds 11 files; this

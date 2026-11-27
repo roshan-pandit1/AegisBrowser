@@ -29,6 +29,10 @@ EXCLUDED_DIRECTORIES = frozenset((
     "aegisbrowser.browsertests/bin", "aegisbrowser.browsertests/obj",
     "aegisbrowser.filteringtests/bin", "aegisbrowser.filteringtests/obj",
     "tests/acceptance/dependencycompat/bin", "tests/acceptance/dependencycompat/obj",
+    "artifacts/governance-decision-run", "artifacts/governance-decision-run-final",
+    "artifacts/governance-decision-run-fixed", "artifacts/governance-inventory-run",
+    "artifacts/recovery-backup-20261127-baseline", "artifacts/recovery-backup-20261127-verified",
+    "artifacts/recovery-backup-inventory-governance",
 ))
 RESERVED_DIRECTORIES = frozenset(("bin", "obj", ".git"))
 SOURCE_EXTENSIONS = frozenset((
@@ -119,7 +123,9 @@ def compare_inventory(records, observed_hashes):
     for key in set(records) & set(observed_hashes):
         _, item = records[key]
         if item["category"] == "UNKNOWN" or any(
-            item[field].strip().upper().startswith("UNKNOWN")
+            not isinstance(item.get(field), str)
+            or not item[field].strip()
+            or item[field].strip().upper().startswith("UNKNOWN")
             for field in REQUIRED_FIELDS
         ):
             unknown += 1
@@ -137,10 +143,10 @@ def comparison_is_clean(result):
 
 def skip_generated_directory(path, workspace):
     relative = path.relative_to(workspace).as_posix().casefold()
-    if path.name.casefold() in RESERVED_DIRECTORIES:
-        if relative not in EXCLUDED_DIRECTORIES:
-            raise ValueError("unexpected generated directory")
+    if relative in EXCLUDED_DIRECTORIES:
         return True
+    if path.name.casefold() in RESERVED_DIRECTORIES:
+        raise ValueError("unexpected generated directory")
     return False
 
 
@@ -202,7 +208,7 @@ def main():
             if category not in CATEGORIES:
                 return fail("invalid_category")
             for field in REQUIRED_FIELDS:
-                if not isinstance(item.get(field), str) or not item[field]:
+                if not isinstance(item.get(field), str) or not item[field].strip():
                     return fail("missing_classification_field")
             evidence = item.get("evidence")
             if not isinstance(evidence, list) or not evidence or any(
@@ -272,8 +278,10 @@ def main():
         )
         if not comparison_is_clean(result):
             return fail("unclassified_or_stale")
-        print("INVENTORY_CHECK=PASS scope=recorded_paths_only authorization=NOT_ESTABLISHED")
-        return 0
+        # File discovery alone does not implement the C# operation mapping.
+        # Refuse rather than reporting overall consistency until parity is
+        # implemented and exercised against the runtime validator.
+        return fail("runtime_operation_validation_not_established")
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
         return fail("inspection_error")
 
