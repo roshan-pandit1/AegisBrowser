@@ -32,7 +32,8 @@ EXCLUDED_DIRECTORIES = frozenset((
     "artifacts/governance-decision-run", "artifacts/governance-decision-run-final",
     "artifacts/governance-decision-run-fixed", "artifacts/governance-inventory-run",
     "artifacts/recovery-backup-20261127-baseline", "artifacts/recovery-backup-20261127-verified",
-    "artifacts/recovery-backup-inventory-governance",
+    "artifacts/recovery-backup-inventory-governance", "artifacts/recovery-backup-verified-checkpoint",
+    "artifacts/governance-build-integrity",
 ))
 RESERVED_DIRECTORIES = frozenset(("bin", "obj", ".git"))
 SOURCE_EXTENSIONS = frozenset((

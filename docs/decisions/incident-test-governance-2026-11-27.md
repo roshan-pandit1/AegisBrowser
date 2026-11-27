@@ -52,6 +52,15 @@ processes, temporary data, audit logs, or other host effects.
 
 ## Known consequences and unresolved questions
 
+- During the later WebView2 SDK research, a package-download link was opened by
+  the research tool before the required download approval. No local package
+  file was written by that operation and no package code was executed. Whether
+  the research service transferred package bytes is unverified. The lookup was
+  stopped. A separate, explicitly approved local download was subsequently made.
+  **FAIL [NONCOMPLIANT-EVIDENCE] [UNVERIFIED].** Next: review research-tool
+  action classification and obtain transfer metadata if available; do not
+  treat the earlier link access as authorization or signature evidence.
+
 - A current official-source search returned an anti-automation redirect whose
   query included a token-like value in raw tool output. The lookup stopped and
   the value is not reproduced here. No repository credential is known to be

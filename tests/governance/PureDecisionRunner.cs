@@ -15,4 +15,6 @@ if (!allowed) return 2;
 if (TestGovernanceTests.Run() != 0) return 1;
 var assertions = InventoryValidationTests.Run();
 Console.WriteLine($"PASS [SYNTHETIC]: {assertions} in-memory inventory checks; no protected operation started.");
+var integrityAssertions = BuildIntegrityVerifierTests.Run();
+Console.WriteLine($"PASS [SYNTHETIC]: {integrityAssertions} in-memory build integrity checks; no assembly loaded by the checks.");
 return 0;

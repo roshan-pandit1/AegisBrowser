@@ -31,7 +31,9 @@
                                                    "artifacts/governance-inventory-run",
                                                    "artifacts/recovery-backup-20261127-baseline",
                                                    "artifacts/recovery-backup-20261127-verified",
-                                                   "artifacts/recovery-backup-inventory-governance"
+                                                   "artifacts/recovery-backup-inventory-governance",
+                                                   "artifacts/recovery-backup-verified-checkpoint",
+                                                   "artifacts/governance-build-integrity"
                                                ],
                       "include_all_files_in_roots":  true,
                       "excluded_control_files":  [
@@ -1729,7 +1731,7 @@
                     },
                     {
                         "path":  "AegisBrowser.Tests/InventoryBinding.cs",
-                        "observed_sha256":  "EC263D13506FCC348F9053035C5B6DC0C312C3809A25349270A024B6F86C6C56",
+                        "observed_sha256":  "43F28B8B491530B33231538F7A60202453FEBF6E7B702CD3C2F74666DCD3103D",
                         "category":  "SAFE_WORKSPACE",
                         "profile":  "A",
                         "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
@@ -2644,6 +2646,40 @@
                         "network_operations":  "UNKNOWN",
                         "privileges":  "UNKNOWN",
                         "basis":  "Repository-wide source or build-definition candidate; complete source and transitive execution-path audit not yet performed.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "experiments/webview2-feasibility/Program.cs",
+                        "observed_sha256":  "BBFC6CDC069B89F18431F9CACE7302A4088740C316A7AD68483FA4CB5077CF07",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "experiments/webview2-feasibility/PrototypeForm.cs",
+                        "observed_sha256":  "36DF475A112DD9ADC997FFBFC1EC3CAFC54F0A6CD4CF7BF0DD164BADEFDCEC7F",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
                         "evidence":  [
                                          "UNVERIFIED"
                                      ],
@@ -3706,8 +3742,44 @@
                         "execution_status":  "BLOCKED"
                     },
                     {
+                        "path":  "tests/governance/BuildIntegrityVerifier.cs",
+                        "observed_sha256":  "0DF310DA2B263DB8C6F92554597C733EE74E9F2451FAF29FC5C4B21AFB2EB7B7",
+                        "category":  "SAFE_WORKSPACE",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
+                        "required_authorization":  "Normal workspace access; no isolated acceptance authorization",
+                        "expected_filesystem_changes":  "Explicit compiler output and temp paths within workspace; decision checks use memory and read inventory and sources",
+                        "process_operations":  "Compiler and test processes; no compiler server or hazardous test fixture",
+                        "network_operations":  "No network operation requested",
+                        "privileges":  "Normal user; no elevation",
+                        "basis":  "Only the fixed standalone source closure is eligible; no full test executable or direct script is authorized",
+                        "evidence":  [
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
+                                     ],
+                        "execution_status":  "PERMITTED_FIXED_SOURCE_DECISION_TEST"
+                    },
+                    {
+                        "path":  "tests/governance/BuildIntegrityVerifierTests.cs",
+                        "observed_sha256":  "F2DB8F57212C7C9438BB77E002430860BE4D9994E50CA56F7C6ADA427CEE8D45",
+                        "category":  "SAFE_WORKSPACE",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
+                        "required_authorization":  "Normal workspace access; no isolated acceptance authorization",
+                        "expected_filesystem_changes":  "Explicit compiler output and temp paths within workspace; decision checks use memory and read inventory and sources",
+                        "process_operations":  "Compiler and test processes; no compiler server or hazardous test fixture",
+                        "network_operations":  "No network operation requested",
+                        "privileges":  "Normal user; no elevation",
+                        "basis":  "Only the fixed standalone source closure is eligible; no full test executable or direct script is authorized",
+                        "evidence":  [
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
+                                     ],
+                        "execution_status":  "PERMITTED_FIXED_SOURCE_DECISION_TEST"
+                    },
+                    {
                         "path":  "tests/governance/check_inventory.py",
-                        "observed_sha256":  "01A1EEB6100DB3285F1F9470270F6183D955B243A962AFEA06FD4E4B02FD8FF9",
+                        "observed_sha256":  "4995EFB9DF029785458535896F35BD3D2A3746BE12460C25AA563A35C272EA1E",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
@@ -3717,6 +3789,40 @@
                         "network_operations":  "UNKNOWN",
                         "privileges":  "UNKNOWN",
                         "basis":  "New checker source; implementation, interpreter and transitive library behavior require review before execution.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "tests/governance/IntegrityVerificationGlobals.cs",
+                        "observed_sha256":  "553E80A4B0057E5B557A30DF02564A16DD7284A50B3407AD8945E85C3B7A32B5",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "tests/governance/IntegrityVerificationRunner.cs",
+                        "observed_sha256":  "09A120C62D71E53403127C69BCA6804F2B8F8AB757E3D20EC8D1B3D1663BF821",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
                         "evidence":  [
                                          "UNVERIFIED"
                                      ],
@@ -3778,7 +3884,7 @@
                     },
                     {
                         "path":  "tests/governance/PureDecisionRunner.cs",
-                        "observed_sha256":  "FB735D0D5A4292FABB02E1F23BC14EA90EB7C715EDACF0660E7E2A687EAEDE73",
+                        "observed_sha256":  "FA4447F3D4808D5D74D786864572C4151384FEBE4434A7FB105905DEA72467BA",
                         "category":  "SAFE_WORKSPACE",
                         "profile":  "A",
                         "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
@@ -3824,7 +3930,9 @@
                                                 "AegisBrowser.Tests/InventoryValidation.cs",
                                                 "AegisBrowser.Tests/InventoryBinding.cs",
                                                 "tests/governance/InventoryValidationTests.cs",
-                                                "tests/governance/PureDecisionRunner.cs"
+                                                "tests/governance/PureDecisionRunner.cs",
+                                                "tests/governance/BuildIntegrityVerifier.cs",
+                                                "tests/governance/BuildIntegrityVerifierTests.cs"
                                             ]
                        }
                    ]

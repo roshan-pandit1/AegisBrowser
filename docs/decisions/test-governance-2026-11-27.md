@@ -50,6 +50,43 @@ authorized environments, sanitized output and execution records are
 demonstrated. Release A and Release B remain NO_GO.
 # Inventory portability limitation
 
+## Build-identity follow-up
+
+The original 65 assertions and six file-backed decision probes were rerun
+successfully before this change. The expanded direct-Roslyn test selection
+then passed 21 decision, 44 inventory and 24 build-integrity assertions. The
+integrity cases use harmless in-memory bytes; a modified target assembly is
+never executed. Two separate local compiler processes produced identical
+test-assembly SHA-256 values:
+`8827FF8E8399DEE0CFE1B9AA370E955043F3F9EF27C58E9A413D1A22359824CD`.
+This does not establish independent-host or browser-package reproducibility.
+[EXECUTED-TEST] [DEVELOPMENT-SAFE]
+
+`artifacts/governance-build-integrity/build-manifest.v3.candidate.json`
+records the fixed eight source identities, compiler and runtime components,
+nine reference identities, explicit compiler arguments, current inventory and
+output assembly. Its SHA-256 is
+`93330D047006FBBDD848451F3EB42C08A0966D376BC635DD8F9D6D60B5E97EF8`.
+The inventory is a post-build runtime input, not a compiler input. A separately
+compiled read-only verifier compared those observations using this candidate
+digest and returned `MATCH_ONLY`; an incorrect digest was refused with exit 2.
+The verifier did not load or start the target assembly. [EXECUTED-TEST]
+
+The digest was generated locally and has **not** been approved by an independent
+reviewer. Therefore the comparison is not an authorization trust anchor, proof
+that the compiler produced the assembly, publisher authentication, build-host
+attestation, or protection against a same-user process replacing files between
+verification and use. The verifier binary itself also needs independent review
+and a protected delivery path. A trusted launcher has not been integrated.
+Next: have a reviewer independently approve a manifest and verifier identity, then
+exercise that verification procedure in the authorized execution environment.
+[UNVERIFIED]
+
+Exact-path Git attributes now specify LF checkout for the eight C# sources in
+the tested closure. Their current bytes and Git attributes were inspected; a
+fresh Windows checkout has not been tested. Other inventory entries still use
+raw hashes and may fail closed after line-ending conversion. [STATIC-ANALYSIS]
+
 ## Inventory-bound decision test
 
 The fixed Profile A decision-test path now reads the inventory from the current

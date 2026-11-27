@@ -14,7 +14,9 @@ internal static class InventoryBinding
         "AegisBrowser.Tests/InventoryValidation.cs",
         "AegisBrowser.Tests/InventoryBinding.cs",
         "tests/governance/InventoryValidationTests.cs",
-        "tests/governance/PureDecisionRunner.cs"
+        "tests/governance/PureDecisionRunner.cs",
+        "tests/governance/BuildIntegrityVerifier.cs",
+        "tests/governance/BuildIntegrityVerifierTests.cs"
     };
 
     internal static bool ValidateCurrent()
