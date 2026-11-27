@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string] $EvidenceDirectory,
     [ValidateRange(1, 20)][int] $Runs = 5
 )
+throw 'BLOCKED: native shutdown stress requires reviewed human authorization; no authorization verifier is configured.'
 $ErrorActionPreference = 'Stop'
 $exe = [IO.Path]::GetFullPath($BrowserTestsExe)
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf) -or [IO.Path]::GetFileName($exe) -ine 'AegisBrowser.BrowserTests.exe') {

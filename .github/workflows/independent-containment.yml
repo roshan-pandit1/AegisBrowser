@@ -1,0 +1,13 @@
+name: Independent containment (authorization unavailable)
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  blocked:
+    # A label and environment name do not establish an isolated two-machine topology.
+    if: ${{ false }}
+    environment: aegis-independent-containment
+    runs-on: [self-hosted, windows, x64, aegis-authorized-containment]
+    steps:
+      - name: Authorization verifier unavailable
+        run: exit 1

@@ -6,8 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
+  authorization-required:
+    runs-on: windows-latest
+    permissions: {}
+    steps:
+      - name: Refuse unaudited workflow execution
+        run: exit 1
   scoped-objects:
-    if: github.repository == 'roshan-pandit1/AegisBrowser' && github.ref == 'refs/heads/ci/wfp-explicit-7c4d9a82' && github.event.created == false && github.event.head_commit.message == 'WFP-RESEARCH-7c4d9a82'
+    # These legacy conditions do not establish human authorization.
+    if: ${{ false && github.repository == 'roshan-pandit1/AegisBrowser' && github.ref == 'refs/heads/ci/wfp-explicit-7c4d9a82' && github.event.created == false && github.event.head_commit.message == 'WFP-RESEARCH-7c4d9a82' }}
     runs-on: windows-2022
     timeout-minutes: 10
     defaults:

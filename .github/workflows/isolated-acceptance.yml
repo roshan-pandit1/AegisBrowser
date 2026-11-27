@@ -1,0 +1,14 @@
+name: Isolated acceptance (authorization unavailable)
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  blocked:
+    # A label and environment name are not proof of human authorization.
+    # Replace this hard deny only after a reviewed authorization verifier exists.
+    if: ${{ false }}
+    environment: aegis-isolated-acceptance
+    runs-on: [self-hosted, windows, x64, aegis-authorized-isolated]
+    steps:
+      - name: Authorization verifier unavailable
+        run: exit 1

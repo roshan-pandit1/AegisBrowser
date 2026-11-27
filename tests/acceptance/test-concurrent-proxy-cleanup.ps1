@@ -1,3 +1,4 @@
+throw 'BLOCKED: process termination tests require reviewed human authorization; no authorization verifier is configured.'
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'concurrent-proxy-cleanup.ps1')
 

@@ -1,5 +1,6 @@
 param([switch] $RegisterOnDisposableRunner)
 
+throw 'BLOCKED: AppContainer process research requires reviewed human authorization; no authorization verifier is configured.'
 $ErrorActionPreference = 'Stop'
 Add-Type -Path (Join-Path $PSScriptRoot '../../scripts/containment/ProcessIdentityReader.cs')
 Add-Type -Path (Join-Path $PSScriptRoot '../../scripts/containment/AppContainerLaunchResearch.cs')

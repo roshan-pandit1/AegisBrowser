@@ -1,5 +1,6 @@
 param([string]$PublishDirectory = 'artifacts/win-x64', [string]$OutputDirectory = 'artifacts/portable',
     [ValidateRange(1, 20)][int]$SmokeRuns = 1)
+throw 'BLOCKED: portable packaging invokes unaudited native acceptance; no authorization verifier is configured.'
 $ErrorActionPreference = 'Stop'
 if (!$IsWindows) { throw 'Packaging verification requires Windows.' }
 if ($SmokeRuns -gt 1 -and ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or !$env:P403_PACKAGE_TRUST_DIR)) {
