@@ -24,7 +24,14 @@
                                                    "aegisbrowser.filteringtests/bin",
                                                    "aegisbrowser.filteringtests/obj",
                                                    "tests/acceptance/dependencycompat/bin",
-                                                   "tests/acceptance/dependencycompat/obj"
+                                                   "tests/acceptance/dependencycompat/obj",
+                                                   "artifacts/governance-decision-run",
+                                                   "artifacts/governance-decision-run-final",
+                                                   "artifacts/governance-decision-run-fixed",
+                                                   "artifacts/governance-inventory-run",
+                                                   "artifacts/recovery-backup-20261127-baseline",
+                                                   "artifacts/recovery-backup-20261127-verified",
+                                                   "artifacts/recovery-backup-inventory-governance"
                                                ],
                       "include_all_files_in_roots":  true,
                       "excluded_control_files":  [
@@ -105,7 +112,7 @@
     "entries":  [
                     {
                         "path":  ".github/workflows/core-dependency-compat.yml",
-                        "observed_sha256":  "AE0C5339DDAE9ED3F8F58A596063D158D5880B0211D92522F911FA8B472EAA75",
+                        "observed_sha256":  "C43F17F273B21B2D560EEF8CC9682A090ACA27D3724D78FA0BD4D72BDA012AF7",
                         "category":  "ISOLATED_ENVIRONMENT_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -121,8 +128,44 @@
                         "execution_status":  "BLOCKED"
                     },
                     {
+                        "path":  ".github/workflows/independent-containment.yml",
+                        "observed_sha256":  "D349FE9015380AA09099608A9ECFE8B97D27368D1FBEE30CD86F0054A165ADAC",
+                        "category":  "EXPLICIT_AUTHORIZATION_REQUIRED",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "Explicitly authorized isolated Windows infrastructure",
+                        "required_authorization":  "Reviewed human authorization artifact and verifier; unavailable",
+                        "expected_filesystem_changes":  "No operations permitted by the hard-denied placeholder",
+                        "process_operations":  "No operations permitted by the hard-denied placeholder",
+                        "network_operations":  "No operations permitted by the hard-denied placeholder",
+                        "privileges":  "Not authorized",
+                        "basis":  "Manual-only hard-denied acceptance placeholder; human authorization cannot be inferred from labels.",
+                        "evidence":  [
+                                         "STATIC-ANALYSIS",
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  ".github/workflows/isolated-acceptance.yml",
+                        "observed_sha256":  "6CCD1B1E287D6D935EACB9C336105ECF52AEEF8F338E178F8CDF0724F459BFC1",
+                        "category":  "EXPLICIT_AUTHORIZATION_REQUIRED",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "Explicitly authorized isolated Windows infrastructure",
+                        "required_authorization":  "Reviewed human authorization artifact and verifier; unavailable",
+                        "expected_filesystem_changes":  "No operations permitted by the hard-denied placeholder",
+                        "process_operations":  "No operations permitted by the hard-denied placeholder",
+                        "network_operations":  "No operations permitted by the hard-denied placeholder",
+                        "privileges":  "Not authorized",
+                        "basis":  "Manual-only hard-denied acceptance placeholder; human authorization cannot be inferred from labels.",
+                        "evidence":  [
+                                         "STATIC-ANALYSIS",
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
                         "path":  ".github/workflows/native-shutdown-stress.yml",
-                        "observed_sha256":  "50330EE676A7183AFF8279F7AB24D06F6BD7ED60C09B190FDEBDE04CA5617B03",
+                        "observed_sha256":  "06E9684537C0D0B0B31AD3C92BC6AEB3709D6A6DF611A74BB7140447753B752C",
                         "category":  "ISOLATED_ENVIRONMENT_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -139,7 +182,7 @@
                     },
                     {
                         "path":  ".github/workflows/net10-migration-focused.yml",
-                        "observed_sha256":  "717CDDC40E84B03F1C5CA120B87B71C154C6F6857D8C0550043F9A2C7B082AC4",
+                        "observed_sha256":  "6F528FF98570DE767FA27F3CA9186CA95D7A5119EE1CEDF4039A6D7C6538106E",
                         "category":  "ISOLATED_ENVIRONMENT_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -156,7 +199,7 @@
                     },
                     {
                         "path":  ".github/workflows/package-publication-focused.yml",
-                        "observed_sha256":  "586E4055C9EF2FB95187ACFE07CE69606F02CB3F0AB286E1315F9ABC60A20F95",
+                        "observed_sha256":  "DABCAD5DB157CFCDC6C66C82E5201EDB837587AA0344CAE42BACF2A0A9D7213C",
                         "category":  "ISOLATED_ENVIRONMENT_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -173,7 +216,7 @@
                     },
                     {
                         "path":  ".github/workflows/viewport-restart-focused.yml",
-                        "observed_sha256":  "27BFC0F0B56EEF7152E5B25EA22860298BEDCF86E57EEBEA6FDC3ABFE4B04125",
+                        "observed_sha256":  "240CC6EF8BE413EED66E8CBB8D74E21ED2DC17ACFFB4FC0E8E87963760116F18",
                         "category":  "ISOLATED_ENVIRONMENT_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -190,7 +233,7 @@
                     },
                     {
                         "path":  ".github/workflows/wfp-isolated-once.yml",
-                        "observed_sha256":  "9BF27FDDD5AFA221F4FE648341C73253B3DB1156D0DE25EFA26DC0CF2EE49909",
+                        "observed_sha256":  "8493930D9A033021E1903678ACF6037DE3D76230881B2840A12BE34C67C30276",
                         "category":  "EXPLICIT_AUTHORIZATION_REQUIRED",
                         "profile":  "C",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -207,7 +250,7 @@
                     },
                     {
                         "path":  ".github/workflows/windows.yml",
-                        "observed_sha256":  "066A6EE69F93712EBD783997799B34CF021C4EA4F4EF86EE0B184F4179E97918",
+                        "observed_sha256":  "093C52390E3C07B799FAC459CB5EECA7911A90936B436D862CB71D70EB100FCB",
                         "category":  "EXPLICIT_AUTHORIZATION_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -224,7 +267,7 @@
                     },
                     {
                         "path":  "AegisBrowser.BrowserTests/AegisBrowser.BrowserTests.csproj",
-                        "observed_sha256":  "7C1BC8C4AA97A3E1AF37CE137BDE1E6EBA51F23A1DC6DD4B3D858BA4EC2C6B00",
+                        "observed_sha256":  "5E2FCCC0C417AD622405194C79825B56EAA8382985E65A2E58ABC3024D8AD6E8",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
@@ -1567,7 +1610,7 @@
                     },
                     {
                         "path":  "AegisBrowser.FilteringTests/AegisBrowser.FilteringTests.csproj",
-                        "observed_sha256":  "BB1C9298135F10C6B10511B94A56D93681568D7D2A00A33E38D52C8D0A04167A",
+                        "observed_sha256":  "C1AC8B787102FABADA7DC2237B7AA526E2D5A5876EEB0776EA59D1DA4926537F",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
@@ -1683,6 +1726,42 @@
                                          "UNVERIFIED"
                                      ],
                         "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "AegisBrowser.Tests/InventoryBinding.cs",
+                        "observed_sha256":  "EC263D13506FCC348F9053035C5B6DC0C312C3809A25349270A024B6F86C6C56",
+                        "category":  "SAFE_WORKSPACE",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
+                        "required_authorization":  "Normal workspace access; no isolated acceptance authorization",
+                        "expected_filesystem_changes":  "Explicit compiler output and temp paths within workspace; decision checks use memory and read inventory and sources",
+                        "process_operations":  "Compiler and test processes; no compiler server or hazardous test fixture",
+                        "network_operations":  "No network operation requested",
+                        "privileges":  "Normal user; no elevation",
+                        "basis":  "Only the fixed standalone source closure is eligible; no full test executable or direct script is authorized",
+                        "evidence":  [
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
+                                     ],
+                        "execution_status":  "PERMITTED_FIXED_SOURCE_DECISION_TEST"
+                    },
+                    {
+                        "path":  "AegisBrowser.Tests/InventoryValidation.cs",
+                        "observed_sha256":  "6F6D795E785C662526BDD5A5207A80818C2B45B673DA8516E1472873E4562973",
+                        "category":  "SAFE_WORKSPACE",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
+                        "required_authorization":  "Normal workspace access; no isolated acceptance authorization",
+                        "expected_filesystem_changes":  "Explicit compiler output and temp paths within workspace; decision checks use memory and read inventory and sources",
+                        "process_operations":  "Compiler and test processes; no compiler server or hazardous test fixture",
+                        "network_operations":  "No network operation requested",
+                        "privileges":  "Normal user; no elevation",
+                        "basis":  "Only the fixed standalone source closure is eligible; no full test executable or direct script is authorized",
+                        "evidence":  [
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
+                                     ],
+                        "execution_status":  "PERMITTED_FIXED_SOURCE_DECISION_TEST"
                     },
                     {
                         "path":  "AegisBrowser.Tests/PrivacyTests.cs",
@@ -2026,37 +2105,39 @@
                     },
                     {
                         "path":  "AegisBrowser.Tests/TestGovernance.cs",
-                        "observed_sha256":  "431A8B2E08BEE955588DE721DED9BCE095EA7BDAE6770CC50D11C15431F395AE",
-                        "category":  "UNKNOWN",
-                        "profile":  "UNKNOWN",
-                        "required_environment":  "UNKNOWN",
-                        "required_authorization":  "UNKNOWN",
-                        "expected_filesystem_changes":  "UNKNOWN",
-                        "process_operations":  "UNKNOWN",
-                        "network_operations":  "UNKNOWN",
-                        "privileges":  "UNKNOWN",
-                        "basis":  "No complete source and transitive execution-path audit.",
+                        "observed_sha256":  "BA30B86B094DA0273960F77CCD01B8A93A4A21368BDE7ADE9BDC4FB00636C3D8",
+                        "category":  "SAFE_WORKSPACE",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
+                        "required_authorization":  "Normal workspace access; no isolated acceptance authorization",
+                        "expected_filesystem_changes":  "Explicit compiler output and temp paths within workspace; decision checks use memory and read inventory and sources",
+                        "process_operations":  "Compiler and test processes; no compiler server or hazardous test fixture",
+                        "network_operations":  "No network operation requested",
+                        "privileges":  "Normal user; no elevation",
+                        "basis":  "Only the fixed standalone source closure is eligible; no full test executable or direct script is authorized",
                         "evidence":  [
-                                         "UNVERIFIED"
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
                                      ],
-                        "execution_status":  "BLOCKED"
+                        "execution_status":  "PERMITTED_FIXED_SOURCE_DECISION_TEST"
                     },
                     {
                         "path":  "AegisBrowser.Tests/TestGovernanceTests.cs",
-                        "observed_sha256":  "733D9C83052067EDFE0AB98EAF0DBA6F66E5DF03436E47F0C7D513565655CC7F",
-                        "category":  "UNKNOWN",
-                        "profile":  "UNKNOWN",
-                        "required_environment":  "UNKNOWN",
-                        "required_authorization":  "UNKNOWN",
-                        "expected_filesystem_changes":  "UNKNOWN",
-                        "process_operations":  "UNKNOWN",
-                        "network_operations":  "UNKNOWN",
-                        "privileges":  "UNKNOWN",
-                        "basis":  "No complete source and transitive execution-path audit.",
+                        "observed_sha256":  "4743ACEA9447140BE64BE18F05FD3B332BB3976932247D01DBB49F21E2812119",
+                        "category":  "SAFE_WORKSPACE",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
+                        "required_authorization":  "Normal workspace access; no isolated acceptance authorization",
+                        "expected_filesystem_changes":  "Explicit compiler output and temp paths within workspace; decision checks use memory and read inventory and sources",
+                        "process_operations":  "Compiler and test processes; no compiler server or hazardous test fixture",
+                        "network_operations":  "No network operation requested",
+                        "privileges":  "Normal user; no elevation",
+                        "basis":  "Only the fixed standalone source closure is eligible; no full test executable or direct script is authorized",
                         "evidence":  [
-                                         "UNVERIFIED"
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
                                      ],
-                        "execution_status":  "BLOCKED"
+                        "execution_status":  "PERMITTED_FIXED_SOURCE_DECISION_TEST"
                     },
                     {
                         "path":  "AegisBrowser.Tests/ViewportLetterboxingTests.cs",
@@ -2588,17 +2669,18 @@
                     {
                         "path":  "scripts/archive-entry-policy.ps1",
                         "observed_sha256":  "EEC10F8AF1951918699EB499F23F836AC02643F9C32800C5501FE0B7A0FC9B4C",
-                        "category":  "UNKNOWN",
-                        "profile":  "UNKNOWN",
-                        "required_environment":  "UNKNOWN",
-                        "required_authorization":  "UNKNOWN",
-                        "expected_filesystem_changes":  "UNKNOWN",
-                        "process_operations":  "UNKNOWN",
-                        "network_operations":  "UNKNOWN",
-                        "privileges":  "UNKNOWN",
-                        "basis":  "New source requires complete source and transitive review.",
+                        "category":  "SAFE_READ_ONLY",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed runtime and transitive dependencies; no external writes",
+                        "required_authorization":  "Legitimate host policy permits reviewed scripts; no policy override",
+                        "expected_filesystem_changes":  "None by source logic",
+                        "process_operations":  "None by source logic",
+                        "network_operations":  "None",
+                        "privileges":  "None",
+                        "basis":  "Source-only pure string policy and test vectors; runtime execution blocked by Restricted host policy.",
                         "evidence":  [
-                                         "UNVERIFIED"
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
                                      ],
                         "execution_status":  "BLOCKED"
                     },
@@ -2706,7 +2788,7 @@
                     },
                     {
                         "path":  "scripts/package-portable.ps1",
-                        "observed_sha256":  "FC423EB219BBF16F60DAFAE8FA1D4401349D6016688FD16D6EAA9CEFC8376C73",
+                        "observed_sha256":  "BDEFDE55AE3E3937B183C2B66C6519E60E25D4817608E5911032CAF2A403786B",
                         "category":  "EXPLICIT_AUTHORIZATION_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -3131,7 +3213,7 @@
                     },
                     {
                         "path":  "tests/acceptance/research-appcontainer-launch.ps1",
-                        "observed_sha256":  "9EE7943AFAF4F57B4BA2FBA0A409C7D049048F2B3D43260231621FBAE51D013A",
+                        "observed_sha256":  "1E0415FBC7F534C895D76ED6CCBCD27CFB80BEAA4C865BD73647114510239D4F",
                         "category":  "EXPLICIT_AUTHORIZATION_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -3165,7 +3247,7 @@
                     },
                     {
                         "path":  "tests/acceptance/stress-native-shutdown.ps1",
-                        "observed_sha256":  "C36A2A69C49998332A7181CA6FA084CCD6036532430E887A8B09FDD01170F4FA",
+                        "observed_sha256":  "17B695F2CD800C9B3CE37BD9E51F525065685BB4A39BFBE7693E2C76D4A84F60",
                         "category":  "ISOLATED_ENVIRONMENT_REQUIRED",
                         "profile":  "B",
                         "required_environment":  "Existing, human-authorized disposable isolated Windows environment; exact scope remains to be verified.",
@@ -3183,17 +3265,18 @@
                     {
                         "path":  "tests/acceptance/test-archive-entry-policy.ps1",
                         "observed_sha256":  "1585C71FAE4CC22C9BEE282E06CF2BA138689C9F1EFDEB689D5D7FC2B442D12F",
-                        "category":  "UNKNOWN",
-                        "profile":  "UNKNOWN",
-                        "required_environment":  "UNKNOWN",
-                        "required_authorization":  "UNKNOWN",
-                        "expected_filesystem_changes":  "UNKNOWN",
-                        "process_operations":  "UNKNOWN",
-                        "network_operations":  "UNKNOWN",
-                        "privileges":  "UNKNOWN",
-                        "basis":  "New source requires complete source and transitive review.",
+                        "category":  "SAFE_READ_ONLY",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed runtime and transitive dependencies; no external writes",
+                        "required_authorization":  "Legitimate host policy permits reviewed scripts; no policy override",
+                        "expected_filesystem_changes":  "None by source logic",
+                        "process_operations":  "None by source logic",
+                        "network_operations":  "None",
+                        "privileges":  "None",
+                        "basis":  "Source-only pure string policy and test vectors; runtime execution blocked by Restricted host policy.",
                         "evidence":  [
-                                         "UNVERIFIED"
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
                                      ],
                         "execution_status":  "BLOCKED"
                     },
@@ -3233,7 +3316,7 @@
                     },
                     {
                         "path":  "tests/acceptance/test-concurrent-proxy-cleanup.ps1",
-                        "observed_sha256":  "02551D0B03A7B87AA55B47EC3FA63343C45CE59418A1159FAD468146625A9525",
+                        "observed_sha256":  "5EC2F0D6FB6278CF50BCBF4AC7FAAD1A4154ECB0E3750165CA27B9DF8CBAFAEE",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
@@ -3624,7 +3707,7 @@
                     },
                     {
                         "path":  "tests/governance/check_inventory.py",
-                        "observed_sha256":  "0274BFD097D3641767C25391A6CAAD0D4664A3D22B3B6C14426C4E7740A2358C",
+                        "observed_sha256":  "01A1EEB6100DB3285F1F9470270F6183D955B243A962AFEA06FD4E4B02FD8FF9",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
@@ -3640,8 +3723,80 @@
                         "execution_status":  "BLOCKED"
                     },
                     {
+                        "path":  "tests/governance/InventoryValidationTests.cs",
+                        "observed_sha256":  "11DEBD889AF0AFC1CBC0AAA4A58684BBC15B6EB362E89671B21105E5A238CEBB",
+                        "category":  "SAFE_WORKSPACE",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
+                        "required_authorization":  "Normal workspace access; no isolated acceptance authorization",
+                        "expected_filesystem_changes":  "Explicit compiler output and temp paths within workspace; decision checks use memory and read inventory and sources",
+                        "process_operations":  "Compiler and test processes; no compiler server or hazardous test fixture",
+                        "network_operations":  "No network operation requested",
+                        "privileges":  "Normal user; no elevation",
+                        "basis":  "Only the fixed standalone source closure is eligible; no full test executable or direct script is authorized",
+                        "evidence":  [
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
+                                     ],
+                        "execution_status":  "PERMITTED_FIXED_SOURCE_DECISION_TEST"
+                    },
+                    {
+                        "path":  "tests/governance/output_safety.js",
+                        "observed_sha256":  "7361A9B2C437963970EF28DF1251A90256B21EC669D80DF6589E92F648577E95",
+                        "category":  "SAFE_READ_ONLY",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed runtime and transitive dependencies; no external writes",
+                        "required_authorization":  "Use audited isolated JavaScript evaluator",
+                        "expected_filesystem_changes":  "None by source logic",
+                        "process_operations":  "None by source logic",
+                        "network_operations":  "None",
+                        "privileges":  "None",
+                        "basis":  "Pure count-only JavaScript policy or test; no imports, filesystem, network, or process APIs.",
+                        "evidence":  [
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
+                                     ],
+                        "execution_status":  "PERMITTED_IN_REVIEWED_EVALUATOR"
+                    },
+                    {
+                        "path":  "tests/governance/output_safety_tests.js",
+                        "observed_sha256":  "4BFA86FEC37D652020BB4448EB3918D811F94088282975FB060EF5C6CC88CFA7",
+                        "category":  "SAFE_READ_ONLY",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed runtime and transitive dependencies; no external writes",
+                        "required_authorization":  "Use audited isolated JavaScript evaluator",
+                        "expected_filesystem_changes":  "None by source logic",
+                        "process_operations":  "None by source logic",
+                        "network_operations":  "None",
+                        "privileges":  "None",
+                        "basis":  "Pure count-only JavaScript policy or test; no imports, filesystem, network, or process APIs.",
+                        "evidence":  [
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
+                                     ],
+                        "execution_status":  "PERMITTED_IN_REVIEWED_EVALUATOR"
+                    },
+                    {
+                        "path":  "tests/governance/PureDecisionRunner.cs",
+                        "observed_sha256":  "FB735D0D5A4292FABB02E1F23BC14EA90EB7C715EDACF0660E7E2A687EAEDE73",
+                        "category":  "SAFE_WORKSPACE",
+                        "profile":  "A",
+                        "required_environment":  "Reviewed direct Roslyn and .NET; fixed standalone decision-test source closure",
+                        "required_authorization":  "Normal workspace access; no isolated acceptance authorization",
+                        "expected_filesystem_changes":  "Explicit compiler output and temp paths within workspace; decision checks use memory and read inventory and sources",
+                        "process_operations":  "Compiler and test processes; no compiler server or hazardous test fixture",
+                        "network_operations":  "No network operation requested",
+                        "privileges":  "Normal user; no elevation",
+                        "basis":  "Only the fixed standalone source closure is eligible; no full test executable or direct script is authorized",
+                        "evidence":  [
+                                         "SOURCE-VERIFIED",
+                                         "STATIC-ANALYSIS"
+                                     ],
+                        "execution_status":  "PERMITTED_FIXED_SOURCE_DECISION_TEST"
+                    },
+                    {
                         "path":  "tests/governance/test_inventory_logic.py",
-                        "observed_sha256":  "5D8E0909A962AEC7313349997E044C63DF98ADCAECA209F118B7F29268FA955D",
+                        "observed_sha256":  "458EB7C8EFA739BC731A9E649086D2EAC4F3A818EF46A274AC547DA335F3BF61",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
@@ -3656,5 +3811,21 @@
                                      ],
                         "execution_status":  "BLOCKED"
                     }
-                ]
+                ],
+    "operations":  [
+                       {
+                           "id":  "governance-self-test",
+                           "profile":  "A",
+                           "category":  "SAFE_WORKSPACE",
+                           "scope":  "fixed-source-decision-test",
+                           "dependencies":  [
+                                                "AegisBrowser.Tests/TestGovernance.cs",
+                                                "AegisBrowser.Tests/TestGovernanceTests.cs",
+                                                "AegisBrowser.Tests/InventoryValidation.cs",
+                                                "AegisBrowser.Tests/InventoryBinding.cs",
+                                                "tests/governance/InventoryValidationTests.cs",
+                                                "tests/governance/PureDecisionRunner.cs"
+                                            ]
+                       }
+                   ]
 }

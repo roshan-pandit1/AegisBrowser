@@ -35,6 +35,11 @@ internal static class TestGovernanceTests
         var unknown = Decide(ProgramKind.Core, "--governance-run", "A", "not-in-the-catalog");
         Check(unknown.Plan is null && unknown.Reason == "UNCLASSIFIED_OR_PROFILE_MISMATCH");
 
+        var request = new[] { "--governance-run", "A", "governance-self-test" };
+        Check(Evaluate(ProgramKind.Core, request, () => false).Disposition == Disposition.Refuse);
+        Check(Evaluate(ProgramKind.Core, request, () => throw new InvalidOperationException()).Disposition == Disposition.Refuse);
+        Check(Evaluate(ProgramKind.Core, request, () => true).Disposition == Disposition.RunSelfTest);
+
         Console.WriteLine($"PASS [SYNTHETIC]: {checks} in-memory governance decision checks; no legacy test started.");
         return 0;
     }

@@ -58,7 +58,12 @@ internal static class TestGovernance
         "Isolated test network only; independent receiver and controls required",
         "Approved WFP and audit permissions required");
 
-    internal static Decision Evaluate(ProgramKind program, IReadOnlyList<string>? args)
+    internal static Decision Evaluate(ProgramKind program, IReadOnlyList<string>? args) =>
+        Evaluate(program, args, InventoryBinding.ValidateCurrent);
+
+    // Injection exists for deterministic in-memory tests; executable entry
+    // points use the overload above and cannot supply a command-line override.
+    internal static Decision Evaluate(ProgramKind program, IReadOnlyList<string>? args, Func<bool> validateInventory)
     {
         // Never echo unrecognized arguments: they could contain sensitive data.
         if (args is null || args.Count != 3 ||
@@ -72,7 +77,18 @@ internal static class TestGovernance
         if (args[0] == "--governance-dry-run")
             return new(Disposition.DryRun, plan, "INSPECTION_ONLY");
         if (program == ProgramKind.Core && plan.Id == SelfTest.Id && plan.Profile == "A")
+        {
+            try
+            {
+                if (validateInventory is null || !validateInventory())
+                    return new(Disposition.Refuse, plan, "INVENTORY_INVALID_OR_STALE");
+            }
+            catch (Exception)
+            {
+                return new(Disposition.Refuse, plan, "INVENTORY_INVALID_OR_STALE");
+            }
             return new(Disposition.RunSelfTest, plan, "PROVISIONAL_PURE_SELF_TEST");
+        }
 
         // No flag, environment variable, file existence, or self-attestation
         // can authorize B/C. No trusted human authorization verifier exists.
