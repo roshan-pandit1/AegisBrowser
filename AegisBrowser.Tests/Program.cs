@@ -2,6 +2,19 @@ using AegisBrowser.Core;
 using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
+using AegisBrowser.Testing;
+
+var governance = TestGovernance.Evaluate(TestGovernance.ProgramKind.Core, args);
+if (governance.Disposition == TestGovernance.Disposition.RunSelfTest)
+{
+    Environment.ExitCode = TestGovernanceTests.Run();
+    return;
+}
+if (!TestGovernance.AllowLegacyExecution(governance))
+{
+    Environment.ExitCode = TestGovernance.Report(governance);
+    return;
+}
 
 if (args.Length == 2 && args[0] == "--probe-dpapi")
 {

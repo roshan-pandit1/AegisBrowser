@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using AegisBrowser.Testing;
 
 internal static partial class Program
 {
@@ -13,6 +14,8 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        var governance = TestGovernance.Evaluate(TestGovernance.ProgramKind.Filtering, args);
+        if (!TestGovernance.AllowLegacyExecution(governance)) return TestGovernance.Report(governance);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var root = args.Length == 2 ? Path.GetFullPath(args[1]) : Path.Combine(Path.GetTempPath(), "aegis-filtering-" + Guid.NewGuid());

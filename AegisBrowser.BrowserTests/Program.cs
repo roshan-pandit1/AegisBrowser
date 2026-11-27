@@ -9,6 +9,7 @@ using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using AegisBrowser.Testing;
 
 namespace AegisBrowser.BrowserTests;
 
@@ -27,6 +28,8 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        var governance = TestGovernance.Evaluate(TestGovernance.ProgramKind.Browser, args);
+        if (!TestGovernance.AllowLegacyExecution(governance)) return TestGovernance.Report(governance);
         if (args.Length == 2 && args[0] == "dashboard-launch") return DashboardApplication(args[1]);
         if (args.Length == 2 && args[0] == "appcontainer-probe") return AppContainerCefProbe(args[1]);
         if (args.Length == 2 && args[0] == "appcontainer-observer") return AppContainerCefProbe(args[1], true);

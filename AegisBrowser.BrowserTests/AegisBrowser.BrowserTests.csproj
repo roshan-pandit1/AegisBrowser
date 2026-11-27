@@ -7,4 +7,5 @@
   </PropertyGroup>
   <ItemGroup><PackageReference Include="CefSharp.WinForms.NETCore" Version="154.0.340" /></ItemGroup>
   <ItemGroup><ProjectReference Include="../AegisBrowser/AegisBrowser.csproj" /></ItemGroup>
+  <ItemGroup><Compile Include="../AegisBrowser.Tests/TestGovernance.cs" Link="TestGovernance.cs" /></ItemGroup>
 </Project>
