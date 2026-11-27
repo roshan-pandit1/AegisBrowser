@@ -16,3 +16,6 @@ tests/governance/InventoryValidationTests.cs text eol=lf
 tests/governance/PureDecisionRunner.cs text eol=lf
 tests/governance/BuildIntegrityVerifier.cs text eol=lf
 tests/governance/BuildIntegrityVerifierTests.cs text eol=lf
+# Keep the compiled feasibility prototype source bytes stable across checkouts.
+experiments/webview2-feasibility/Program.cs text eol=lf
+experiments/webview2-feasibility/PrototypeForm.cs text eol=lf

@@ -14,20 +14,31 @@ internal sealed class PrototypeForm : Form
     private const string LocalPage = "<!doctype html><title>Local fixture</title><p>Local prototype fixture</p>";
     private readonly WebView2[] views = { new(), new() };
     private readonly Label status = new() { Dock = DockStyle.Bottom, AutoSize = true, Text = "Not initialized" };
+    private readonly Button local = new() { Text = "Local fixture", AutoSize = true };
+    private readonly Button storage = new() { Text = "Synthetic storage check", AutoSize = true };
+    private readonly string runDirectory = Path.Combine(AppContext.BaseDirectory, "disposable-profiles", Guid.NewGuid().ToString("N"));
+    private Task initializationTask = Task.CompletedTask;
+    private Task storageTask = Task.CompletedTask;
     private bool closing;
+    private bool closeReady;
 
     internal PrototypeForm()
     {
         Text = "WebView2 feasibility — local fixture";
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var toolbar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
-        var local = new Button { Text = "Local fixture", AutoSize = true };
-        var storage = new Button { Text = "Synthetic storage check", AutoSize = true };
         local.Click += (_, _) =>
         {
-            if (tabs.SelectedIndex >= 0) views[tabs.SelectedIndex].CoreWebView2?.NavigateToString(LocalPage);
+            if (!closing && tabs.SelectedIndex >= 0) views[tabs.SelectedIndex].CoreWebView2?.NavigateToString(LocalPage);
         };
-        storage.Click += async (_, _) => await CheckSyntheticStorageAsync();
+        storage.Click += async (_, _) =>
+        {
+            if (closing || !storageTask.IsCompleted) return;
+            storage.Enabled = false;
+            storageTask = CheckSyntheticStorageAsync();
+            await storageTask;
+            if (!closing && !IsDisposed) storage.Enabled = true;
+        };
         toolbar.Controls.Add(local);
         toolbar.Controls.Add(storage);
         for (var i = 0; i < views.Length; i++)
@@ -40,8 +51,34 @@ internal sealed class PrototypeForm : Form
         Controls.Add(tabs);
         Controls.Add(status);
         Controls.Add(toolbar);
-        Shown += async (_, _) => await InitializeAsync();
-        FormClosing += (_, _) => { closing = true; foreach (var view in views) view.Dispose(); };
+        Shown += (_, _) => initializationTask = InitializeAsync();
+        FormClosing += CloseAfterPendingOperations;
+    }
+
+    private async void CloseAfterPendingOperations(object? sender, FormClosingEventArgs e)
+    {
+        if (closeReady) return;
+        e.Cancel = true;
+        if (closing) return;
+        closing = true;
+        local.Enabled = false;
+        storage.Enabled = false;
+        status.Text = "Waiting for browser operations to finish.";
+        try
+        {
+            // These APIs do not expose cancellation here; keep the controls alive
+            // until their pending operations return to the WinForms UI context.
+            await initializationTask;
+            await storageTask;
+            foreach (var view in views) view.Dispose();
+            closeReady = true;
+            if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)Close);
+        }
+        catch (Exception error)
+        {
+            closing = false;
+            if (!IsDisposed) status.Text = $"Shutdown failed (0x{error.HResult:X8}).";
+        }
     }
 
     private async Task InitializeAsync()
@@ -52,7 +89,7 @@ internal sealed class PrototypeForm : Form
             for (var i = 0; i < views.Length && !closing; i++)
             {
                 // Separate disposable data folders beside the experimental output.
-                var profile = Path.Combine(AppContext.BaseDirectory, "disposable-profiles", i == 0 ? "a" : "b");
+                var profile = Path.Combine(runDirectory, i == 0 ? "a" : "b");
                 var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: profile);
                 runtimeVersion = environment.BrowserVersionString;
                 if (closing) return;

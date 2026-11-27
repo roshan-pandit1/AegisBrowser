@@ -2653,7 +2653,7 @@
                     },
                     {
                         "path":  "experiments/webview2-feasibility/Program.cs",
-                        "observed_sha256":  "BBFC6CDC069B89F18431F9CACE7302A4088740C316A7AD68483FA4CB5077CF07",
+                        "observed_sha256":  "171D0A654AB8ED6EFAEB1860F62CAD3E79B01FF70DCF6C7ED5D652B0EA6001C4",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
@@ -2670,7 +2670,7 @@
                     },
                     {
                         "path":  "experiments/webview2-feasibility/PrototypeForm.cs",
-                        "observed_sha256":  "36DF475A112DD9ADC997FFBFC1EC3CAFC54F0A6CD4CF7BF0DD164BADEFDCEC7F",
+                        "observed_sha256":  "DE171C612234CAF3FAB8037B47F31EC1913E38EF10E902CC0759349D923EBC7A",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
