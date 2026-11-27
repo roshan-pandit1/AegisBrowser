@@ -1,5 +1,29 @@
 # Security qualification matrices — 2026-11-26
 
+## Current safety qualification, 2026-11-27
+
+The rows below are historical evidence, not current authorization or a current
+production acceptance. The [incident review](../decisions/incident-test-governance-2026-11-27.md)
+identifies operations whose outcomes are [NONCOMPLIANT-EVIDENCE]. This task has
+not rerun those operations. The following gate status applies to this worktree:
+
+| Gate | Status | Missing evidence and next discriminating test |
+| --- | --- | --- |
+| G0 test governance | PARTIAL [STATIC-ANALYSIS] | Guards and catalog are source-only and do not cover direct script invocation. Audit the runtime and execute refusal tests in an approved safe context; establish and review human-authorization verification. |
+| G1 engine fixes | BLOCKED [UNVERIFIED] | Fix coverage and backports for shipped binaries are not established. Compare authenticated current upstream advisories and exact artifact versions. |
+| G2 renderer sandbox | BLOCKED [NOT_RUN] | No qualifying external denial and working control for the real renderer. Run the approved renderer protocol in an existing authorized isolated environment. |
+| G3 profile isolation | PARTIAL [UNVERIFIED] | Full cross-store and concurrent-profile evidence is incomplete. Execute the qualified-engine canary matrix in an approved environment. |
+| G4 proxy containment | ENVIRONMENT_BLOCKED [ENVIRONMENT-BLOCKED] | Two authorized isolated machines and independent observer are unavailable. Establish the approved topology, positive control and OS decision evidence. |
+| G5 privacy capability | PARTIAL [UNVERIFIED] | Cross-context and worker behavior is incomplete. Run the controlled qualified-engine capability matrix. |
+| G6 credential management | PARTIAL [STATIC-ANALYSIS] | Restricted-context failure is undiagnosed. Run the metadata-only diagnosis on an authorized disposable machine and confirm no persistent plaintext. |
+| G7 provenance | PARTIAL [UNVERIFIED] | Some file origins, signature trust and build attestation remain unresolved. Authenticate packages and resolve every shipped file to a verified source. |
+| G8 build reproducibility | PARTIAL [UNVERIFIED] | The current transitive build path and independent final-head outputs are not qualified. Audit it, then compare two authorized builds at file and archive levels. |
+| G9 native lifecycle | NOT_RUN [NOT_RUN] | No authorized Windows 11 desktop acceptance in this task. Run the approved 50-cycle protocol and inspect cleanup. |
+| G10 independent review | BLOCKED [AUTHORIZATION-BLOCKED] | An external reviewer and human release authorization are required. Submit the complete evidence after all preceding gates pass. |
+
+Release A and Release B remain **NO_GO**. No gate above establishes production
+readiness; source guards alone do not establish compliant execution.
+
 Status: **PARTIAL**. This is a test and evidence matrix for the development
 preview at source baseline `1ee1dd284d2f6ad3ccb66593ce2984d56843063a`,
 not a production acceptance result. Existing fixture outcomes apply only to
