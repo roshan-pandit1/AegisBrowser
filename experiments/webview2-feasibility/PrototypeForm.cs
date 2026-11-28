@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -16,28 +17,36 @@ internal sealed class PrototypeForm : Form
     private readonly Label status = new() { Dock = DockStyle.Bottom, AutoSize = true, Text = "Not initialized" };
     private readonly Button local = new() { Text = "Local fixture", AutoSize = true };
     private readonly Button storage = new() { Text = "Synthetic storage check", AutoSize = true };
-    private readonly string runDirectory = Path.Combine(AppContext.BaseDirectory, "disposable-profiles", Guid.NewGuid().ToString("N"));
-    private Task initializationTask = Task.CompletedTask;
-    private Task storageTask = Task.CompletedTask;
+    private readonly LifecycleCoordinator lifecycle = new();
+    private readonly ProfileLaunchConfig configuration;
+    private readonly string runDirectory;
+    private readonly NavigationAttempt?[] navigations = new NavigationAttempt?[2];
     private bool closing;
     private bool closeReady;
+    private bool closeWaitInProgress;
+    private string? disposalFailureMessage;
 
-    internal PrototypeForm()
+    internal PrototypeForm(ProfileLaunchConfig configuration)
     {
+        this.configuration = configuration;
+        runDirectory = Path.Combine(configuration.ProfileRoot, "aegis-webview2-" + Guid.NewGuid().ToString("N"));
         Text = "WebView2 feasibility — local fixture";
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var toolbar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
         local.Click += (_, _) =>
         {
-            if (!closing && tabs.SelectedIndex >= 0) views[tabs.SelectedIndex].CoreWebView2?.NavigateToString(LocalPage);
+            if (!closing && tabs.SelectedIndex >= 0) StartNavigation(tabs.SelectedIndex);
         };
         storage.Click += async (_, _) =>
         {
-            if (closing || !storageTask.IsCompleted) return;
+            if (!lifecycle.TryBeginOperation(out var lease)) return;
             storage.Enabled = false;
-            storageTask = CheckSyntheticStorageAsync();
-            await storageTask;
-            if (!closing && !IsDisposed) storage.Enabled = true;
+            try { await CheckSyntheticStorageAsync(); }
+            finally
+            {
+                lease?.Dispose();
+                if (!closing && !IsDisposed) storage.Enabled = true;
+            }
         };
         toolbar.Controls.Add(local);
         toolbar.Controls.Add(storage);
@@ -51,7 +60,7 @@ internal sealed class PrototypeForm : Form
         Controls.Add(tabs);
         Controls.Add(status);
         Controls.Add(toolbar);
-        Shown += (_, _) => initializationTask = InitializeAsync();
+        Shown += async (_, _) => await InitializeAsync();
         FormClosing += CloseAfterPendingOperations;
     }
 
@@ -59,36 +68,66 @@ internal sealed class PrototypeForm : Form
     {
         if (closeReady) return;
         e.Cancel = true;
-        if (closing) return;
-        closing = true;
-        local.Enabled = false;
-        storage.Enabled = false;
+        if (closeWaitInProgress) return;
+        if (closing && lifecycle.State == PrototypeLifecycleState.Failed)
+        {
+            status.Text = disposalFailureMessage ?? "Shutdown remains incomplete after disposal failure.";
+            return;
+        }
+        if (!closing)
+        {
+            if (!lifecycle.TryBeginClose()) return;
+            closing = true;
+            local.Enabled = false;
+            storage.Enabled = false;
+        }
+        closeWaitInProgress = true;
         status.Text = "Waiting for browser operations to finish.";
         try
         {
-            // These APIs do not expose cancellation here; keep the controls alive
-            // until their pending operations return to the WinForms UI context.
-            await initializationTask;
-            await storageTask;
-            foreach (var view in views) view.Dispose();
+            // This deadline reports incomplete shutdown; it does not cancel
+            // native work or authorize disposing controls while work is active.
+            if (!await lifecycle.WaitForQuiescenceAsync(Task.Delay(configuration.ShutdownTimeoutMilliseconds)))
+            {
+                status.Text = "Shutdown timed out; browser work is still pending. Close again to recheck.";
+                return;
+            }
+            var failures = lifecycle.DisposeAll(new Action[] { views[0].Dispose, views[1].Dispose });
+            if (failures is null)
+            {
+                status.Text = "Shutdown incomplete: disposal was not permitted.";
+                return;
+            }
+            if (failures.Count != 0)
+            {
+                var summaries = new List<string>();
+                foreach (var failure in failures) summaries.Add($"{failure.Category}:0x{failure.HResult:X8}");
+                disposalFailureMessage = "Shutdown incomplete: " + string.Join(", ", summaries);
+                status.Text = disposalFailureMessage;
+                return;
+            }
             closeReady = true;
             if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)Close);
         }
         catch (Exception error)
         {
-            closing = false;
-            if (!IsDisposed) status.Text = $"Shutdown failed (0x{error.HResult:X8}).";
+            if (!IsDisposed) status.Text = $"Shutdown failed ({error.GetType().Name}, 0x{error.HResult:X8}).";
         }
+        finally { closeWaitInProgress = false; }
     }
 
     private async Task InitializeAsync()
     {
+        if (!lifecycle.TryBeginInitialization()) return;
+        var initialized = false;
+        int? failureCode = null;
         try
         {
+            if (Directory.Exists(runDirectory)) throw new IOException();
             string runtimeVersion = "unknown";
             for (var i = 0; i < views.Length && !closing; i++)
             {
-                // Separate disposable data folders beside the experimental output.
+                // The root was explicitly selected and checked before creating controls.
                 var profile = Path.Combine(runDirectory, i == 0 ? "a" : "b");
                 var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: profile);
                 runtimeVersion = environment.BrowserVersionString;
@@ -99,24 +138,91 @@ internal sealed class PrototypeForm : Form
                 browser.DownloadStarting += (_, e) => e.Cancel = true;
                 browser.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
                 browser.NewWindowRequested += (_, e) => e.Handled = true;
-                browser.NavigationStarting += (_, e) =>
-                {
-                    if (!string.Equals(e.Uri, "about:blank", StringComparison.OrdinalIgnoreCase)) e.Cancel = true;
-                };
+                var slot = i;
+                browser.NavigationStarting += (_, e) => OnNavigationStarting(slot, e);
+                browser.NavigationCompleted += (_, e) => OnNavigationCompleted(slot, e);
                 browser.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
                 browser.WebResourceRequested += (_, e) =>
                 {
                     // Deny all resource requests; never log the request URL or body.
                     e.Response = environment.CreateWebResourceResponse(null, 403, "Blocked", "");
                 };
-                browser.NavigateToString(LocalPage);
+                StartNavigation(i);
             }
+            initialized = !closing;
             if (!closing) status.Text = $"Runtime {runtimeVersion}; browser processes {views[0].CoreWebView2.BrowserProcessId}, {views[1].CoreWebView2.BrowserProcessId}; behavior not yet qualified.";
         }
         catch (Exception error)
         {
-            if (!closing && !IsDisposed) status.Text = $"Initialization failed (0x{error.HResult:X8}).";
+            failureCode = error.HResult;
+            if (!closing && !IsDisposed) status.Text = $"Initialization failed ({error.GetType().Name}, 0x{error.HResult:X8}).";
         }
+        finally { lifecycle.FinishInitialization(initialized, failureCode); }
+    }
+
+    private void StartNavigation(int index)
+    {
+        var browser = views[index].CoreWebView2;
+        if (browser is null || navigations[index] is not null || !lifecycle.TryBeginNavigation(out var lease)) return;
+        var attempt = new NavigationAttempt(lease!);
+        navigations[index] = attempt;
+        status.Text = $"Profile {index + 1}: navigation requested.";
+        try
+        {
+            browser.NavigateToString(LocalPage);
+            _ = ReportNavigationTimeoutAsync(index, attempt);
+        }
+        catch (Exception error)
+        {
+            navigations[index] = null;
+            attempt.Lease.Dispose();
+            if (!closing && !IsDisposed) status.Text = $"Navigation request failed ({error.GetType().Name}, 0x{error.HResult:X8}).";
+        }
+    }
+
+    private void OnNavigationStarting(int index, CoreWebView2NavigationStartingEventArgs e)
+    {
+        if (closing || !string.Equals(e.Uri, "about:blank", StringComparison.OrdinalIgnoreCase))
+        {
+            e.Cancel = true;
+            if (!IsDisposed) status.Text = $"Profile {index + 1}: navigation cancelled by policy.";
+            return;
+        }
+        var attempt = navigations[index];
+        if (attempt is null || attempt.NavigationId is not null)
+        {
+            e.Cancel = true;
+            if (!IsDisposed) status.Text = $"Profile {index + 1}: untracked navigation cancelled.";
+            return;
+        }
+        attempt.NavigationId = e.NavigationId;
+        if (!IsDisposed) status.Text = $"Profile {index + 1}: navigation started.";
+    }
+
+    private void OnNavigationCompleted(int index, CoreWebView2NavigationCompletedEventArgs e)
+    {
+        var attempt = navigations[index];
+        if (attempt is null || attempt.NavigationId != e.NavigationId) return;
+        navigations[index] = null;
+        attempt.Lease.Dispose();
+        if (IsDisposed) return;
+        status.Text = e.IsSuccess
+            ? $"Profile {index + 1}: navigation completed; rendering not yet verified."
+            : $"Profile {index + 1}: navigation failed ({e.WebErrorStatus}).";
+    }
+
+    private async Task ReportNavigationTimeoutAsync(int index, NavigationAttempt attempt)
+    {
+        await Task.Delay(configuration.ShutdownTimeoutMilliseconds);
+        if (ReferenceEquals(navigations[index], attempt) && !IsDisposed)
+            status.Text = $"Profile {index + 1}: navigation timed out; completion remains unconfirmed.";
+    }
+
+    private sealed class NavigationAttempt
+    {
+        internal NavigationAttempt(IDisposable lease) => Lease = lease;
+        internal IDisposable Lease { get; }
+        internal ulong? NavigationId { get; set; }
     }
 
     private async Task CheckSyntheticStorageAsync()

@@ -2652,8 +2652,76 @@
                         "execution_status":  "BLOCKED"
                     },
                     {
+                        "path":  "experiments/webview2-feasibility/LifecycleCoordinator.cs",
+                        "observed_sha256":  "D541A8684566DB036885A344F930F657F222554E8B2AC8E38B113EEDA408FDAE",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "experiments/webview2-feasibility/LifecycleCoordinatorTests.cs",
+                        "observed_sha256":  "C1BEBC162B834C067A512C5050F220F142F672B8FFD622F461178171EFFF09A0",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "experiments/webview2-feasibility/ProfileRootPolicy.cs",
+                        "observed_sha256":  "53104EF560C6A62377818D0EF91A4CD177F7CCFE5F21AA1E69C43C014D783804",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "experiments/webview2-feasibility/ProfileRootPolicyTests.cs",
+                        "observed_sha256":  "0BA423E78589652EBDFB40F102C4D7FA1D772977130C936C03B3B55447C028BD",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
                         "path":  "experiments/webview2-feasibility/Program.cs",
-                        "observed_sha256":  "171D0A654AB8ED6EFAEB1860F62CAD3E79B01FF70DCF6C7ED5D652B0EA6001C4",
+                        "observed_sha256":  "706C9D433C8A41CE2DBB2F97FF1BE069187E744FFE6C0752C85B951FFDDDD1F0",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",
@@ -2670,7 +2738,24 @@
                     },
                     {
                         "path":  "experiments/webview2-feasibility/PrototypeForm.cs",
-                        "observed_sha256":  "DE171C612234CAF3FAB8037B47F31EC1913E38EF10E902CC0759349D923EBC7A",
+                        "observed_sha256":  "AFB9911464D4D5F223AC4D69F5D95ADDB7EA91EAF977EF964B584CA14BF441F8",
+                        "category":  "UNKNOWN",
+                        "profile":  "UNKNOWN",
+                        "required_environment":  "UNKNOWN",
+                        "required_authorization":  "UNKNOWN",
+                        "expected_filesystem_changes":  "UNKNOWN",
+                        "process_operations":  "UNKNOWN",
+                        "network_operations":  "UNKNOWN",
+                        "privileges":  "UNKNOWN",
+                        "basis":  "New source requires full operation and transitive dependency classification.",
+                        "evidence":  [
+                                         "UNVERIFIED"
+                                     ],
+                        "execution_status":  "BLOCKED"
+                    },
+                    {
+                        "path":  "experiments/webview2-feasibility/PureTestsRunner.cs",
+                        "observed_sha256":  "87AEA63958BD9DA6D563D788BA03931F58C7C17BAB3D563BC589A11BF88B2680",
                         "category":  "UNKNOWN",
                         "profile":  "UNKNOWN",
                         "required_environment":  "UNKNOWN",

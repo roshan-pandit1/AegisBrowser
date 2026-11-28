@@ -30,8 +30,18 @@ extracted; their hashes match the package entries. Dependency behavior and .NET
 10 runtime compatibility remain unverified. No package code or prototype
 runtime was executed.
 
-The compiled assembly SHA-256 is
-`DE11C0532366FA457D8DCA4B3EF13649ECA14FAAC952A031642845D0EF4357B6`.
+The hardened assembly SHA-256 is
+`85533DA097574DD73AD630DF36B457F5A39608627A6E2B0F3A9B1B4B22D4CE3A`.
+It requires an explicit `--profile-root C:\AegisLab\Profiles` and an
+operator-supplied positive `--shutdown-timeout-ms`; neither establishes human
+authorization or a disposable environment. The fixed root and its existing
+ancestors are checked for reparse points, but those checks are non-atomic.
+Two independent local compiler processes produced matching assembly hashes.
+The UI-free lifecycle and profile-policy tests passed 44 and 24 assertions,
+respectively; they did not start WebView2 or inspect a real profile directory.
+An outstanding-operation deadline reports incomplete shutdown without claiming
+to cancel native work. Synchronous control disposal itself can still hang on
+the UI thread and is not covered by that deadline.
 The workspace-local compiler and build manifests record the reference hashes,
 source hashes, runtime configuration and warnings. Compilation is not evidence
 of sandbox enforcement, profile isolation or production readiness.

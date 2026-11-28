@@ -19,3 +19,8 @@ tests/governance/BuildIntegrityVerifierTests.cs text eol=lf
 # Keep the compiled feasibility prototype source bytes stable across checkouts.
 experiments/webview2-feasibility/Program.cs text eol=lf
 experiments/webview2-feasibility/PrototypeForm.cs text eol=lf
+experiments/webview2-feasibility/LifecycleCoordinator.cs text eol=lf
+experiments/webview2-feasibility/ProfileRootPolicy.cs text eol=lf
+experiments/webview2-feasibility/LifecycleCoordinatorTests.cs text eol=lf
+experiments/webview2-feasibility/ProfileRootPolicyTests.cs text eol=lf
+experiments/webview2-feasibility/PureTestsRunner.cs text eol=lf
