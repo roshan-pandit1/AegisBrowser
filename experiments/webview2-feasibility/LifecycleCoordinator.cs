@@ -22,6 +22,7 @@ internal sealed class LifecycleCoordinator
 
     internal PrototypeLifecycleState State { get { lock (gate) return state; } }
     internal int? InitializationError { get { lock (gate) return initializationError; } }
+    internal int ActiveCount { get { lock (gate) return active; } }
 
     internal bool TryBeginInitialization()
     {
@@ -99,19 +100,37 @@ internal sealed class LifecycleCoordinator
     internal IReadOnlyList<DisposalFailure>? DisposeAll(IReadOnlyList<Action> disposeActions)
     {
         ArgumentNullException.ThrowIfNull(disposeActions);
-        lock (gate)
-        {
-            if (state != PrototypeLifecycleState.Closing || active != 0 || disposeAttempted) return null;
-            disposeAttempted = true;
-        }
+        if (!TryBeginDisposal()) return null;
         var failures = new List<DisposalFailure>();
         foreach (var dispose in disposeActions)
         {
             try { dispose(); }
             catch (Exception error) { failures.Add(new DisposalFailure(error.GetType().Name, error.HResult)); }
         }
-        lock (gate) state = failures.Count == 0 ? PrototypeLifecycleState.Closed : PrototypeLifecycleState.Failed;
+        FinishDisposal(failures.Count == 0);
         return failures;
+    }
+
+    // The form may await a bounded diagnostic flush between control disposals.
+    // This reserves disposal once while retaining the original quiescence guard.
+    internal bool TryBeginDisposal()
+    {
+        lock (gate)
+        {
+            if (state != PrototypeLifecycleState.Closing || active != 0 || disposeAttempted) return false;
+            disposeAttempted = true;
+            return true;
+        }
+    }
+
+    internal void FinishDisposal(bool success)
+    {
+        lock (gate)
+        {
+            if (!disposeAttempted || state != PrototypeLifecycleState.Closing)
+                throw new InvalidOperationException("Disposal was not reserved.");
+            state = success ? PrototypeLifecycleState.Closed : PrototypeLifecycleState.Failed;
+        }
     }
 
     private void BeginUnderLock()

@@ -41,6 +41,9 @@ internal static class ProfileRootPolicyTests
         Check(!Valid("--profile-root", root, "--shutdown-timeout-ms", "1", "extra"));
         Check(ProfileRootPolicy.TryParse(Pair(root, "5000"), out var config, out _) &&
             config.ProfileRoot == root && config.ShutdownTimeoutMilliseconds == 5000);
+        Check(!ProfileRootPolicy.TryParse(Pair(@"C:\AegisLab\Other", "5000"), out _, out var rootReason) && rootReason == "PROFILE_ROOT_NOT_ALLOWED");
+        Check(!ProfileRootPolicy.TryParse(Pair(root, "0"), out _, out var timeoutReason) && timeoutReason == "INVALID_SHUTDOWN_TIMEOUT");
+        Check(!ProfileRootPolicy.TryParse(Array.Empty<string>(), out _, out var argsReason) && argsReason == "INVALID_ARGUMENTS");
         return count;
     }
 }
